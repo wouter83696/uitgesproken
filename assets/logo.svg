@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="700" viewBox="0 0 900 700">
+  <!-- Soft blobs -->
+  <g opacity="0.34">
+    <path d="M210,245 C170,160 250,95 345,115 C410,128 420,180 485,190 C550,200 640,160 690,225 C740,295 665,355 585,365 C495,378 440,435 350,420 C270,407 245,325 210,245 Z"
+          fill="#A8E3DE"/>
+    <path d="M255,280 C220,210 285,155 360,165 C420,173 438,215 495,228 C560,244 625,220 655,265 C690,320 640,360 580,366 C505,375 460,420 385,410 C315,400 280,345 255,280 Z"
+          fill="#7FD3CC" opacity="0.55"/>
+    <path d="M355,495 C320,455 340,405 395,385 C450,365 540,395 585,430 C630,465 615,525 560,545 C505,565 410,545 355,495 Z"
+          fill="#A8E3DE" opacity="0.45"/>
+  </g>
+
+  <!-- Tilted double-outline card -->
+  <g transform="translate(450 315) rotate(-14) translate(-450 -315)">
+    <rect x="230" y="150" width="440" height="330" rx="48" ry="48"
+          fill="rgba(255,255,255,0)" stroke="#2E2E2E" stroke-width="2" opacity="0.55"/>
+    <rect x="242" y="162" width="416" height="306" rx="44" ry="44"
+          fill="rgba(255,255,255,0)" stroke="#2E2E2E" stroke-width="2" opacity="0.35"/>
+    <rect x="270" y="190" width="360" height="250" rx="40" ry="40"
+          fill="#F3FBFA" stroke="#2E2E2E" stroke-width="2" opacity="0.55"/>
+  </g>
+</svg>

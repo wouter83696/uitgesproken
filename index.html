@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <title></title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- DM Serif Display -->
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --brand: #6F8F8A; /* grijsgroen voor 'uitgesproken' */
+      --muted: #9AA3A1; /* warm lichtgrijs voor onderregel */
+      --bg: #ffffff;
+    }
+
+    html, body { height: 100%; }
+
+    body{
+      margin: 0;
+      background: var(--bg);
+      display: grid;
+      place-items: center;
+      font-family: "DM Serif Display", serif;
+    }
+
+    .wrap{
+      width: min(980px, 92vw);
+      text-align: center;
+      padding: 36px 16px 44px;
+    }
+
+    .logo{
+      width: min(600px, 88vw);
+      height: auto;
+      display: block;
+      margin: 0 auto 8px;
+    }
+
+    .wordmark{
+      margin: 10px 0 14px;
+      font-size: clamp(46px, 6.6vw, 76px);
+      line-height: 1.02;
+      color: var(--brand);
+      letter-spacing: 0.2px;
+    }
+
+    .tagline{
+      margin: 0;
+      font-size: clamp(18px, 2.2vw, 26px);
+      line-height: 1.25;
+      color: var(--muted);
+    }
+
+    /* Subtiele optische balans (mobile) */
+    @media (max-width: 420px){
+      .wrap{ padding-top: 28px; }
+      .wordmark{ margin-top: 8px; }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="wrap" aria-label="uitgesproken coming soon">
+    <img class="logo" src="assets/logo.svg" alt="" role="presentation" />
+    <div class="wordmark">uitgesproken</div>
+    <p class="tagline">Hier ontstaat iets om te verkennen.</p>
+  </main>
+</body>
+</html>
