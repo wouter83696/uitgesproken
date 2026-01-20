@@ -10,8 +10,8 @@
 
   <style>
     :root{
-      --brand: #6F8F8A; /* grijsgroen voor 'uitgesproken' */
-      --muted: #9AA3A1; /* warm lichtgrijs voor onderregel */
+      --brand: #6F8F8A; /* grijsgroen (woordmerk) */
+      --muted: #9AA3A1; /* warm lichtgrijs (onderregel) */
       --bg: #ffffff;
     }
 
@@ -28,42 +28,47 @@
     .wrap{
       width: min(980px, 92vw);
       text-align: center;
-      padding: 36px 16px 44px;
+      padding: 44px 16px 54px;
     }
 
+    /* Logo uit de zip (exact zoals jij 'm hebt aangeleverd) */
     .logo{
-      width: min(600px, 88vw);
+      width: min(640px, 90vw);
       height: auto;
       display: block;
-      margin: 0 auto 8px;
+      margin: 0 auto 6px;
+      transform: translateY(6px);
     }
 
+    /* Woordmerk – bewust iets subtieler dan mijn vorige versie */
     .wordmark{
-      margin: 10px 0 14px;
-      font-size: clamp(46px, 6.6vw, 76px);
+      margin: 8px 0 12px;
+      font-size: clamp(44px, 6.0vw, 68px);
       line-height: 1.02;
-      color: var(--brand);
       letter-spacing: 0.2px;
+      color: var(--brand);
     }
 
+    /* Onderregel – dezelfde “chique” grijs als jouw voorbeeld */
     .tagline{
       margin: 0;
-      font-size: clamp(18px, 2.2vw, 26px);
+      font-size: clamp(18px, 2.1vw, 24px);
       line-height: 1.25;
       color: var(--muted);
+      /* op desktop liefst 1 regel; op mobiel mag hij breken */
+      white-space: nowrap;
     }
 
-    /* Subtiele optische balans (mobile) */
-    @media (max-width: 420px){
-      .wrap{ padding-top: 28px; }
-      .wordmark{ margin-top: 8px; }
+    @media (max-width: 520px){
+      .wrap{ padding-top: 34px; padding-bottom: 44px; }
+      .tagline{ white-space: normal; }
     }
   </style>
 </head>
 
 <body>
-  <main class="wrap" aria-label="uitgesproken coming soon">
-    <img class="logo" src="assets/logo.svg" alt="" role="presentation" />
+  <main class="wrap" aria-label="uitgesproken">
+    <img class="logo" src="assets/logo-master.svg" alt="" role="presentation" />
     <div class="wordmark">uitgesproken</div>
     <p class="tagline">Hier ontstaat iets om te verkennen.</p>
   </main>
