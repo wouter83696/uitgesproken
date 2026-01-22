@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
   <meta charset="utf-8" />
-  <title></title>
+  <title>uitgesproken</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- DM Serif Display -->
@@ -26,49 +26,63 @@
     }
 
     .wrap{
-      width: min(980px, 92vw);
+      width: min(860px, 92vw);
       text-align: center;
-      padding: 44px 16px 54px;
+      padding: 46px 16px 54px;
     }
 
-    /* Logo uit de zip (exact zoals jij 'm hebt aangeleverd) */
+    /* Logo (icoon) */
     .logo{
-      width: min(640px, 90vw);
+      width: clamp(140px, 22vw, 220px);
       height: auto;
       display: block;
-      margin: 0 auto 6px;
-      transform: translateY(6px);
+      margin: 0 auto 14px;
     }
 
-    /* Woordmerk – bewust iets subtieler dan mijn vorige versie */
+/* Woordmerk – bewust iets subtieler dan mijn vorige versie */
     .wordmark{
-      margin: 8px 0 12px;
-      font-size: clamp(44px, 6.0vw, 68px);
+      margin: 0 0 10px;
+      font-size: clamp(42px, 5.8vw, 66px);
       line-height: 1.02;
       letter-spacing: 0.2px;
       color: var(--brand);
     }
 
-    /* Onderregel – dezelfde “chique” grijs als jouw voorbeeld */
+/* Onderregel – dezelfde “chique” grijs als jouw voorbeeld */
     .tagline{
       margin: 0;
       font-size: clamp(18px, 2.1vw, 24px);
       line-height: 1.25;
       color: var(--muted);
-      /* op desktop liefst 1 regel; op mobiel mag hij breken */
       white-space: nowrap;
     }
 
-    @media (max-width: 520px){
-      .wrap{ padding-top: 34px; padding-bottom: 44px; }
+@media (max-width: 520px){
+      .wrap{ padding-top: 36px; padding-bottom: 44px; }
+      .logo{ width: clamp(130px, 46vw, 190px); }
       .tagline{ white-space: normal; }
     }
   </style>
+
+  <meta name="description" content="uitgesproken – leeswijzer en startpagina." />
+  <meta name="theme-color" content="#ffffff" />
+
+  <!-- iOS / Home Screen -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="uitgesproken" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png" />
+
+  <!-- PWA / favicons -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png" />
+
 </head>
 
 <body>
   <main class="wrap" aria-label="uitgesproken">
-    <img class="logo" src="assets/logo-master.svg" alt="" role="presentation" />
+    <img class="logo" src="assets/logo-appicon-final.svg" alt="uitgesproken" />
     <div class="wordmark">uitgesproken</div>
     <p class="tagline">Hier ontstaat iets om te verkennen.</p>
   </main>
