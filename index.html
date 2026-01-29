@@ -10,8 +10,9 @@
 
   <style>
     :root{
-      --brand: #6F8F8A; /* grijsgroen (woordmerk) */
-      --muted: #9AA3A1; /* warm lichtgrijs (onderregel) */
+      /* Kleuren afgestemd op het voorbeeldlogo */
+      --brand: #9BBFC2; /* woordmerk */
+      --muted: #9BBFC2; /* onderregel (zelfde tint, lagere opacity) */
       --bg: #ffffff;
     }
 
@@ -33,10 +34,11 @@
 
     /* Logo (icoon) */
     .logo{
-      width: clamp(180px, 28vw, 300px);
+      /* Kleiner en in verhouding (zoals je screenshot) */
+      width: clamp(96px, 18vw, 140px);
       height: auto;
       display: block;
-      margin: 0 auto 8px;
+      margin: 0 auto 14px;
     }
 
 /* Woordmerk – bewust iets subtieler dan mijn vorige versie */
@@ -55,13 +57,13 @@
       font-size: clamp(16px, 2.0vw, 22px);
       line-height: 1.25;
       color: var(--muted);
-      opacity: 0.9;
+      opacity: 0.65;
       white-space: nowrap;
     }
 
 @media (max-width: 520px){
       .wrap{ padding-top: 36px; padding-bottom: 44px; }
-      .logo{ width: clamp(130px, 46vw, 190px); }
+      .logo{ width: clamp(84px, 26vw, 120px); }
       .tagline{ white-space: normal; }
     }
   </style>
@@ -84,7 +86,7 @@
 
 <body>
   <main class="wrap" aria-label="uitgesproken">
-    <img class="logo" src="assets/logo-appicon-final.png" alt="uitgesproken" />
+    <img class="logo" src="assets/uitgesproken-ballon.png" alt="uitgesproken" />
     <div class="wordmark">uitgesproken</div>
     <p class="tagline">Hier ontstaat iets om te verkennen.</p>
   </main>
