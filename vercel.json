@@ -2,13 +2,7 @@
   "cleanUrls": true,
   "trailingSlash": true,
   "rewrites": [
-    {
-      "source": "/:space((?!login|dashboard|admin|kaarten|uitleg|space|css|js|sets|assets|scripts|templates|docs|favicon\\.ico)[^/]+)/:set([^/]+)",
-      "destination": "/space/"
-    },
-    {
-      "source": "/:space((?!login|dashboard|admin|kaarten|uitleg|space|css|js|sets|assets|scripts|templates|docs|favicon\\.ico)[^/]+)",
-      "destination": "/space/"
-    }
+    { "source": "/:space/:set", "destination": "/space/" },
+    { "source": "/:space",      "destination": "/space/" }
   ]
 }
