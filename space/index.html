@@ -153,6 +153,47 @@
       location.href = '/';
     }
 
+    // Als er ook een set-slug is, toon de set-viewer
+    if (setSlug) {
+      loadSet();
+    } else {
+      load();
+    }
+
+    async function loadSet() {
+      // Space ophalen
+      const { data: spaces } = await db.from('spaces').select('id,name,slug').eq('slug', spaceSlug).limit(1);
+      if (!spaces || !spaces.length) { document.getElementById('spaceName').textContent = 'Niet gevonden'; return; }
+      const space = spaces[0];
+
+      // Set ophalen
+      const { data: sets } = await db.from('sets').select('id,slug,title').eq('space_id', space.id).eq('slug', setSlug).limit(1);
+      if (!sets || !sets.length) { document.getElementById('spaceName').textContent = 'Set niet gevonden'; return; }
+      const set = sets[0];
+
+      document.getElementById('spaceName').textContent = set.title;
+      document.getElementById('spaceSub').textContent = location.host + '/' + space.slug + '/' + set.slug + '/';
+      document.title = set.title + ' — ' + space.name;
+
+      // Thema's ophalen
+      const { data: themes } = await db.from('themes').select('id,key,label,sort_order').eq('set_id', set.id).order('sort_order');
+      if (!themes || !themes.length) { document.getElementById('setsGrid').innerHTML = '<p class="empty">Nog geen thema\'s in deze set.</p>'; return; }
+
+      // Vragen per thema ophalen
+      const themeIds = themes.map(function(t) { return t.id; });
+      const { data: questions } = await db.from('questions').select('id,theme_id,body,sort_order').in('theme_id', themeIds).order('sort_order');
+
+      const grid = document.getElementById('setsGrid');
+      grid.innerHTML = themes.map(function(t) {
+        var qs = (questions || []).filter(function(q) { return q.theme_id === t.id; });
+        return '<div class="set-card" style="display:block;cursor:default">' +
+          '<div class="set-title">' + esc(t.label) + '</div>' +
+          '<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">' +
+          qs.map(function(q) { return '<div style="font-size:14px;color:#444;padding:8px 10px;background:#f4f6f7;border-radius:8px">' + esc(q.body) + '</div>'; }).join('') +
+          '</div></div>';
+      }).join('');
+    }
+
     async function load() {
       // Space ophalen op slug
       const { data: spaces, error: spErr } = await db
