@@ -93,6 +93,14 @@
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqcXV3cWVwaXNicHBoZ256bGNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2NzU3OTAsImV4cCI6MjA5MDI1MTc5MH0.NFcWbQY_ES4SotPW2cNGFmJl4vpI0m-ejDPPlHj83Gs'
   );
 </script>
+<script>
+  // Auth check — redirect naar login als niet ingelogd
+  window._supa.auth.getSession().then(function(r) {
+    if (!r.data.session) {
+      window.location.href = '/login/?redirect=' + encodeURIComponent(window.location.pathname);
+    }
+  });
+</script>
 <script src="supabase-data.js"></script>
 </body>
 </html>
