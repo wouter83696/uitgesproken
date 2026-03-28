@@ -2,7 +2,7 @@
   "cleanUrls": true,
   "trailingSlash": true,
   "rewrites": [
-    { "source": "/:space/:set", "destination": "/space/" },
-    { "source": "/:space",      "destination": "/space/" }
+    { "source": "/:space/:set", "destination": "/space/index.html" },
+    { "source": "/:space",      "destination": "/space/index.html" }
   ]
 }
