@@ -1,7 +1,5 @@
 {
-  "cleanUrls": true,
-  "trailingSlash": true,
   "rewrites": [
-    { "source": "/:path*", "destination": "/space/index.html" }
+    { "source": "/(.*)", "destination": "/space/index.html" }
   ]
 }
