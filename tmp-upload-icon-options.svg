@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="230" viewBox="0 0 620 230" fill="none">
+  <rect width="620" height="230" rx="28" fill="#F8FBFC"/>
+
+  <g transform="translate(40 25)">
+    <rect x="0" y="0" width="250" height="180" rx="90" fill="#FFFFFF" stroke="#E3EAEE" stroke-width="4"/>
+    <text x="125" y="147" text-anchor="middle" font-family="Arial, sans-serif" font-size="23" font-weight="700" fill="#5B6D82">Optie A</text>
+    <text x="125" y="168" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#7D8D9E">tray + pijl omhoog</text>
+    <g transform="translate(86 46)" stroke="#4F7283" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M39 64V24"/>
+      <path d="M26 37L39 24L52 37"/>
+      <path d="M20 14H58"/>
+      <path d="M18 72H60"/>
+      <path d="M24 72L28 84H50L54 72"/>
+    </g>
+  </g>
+
+  <g transform="translate(330 25)">
+    <rect x="0" y="0" width="250" height="180" rx="90" fill="#FFFFFF" stroke="#E3EAEE" stroke-width="4"/>
+    <text x="125" y="147" text-anchor="middle" font-family="Arial, sans-serif" font-size="23" font-weight="700" fill="#5B6D82">Optie B</text>
+    <text x="125" y="168" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#7D8D9E">inbox + pijl omhoog</text>
+    <g transform="translate(82 46)" stroke="#4F7283" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M43 60V18"/>
+      <path d="M30 31L43 18L56 31"/>
+      <path d="M16 64H70L59 80H27L16 64Z"/>
+      <path d="M27 64L34 54H52L59 64"/>
+    </g>
+  </g>
+</svg>

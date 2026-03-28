@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:www.shapes.gallery)",
+      "WebFetch(domain:svgshapes.in)",
+      "Bash(grep -o stijlCanvasWindow[^}]* /Users/wouter/.claude/projects/-Users-wouter-Desktop-uitgesproken/e4264b2f-14aa-4763-8077-b3e37a3fab86.jsonl)",
+      "Bash(grep -o stijlCanvasStage[^}]* /Users/wouter/.claude/projects/-Users-wouter-Desktop-uitgesproken/e4264b2f-14aa-4763-8077-b3e37a3fab86.jsonl)",
+      "Bash(grep -o stijlCanvasCardWrap[^}]* /Users/wouter/.claude/projects/-Users-wouter-Desktop-uitgesproken/e4264b2f-14aa-4763-8077-b3e37a3fab86.jsonl)",
+      "Bash(python3:*)",
+      "Bash(grep -n newString.*stijlCanvasWindow /Users/wouter/.claude/projects/-Users-wouter-Desktop-uitgesproken/e4264b2f-14aa-4763-8077-b3e37a3fab86.jsonl)",
+      "Bash(grep -E \"\\\\.\\(html|tsx?|jsx?\\)$\")",
+      "Bash(wc -l /Users/wouter/Desktop/uitgesproken/css/*.css /Users/wouter/Desktop/uitgesproken/templates/*.css)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(grep -E \"\\\\.\\(html|htm\\)$\")",
+      "Bash(grep -E \"^[^/]*\\(/[^/]+\\){0,3}$\")",
+      "Bash(node --check /Users/wouter/Desktop/uitgesproken/admin/admin.js)",
+      "Bash(grep -E \"\\\\.html$|\\\\.js$|package\")",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}

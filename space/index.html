@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Uitgesproken</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'IBM Plex Sans', system-ui, sans-serif;
+      background: #f4f6f7;
+      min-height: 100dvh;
+      color: #1a1a2e;
+    }
+
+    .topbar {
+      background: #fff;
+      border-bottom: 1px solid rgba(26,26,46,.07);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .topbar-logo {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a1a2e;
+      letter-spacing: -.02em;
+      text-decoration: none;
+    }
+
+    .main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 48px 24px;
+    }
+
+    .space-header {
+      margin-bottom: 40px;
+    }
+
+    .space-name {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      margin-bottom: 6px;
+    }
+
+    .space-sub {
+      font-size: 14px;
+      color: #7f8996;
+    }
+
+    .sets-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      color: #a0aab4;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+
+    .sets-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+    }
+
+    .set-card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 24px;
+      text-decoration: none;
+      color: inherit;
+      border: 1px solid rgba(26,26,46,.07);
+      transition: box-shadow .15s, transform .15s;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .set-card:hover {
+      box-shadow: 0 4px 20px rgba(15,23,42,.09);
+      transform: translateY(-1px);
+    }
+
+    .set-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .set-meta {
+      font-size: 13px;
+      color: #7f8996;
+    }
+
+    .set-arrow {
+      margin-top: auto;
+      padding-top: 12px;
+      font-size: 13px;
+      color: #4f8e9e;
+      font-weight: 500;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 80px 24px;
+      color: #a0aab4;
+    }
+
+    .error-msg {
+      text-align: center;
+      padding: 80px 24px;
+      color: #b91c1c;
+    }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="topbar-logo">Uitgesproken</a>
+  </header>
+
+  <main class="main">
+    <div class="space-header">
+      <div class="space-name" id="spaceName">Laden…</div>
+      <div class="space-sub" id="spaceSub"></div>
+    </div>
+    <div class="sets-label">Kaartensets</div>
+    <div class="sets-grid" id="setsGrid"></div>
+  </main>
+
+  <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+    const SUPABASE_URL  = 'https://gjquwqepisbpphgnzlcs.supabase.co';
+    const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqcXV3cWVwaXNicHBoZ256bGNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2NzU3OTAsImV4cCI6MjA5MDI1MTc5MH0.NFcWbQY_ES4SotPW2cNGFmJl4vpI0m-ejDPPlHj83Gs';
+    const db = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    // Lees space-slug uit URL: /wouter-test/ → 'wouter-test'
+    const parts = location.pathname.replace(/^\/|\/$/g, '').split('/');
+    const spaceSlug = parts[0];
+    const setSlug   = parts[1] || null;
+
+    if (!spaceSlug) {
+      location.href = '/';
+    }
+
+    async function load() {
+      // Space ophalen op slug
+      const { data: spaces, error: spErr } = await db
+        .from('spaces')
+        .select('id, name, slug')
+        .eq('slug', spaceSlug)
+        .limit(1);
+
+      if (spErr || !spaces || !spaces.length) {
+        document.getElementById('spaceName').textContent = 'Space niet gevonden';
+        document.getElementById('setsGrid').innerHTML =
+          '<p class="error-msg">Er bestaat geen space met de naam "' + spaceSlug + '".</p>';
+        document.title = 'Niet gevonden — Uitgesproken';
+        return;
+      }
+
+      const space = spaces[0];
+      document.getElementById('spaceName').textContent = space.name;
+      document.getElementById('spaceSub').textContent = location.host + '/' + space.slug + '/';
+      document.title = space.name + ' — Uitgesproken';
+
+      // Sets ophalen
+      const { data: sets, error: sErr } = await db
+        .from('sets')
+        .select('id, slug, title, card_format')
+        .eq('space_id', space.id)
+        .eq('is_public', true)
+        .order('sort_order');
+
+      const grid = document.getElementById('setsGrid');
+
+      if (sErr || !sets || !sets.length) {
+        grid.innerHTML = '<p class="empty">Nog geen kaartensets in deze space.</p>';
+        return;
+      }
+
+      grid.innerHTML = sets.map(function(s) {
+        var href = '/' + space.slug + '/' + s.slug + '/';
+        return '<a class="set-card" href="' + href + '">' +
+          '<div class="set-title">' + esc(s.title) + '</div>' +
+          '<div class="set-arrow">Kaarten bekijken →</div>' +
+          '</a>';
+      }).join('');
+    }
+
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    load();
+  </script>
+</body>
+</html>

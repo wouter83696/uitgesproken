@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard — Uitgesproken</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'IBM Plex Sans', system-ui, sans-serif;
+      background: #f4f6f7;
+      min-height: 100dvh;
+      color: #1a1a2e;
+    }
+
+    /* Topbar */
+    .topbar {
+      background: #fff;
+      border-bottom: 1px solid rgba(26,26,46,.07);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .topbar-logo {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      color: #1a1a2e;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .user-name {
+      font-size: 13px;
+      color: #7f8996;
+    }
+
+    .btn-sm {
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1.5px solid rgba(26,26,46,.12);
+      background: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      color: #5a7282;
+      cursor: pointer;
+      transition: background .12s, border-color .12s;
+    }
+
+    .btn-sm:hover { background: #f4f6f7; }
+
+    /* Inhoud */
+    .main {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 24px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      color: #a0aab4;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+
+    /* Space card */
+    .space-card {
+      background: #fff;
+      border-radius: 16px;
+      border: 1.5px solid rgba(26,26,46,.07);
+      padding: 24px;
+      margin-bottom: 12px;
+    }
+
+    .space-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .space-name {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .space-slug {
+      font-size: 12px;
+      color: #a0aab4;
+    }
+
+    .btn-primary {
+      padding: 10px 20px;
+      border-radius: 10px;
+      border: none;
+      background: #4f8e9e;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .12s;
+    }
+
+    .btn-primary:hover { background: #3d7a8a; }
+
+    /* Maak space aan */
+    .create-space {
+      background: #fff;
+      border-radius: 16px;
+      border: 1.5px dashed rgba(26,26,46,.12);
+      padding: 32px;
+      text-align: center;
+    }
+
+    .create-space p {
+      font-size: 14px;
+      color: #7f8996;
+      margin-bottom: 16px;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .input {
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1.5px solid rgba(26,26,46,.12);
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color .12s;
+      width: 220px;
+    }
+
+    .input:focus { border-color: #4f8e9e; }
+
+    .loading { color: #a0aab4; font-size: 14px; text-align: center; padding: 40px; }
+    .error-msg { color: #b91c1c; font-size: 13px; margin-top: 10px; }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <nav class="topbar">
+    <div class="topbar-logo">Uitgesproken</div>
+    <div class="topbar-right">
+      <span class="user-name" id="userName"></span>
+      <button class="btn-sm" id="btnLogout">Uitloggen</button>
+    </div>
+  </nav>
+
+  <main class="main">
+    <div class="section-title">Jouw spaces</div>
+    <div id="spacesWrap"><div class="loading">Laden…</div></div>
+  </main>
+
+  <script type="module">
+    import { supabase } from '../js/supabase-client.js';
+
+    // Controleer of ingelogd
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { location.href = '/login/'; }
+
+    const user = session.user;
+    document.getElementById('userName').textContent = user.email;
+
+    // Uitloggen
+    document.getElementById('btnLogout').addEventListener('click', async () => {
+      await supabase.auth.signOut();
+      location.href = '/login/';
+    });
+
+    // Laad spaces
+    async function loadSpaces() {
+      const { data: spaces, error } = await supabase
+        .from('spaces')
+        .select('*')
+        .order('created_at');
+
+      const wrap = document.getElementById('spacesWrap');
+
+      if (error) {
+        wrap.innerHTML = '<p class="error-msg">Fout: ' + error.message + '</p>';
+        return;
+      }
+
+      if (!spaces.length) {
+        wrap.innerHTML = `
+          <div class="create-space">
+            <p>Je hebt nog geen space. Maak er een aan om te beginnen.</p>
+            <div class="form-row">
+              <input class="input" id="spaceName" placeholder="Naam (bijv. Acme)" type="text">
+              <input class="input" id="spaceSlug" placeholder="URL (bijv. acme)" type="text">
+            </div>
+            <p class="error-msg" id="createErr" style="display:none"></p>
+            <br>
+            <button class="btn-primary" id="btnCreate">Space aanmaken</button>
+          </div>`;
+
+        // Slug auto-invullen vanuit naam
+        document.getElementById('spaceName').addEventListener('input', e => {
+          document.getElementById('spaceSlug').value = e.target.value
+            .toLowerCase().trim()
+            .replace(/\s+/g, '-')
+            .replace(/[^a-z0-9-]/g, '');
+        });
+
+        document.getElementById('btnCreate').addEventListener('click', createSpace);
+        return;
+      }
+
+      wrap.innerHTML = spaces.map(s => `
+        <div class="space-card">
+          <div class="space-header">
+            <div>
+              <div class="space-name">${s.name}</div>
+              <div class="space-slug">uitgesproken.vercel.app/${s.slug}/</div>
+            </div>
+            <a href="/${s.slug}/" class="btn-primary" style="text-decoration:none">Openen →</a>
+          </div>
+        </div>`).join('');
+    }
+
+    async function createSpace() {
+      const name = document.getElementById('spaceName').value.trim();
+      const slug = document.getElementById('spaceSlug').value.trim();
+      const errEl = document.getElementById('createErr');
+
+      if (!name || !slug) { errEl.textContent = 'Vul naam en URL in.'; errEl.style.display = 'block'; return; }
+      if (!/^[a-z0-9-]+$/.test(slug)) { errEl.textContent = 'URL mag alleen kleine letters, cijfers en - bevatten.'; errEl.style.display = 'block'; return; }
+
+      const { error } = await supabase.from('spaces').insert({
+        name, slug, owner_id: user.id
+      });
+
+      if (error) { errEl.textContent = 'Fout: ' + error.message; errEl.style.display = 'block'; return; }
+      loadSpaces();
+    }
+
+    loadSpaces();
+  </script>
+</body>
+</html>
