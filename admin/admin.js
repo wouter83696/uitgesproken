@@ -2,23 +2,66 @@
 // ═══════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════
-var S={repo:'',token:'',sets:[],indexSha:'',indexData:{},activeId:null,d:{},mode:'checklist',wizStep:0,clTab:'opmaken',opmPane:'vragen',infoSlideIdx:0,dirty:false,thumbsOpen:false,history:{past:[],future:[],lastSig:'',suspend:false}};
+var S={repo:'',token:'',sets:[],indexSha:'',indexData:{},activeId:null,activeKind:'space',space:null,d:{},mode:'checklist',wizStep:0,clTab:'opmaken',opmPane:'vragen',infoSlideIdx:0,dirty:false,thumbsOpen:false,history:{past:[],future:[],lastSig:'',suspend:false}};
 var CC={},KF={},SC={},bgTimer=null,asTimer=null,_lp=null,dragSrc=null;
+var SAVE_UI={state:'idle',text:'',hideTimer:null};
+var _savedSpaceSig=null;
+var SPACE_PREVIEW_CARDS_MODE=false;
+var SPACE_PREVIEW_CURRENT_SET_ID='';
+var STYLE_SLIDE_DND=null;
+var SESSION_ID=(function(){var k='pk_sid';var v=sessionStorage.getItem(k);if(!v){v=Date.now()+'_'+(Math.random()*0xffff|0);sessionStorage.setItem(k,v);}return v;})();
 var BG_AUTO_PREVIEW_SEED=((Date.now()^((Math.random()*0xffffffff)>>>0))>>>0);
 var LIB_REFRESH_TOKEN=0;
 var STYLE_PREVIEW_KEY=null;
 var INFO_SLIDE_KEY='cover';
+var BACK_STYLE_KEY='__back__';
+var STYLE_BACK_EDIT_SURFACE='front';
+var SPACE_PREVIEW_W=430;
+var SPACE_PREVIEW_H=930;
 var STYLE_PAL_EXPANDED={};
 var BG_ACTIVE_PAL_INDEX=0;
 var STIJL_KLEUR_TAB='settc';
 var Q_EDITOR_SIDE='front';
+var QUESTION_ENTITY_SEQ=0;
 var SELECTED_LIB_PATH='';
 var ACTIVE_TARGET_PATH='';
 var PRELOAD={token:0,active:false,total:0,done:0};
 var RT={target:null,seed:0,richCeTarget:null,savedRange:null,ceBlurTimer:null};
+function resetTransientEditorState(){
+  COVER_TEXT_DRAG=null;
+  COVER_TEXT_ACTIVE=-1;
+  COVER_TEXT_LAST_FOCUSED=0;
+  COVER_TEXT_SELECTED_MULTI=[];
+  COVER_TEXT_SUPPRESS_CLICK_UNTIL=0;
+  COVER_TEXT_DESELECTED=false;
+  COVER_ELEM_SEL=null;
+  COVER_ELEM_DRAG=null;
+  COVER_ELEM_EDITING=null;
+  STYLE_SHAPE_ACTIVE={};
+  STYLE_SHAPE_SELECTED={};
+  STYLE_SHAPE_SELECTED_MULTI={};
+  STYLE_SHAPE_COLOR_TARGET={};
+  STYLE_BACK_EDIT_SURFACE='front';
+}
+function nextQuestionEntityId(){
+  QUESTION_ENTITY_SEQ+=1;
+  return 'q'+Date.now().toString(36)+QUESTION_ENTITY_SEQ.toString(36)+(Math.random()*0xffff|0).toString(36);
+}
+function syncInfoRichLinkedFocus(el){
+  document.querySelectorAll('[data-rich-type="info"].is-linked-focus').forEach(function(node){
+    node.classList.remove('is-linked-focus');
+  });
+  if(!el||el.dataset.richType!=='info')return;
+  var key=String(el.dataset.richKey||'').trim();
+  if(!key)return;
+  document.querySelectorAll('[data-rich-type="info"][data-rich-key="'+key+'"]').forEach(function(node){
+    node.classList.add('is-linked-focus');
+  });
+}
 function activateRichCe(el){
   if(RT.ceBlurTimer){clearTimeout(RT.ceBlurTimer);RT.ceBlurTimer=null;}
   RT.richCeTarget=el;
+  syncInfoRichLinkedFocus(el);
   if(el&&el.dataset.richType!=='question'){
     document.querySelectorAll('.stijlCanvasToolbar').forEach(function(t){t.classList.add('richce-active');});
   }
@@ -30,6 +73,7 @@ function deactivateRichCe(){
     var inToolbar=!!(active&&active.closest&&active.closest('.stijlCanvasTopTools,.stijlCanvasToolbar,.textToolbarMenuPop'));
     if(!inToolbar){
       RT.richCeTarget=null;RT.savedRange=null;
+      syncInfoRichLinkedFocus(null);
       document.querySelectorAll('.stijlCanvasToolbar').forEach(function(t){t.classList.remove('richce-active');});
     }
     RT.ceBlurTimer=null;
@@ -199,8 +243,11 @@ function toggleAdminNight(){
 // ═══════════════════════════════════════════
 (function(){
   applyAdminNightMode();
-  // Als Supabase beschikbaar is, laat supabase-data.js de init afhandelen
-  if(window._supa) return;
+  S.sidebarCollapsed=lsGet('pk_sidebar_collapsed')==='1';
+  applySidebarState();
+  // Als deze pagina Supabase gaat gebruiken, mag de legacy GitHub-init
+  // nooit alvast demo/index-data laden voordat supabase-data.js overneemt.
+  if(window.PK_USE_SUPABASE || window._supa) return;
   // Legacy GitHub auth
   var cfg=parse(lsGet('pk_cfg'));
   if(cfg&&cfg.repo&&cfg.token){S.repo=cfg.repo;S.token=cfg.token;g('iRepo').value=S.repo;g('iToken').value=S.token;lbStart();loadIndex();}
@@ -210,6 +257,9 @@ function toggleAdminNight(){
 // API
 // ═══════════════════════════════════════════
 function api(path,method,body){
+  if((!S.repo||!S.token)&&window._supa){
+    return Promise.reject(new Error('Bestandsupload loopt nog via GitHub en is nog niet gekoppeld aan Supabase.'));
+  }
   return fetch('https://api.github.com/repos/'+S.repo+path,{
     method:method||'GET',
     cache:'no-store',
@@ -287,6 +337,8 @@ function connect(){
   });
 }
 function disconnect(){localStorage.removeItem('pk_cfg');location.reload();}
+function toggleSetPublic(){toast('Publieke zichtbaarheid werkt in de Supabase-admin','amber');}
+function saveSpaceSettings(){toast('Ruimte-instellingen werken in de Supabase-admin','amber');}
 
 
 // ─── LOADING BAR ─────────────────────────────────────────────────────────────
@@ -406,16 +458,24 @@ function calcPctFromBundle(bundle){
   var items=[
     !!(bundle&&bundle.meta&&bundle.meta.id&&cardsStepDoneForState(bundle.meta.id,meta)),
     Object.values(questions||{}).some(function(a){return Array.isArray(a)&&a.length>0;})||!themes.length,
-    !!(uitleg&&uitleg.cover),
+    (isInfoSlideEnabled(meta,'cover')?!!(uitleg&&uitleg.cover):true),
     true
   ];
   var done=items.filter(Boolean).length;
   return Math.round(done/items.length*100);
 }
 function cacheSetBundle(id,bundle){
-  SC[id]=bundle;
+  var stored=cloneSetBundle(bundle);
+  SC[id]=stored;
   var idx=S.sets.findIndex(function(s){return s.id===id;});
-  if(idx>=0)S.sets[idx]._pct=calcPctFromBundle(bundle);
+  if(idx>=0){
+    S.sets[idx].bundle=cloneSetBundle(stored);
+    if(stored&&stored.meta){
+      if(stored.meta.title)S.sets[idx].title=stored.meta.title;
+      if(stored.meta.slug)S.sets[idx].slug=stored.meta.slug;
+    }
+    S.sets[idx]._pct=calcPctFromBundle(stored);
+  }
 }
 function historyStateSig(bundle){
   try{return JSON.stringify(bundle||{});}catch(_){return '';}
@@ -424,22 +484,62 @@ function currentHistorySnapshot(){
   return cloneSetBundle(S.d||{meta:{},questions:{},uitleg:{},intro:{}});
 }
 function savedHistorySnapshot(){
+  if(S.activeKind==='space')return _savedSpaceSig!==null?{_spaceSig:_savedSpaceSig}:null;
   return S.activeId&&SC[S.activeId]?cloneSetBundle(SC[S.activeId]):null;
+}
+function historyStateSigForSpace(bundle){
+  // For space editor: include only the editable parts
+  try{return JSON.stringify({meta:bundle.meta,uitleg:bundle.uitleg});}catch(_){return '';}
 }
 function updateDirtyUi(){
   var db=g('dirtyBadge');
   if(db)db.classList.toggle('on',!!S.dirty);
 }
+function clearTopSaveStatusTimer(){
+  if(!SAVE_UI.hideTimer)return;
+  clearTimeout(SAVE_UI.hideTimer);
+  SAVE_UI.hideTimer=null;
+}
+function updateTopSaveStatusUi(){
+  var el=g('saveMiniStatus');
+  if(!el)return;
+  var show=S.activeKind!=='space'&&!!SAVE_UI.text;
+  el.className='tbRStatus'+(show?' on':'')+(SAVE_UI.state?' is-'+SAVE_UI.state:'');
+  el.textContent=show?SAVE_UI.text:'';
+}
+function setTopSaveStatus(state,text,autoHideMs){
+  clearTopSaveStatusTimer();
+  SAVE_UI.state=state||'idle';
+  SAVE_UI.text=text||'';
+  updateTopSaveStatusUi();
+  if(autoHideMs&&SAVE_UI.text){
+    var keepState=SAVE_UI.state,keepText=SAVE_UI.text;
+    SAVE_UI.hideTimer=setTimeout(function(){
+      SAVE_UI.hideTimer=null;
+      if(SAVE_UI.state===keepState&&SAVE_UI.text===keepText){
+        SAVE_UI.state='idle';
+        SAVE_UI.text='';
+        updateTopSaveStatusUi();
+      }
+    },autoHideMs);
+  }
+}
 function refreshTopBarControls(){
   updateDirtyUi();
+  updateTopSaveStatusUi();
   var ub=g('undoBtn');
   if(ub)ub.disabled=!canUndo();
   var rb=g('redoBtn');
   if(rb)rb.disabled=!canRedo();
 }
 function syncDirtyFromSnapshot(){
-  var saved=savedHistorySnapshot();
-  S.dirty=!saved||historyStateSig(currentHistorySnapshot())!==historyStateSig(saved);
+  if(S.activeKind==='space'){
+    var curSig=historyStateSigForSpace(currentHistorySnapshot());
+    S.dirty=_savedSpaceSig!==null&&curSig!==_savedSpaceSig;
+  }else{
+    var saved=savedHistorySnapshot();
+    S.dirty=!saved||historyStateSig(currentHistorySnapshot())!==historyStateSig(saved);
+  }
   refreshTopBarControls();
 }
 function resetHistory(snapshot){
@@ -592,10 +692,18 @@ function renderLoadedWelcome(){
   var label=count===1?'kaartenset':'kaartensets';
   hideFloatingTextBar(true);
   g('mc').innerHTML='<div class="welcome" style="gap:12px">'+
-    '<img src="../assets/logo-icons/masters/master-squircle.svg" style="width:56px;height:56px" alt="Uitgesproken">'+
-    '<h2>Alle kaartensets zijn geladen</h2>'+
-    '<p>Kies links een set om verder te werken.</p>'+
+    '<img src="../assets/logo-icons/masters/master-transparent.svg" style="width:72px;height:72px" alt="Uitgesproken">'+
+    '<h2>Welkom in de editor</h2>'+
+    '<p>Je kaartensets staan klaar. Kies links waarmee je verder wilt werken.</p>'+
     '<div class="welcomeStat">✓ '+count+' '+label+' en previews staan klaar in de editor</div>'+
+  '</div>';
+}
+function renderSelectSetWelcome(){
+  hideFloatingTextBar(true);
+  g('mc').innerHTML='<div class="welcome" style="gap:12px">'+
+    '<img src="../assets/logo-icons/masters/master-transparent.svg" style="width:72px;height:72px" alt="Uitgesproken">'+
+    '<h2>Welkom in de editor</h2>'+
+    '<p>Kies links een kaartenset of maak een nieuwe aan.</p>'+
   '</div>';
 }
 // ═══════════════════════════════════════════
@@ -603,6 +711,7 @@ function renderLoadedWelcome(){
 // ═══════════════════════════════════════════
 function loadIndex(){
   show('app');hide('setup');g('sbRepo').textContent=S.repo;
+  applySidebarState();
   if(g('sbQ'))g('sbQ').value='';
   g('mc').innerHTML='<div class="welcome" style="opacity:.4"><p style="font-size:12px;color:var(--k3)">Sets laden…</p></div>';
   return getFile('sets/index.json').then(function(r){
@@ -611,7 +720,7 @@ function loadIndex(){
     S.indexData=r.data;
     renderSidebar();
     if(!S.sets.length){
-      g('mc').innerHTML='<div class="welcome"><h2>Selecteer een set</h2><p>Kies een kaartenset in de zijbalk of maak een nieuwe aan.</p></div>';
+      renderSelectSetWelcome();
       return Promise.resolve();
     }
     var preferredId=(S.indexData&&S.indexData.default)||((S.sets[0]||{}).id)||null;
@@ -639,26 +748,103 @@ function saveIndex(msg){S.indexData.sets=S.sets;return saveFile('sets/index.json
 // ═══════════════════════════════════════════
 // SIDEBAR
 // ═══════════════════════════════════════════
+function sidebarCollapsed(){
+  return !!S.sidebarCollapsed;
+}
+function sidebarBadgeText(label){
+  var raw=String(label||'').trim();
+  if(!raw)return '•';
+  var words=raw.split(/[\s_-]+/).filter(Boolean);
+  if(words.length>1)return (words[0].charAt(0)+words[1].charAt(0)).toUpperCase();
+  return raw.slice(0,2).toUpperCase();
+}
+function sidebarMiniCardHtml(){
+  return '<span class="sLeadMiniCard" aria-hidden="true">'+
+    '<span class="sLeadMiniCardLine"></span>'+
+    '<span class="sLeadMiniCardMenu"><span></span><span></span><span></span></span>'+
+    '<span class="sLeadMiniCardBlocks">'+
+      '<span class="sLeadMiniCardBlock"></span>'+
+      '<span class="sLeadMiniCardBlock is-light"></span>'+
+    '</span>'+
+  '</span>';
+}
+function applySidebarState(){
+  var app=g('app'),btn=g('sbToggle'),q=g('sbQ');
+  var collapsed=sidebarCollapsed();
+  if(app)app.classList.toggle('sidebar-collapsed',collapsed);
+  if(btn){
+    var label=collapsed?'Zijbalk uitklappen':'Zijbalk inklappen';
+    btn.classList.toggle('is-collapsed',collapsed);
+    btn.title=label;
+    btn.setAttribute('aria-label',label);
+    btn.setAttribute('aria-pressed',collapsed?'true':'false');
+  }
+  if(q)q.tabIndex=collapsed?-1:0;
+}
+function setSidebarCollapsed(next){
+  var collapsed=!!next;
+  if(S.sidebarCollapsed===collapsed){
+    applySidebarState();
+    return;
+  }
+  S.sidebarCollapsed=collapsed;
+  lsSet('pk_sidebar_collapsed',collapsed?'1':'0');
+  var q=g('sbQ');
+  if(collapsed&&q===document.activeElement)q.blur();
+  applySidebarState();
+  renderSidebar();
+}
+function toggleSidebar(){
+  setSidebarCollapsed(!sidebarCollapsed());
+}
 function renderSidebar(){
-  var sbQ=g('sbQ'),setList=g('setList');
-  if(!setList)return;
+  var sbQ=g('sbQ'),setList=g('setList'),spaceNav=g('spaceNav');
+  if(!setList||!spaceNav)return;
+  applySidebarState();
   var q=String(sbQ&&sbQ.value||'').toLowerCase();
   var list=(Array.isArray(S.sets)?S.sets:[]).filter(function(s){
     var title=String((s&&s.title)||'').toLowerCase();
     var id=String((s&&s.id)||'').toLowerCase();
     return !q||title.indexOf(q)>=0||id.indexOf(q)>=0;
   });
+  var homeIcon='<span class="sLeadIcon sLeadHome" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></span>';
+  var ruimteBtn='<button class="sItem sItem-home'+(S.activeKind==='space'?' active':'')+'" type="button" title="Home" onclick="reqLoadSpace()">'+
+    homeIcon+
+    '<span class="sNm">Home</span>'+
+  '</button>';
+  spaceNav.innerHTML=ruimteBtn;
   setList.innerHTML=list.map(function(s){
     var sid=String((s&&s.id)||'');
-    var pct=calcPct(sid),isDirty=sid===S.activeId&&S.dirty;
-    return '<button class="sItem'+(sid===S.activeId?' active':'')+(isDirty?' dirty':'')+'" draggable="true" data-sid="'+esc(sid)+'" onclick="reqLoad(\''+esc(sid)+'\')">'+
-      '<span class="sDot"></span><span class="sNm">'+esc((s&&s.title)||sid)+'</span>'+
-      '<span class="sDirty" title="Niet opgeslagen"></span><span class="sPct">'+pct+'%</span></button>';
+    var pct=calcPct(sid),isDirty=S.activeKind==='set'&&sid===S.activeId&&S.dirty;
+    var isPublic=(s&&s.isPublic)!==false;
+    var pubCls=isPublic?' public':' private';
+    var pubLabel=isPublic?'Live':'Publiceer';
+    var pubTitle=isPublic?'Zet terug naar privé':'Maak publiek zichtbaar';
+    var title=(s&&s.title)||sid;
+    return '<button class="sItem'+(S.activeKind==='set'&&sid===S.activeId?' active':'')+(isDirty?' dirty':'')+'" draggable="true" data-sid="'+esc(sid)+'" onclick="reqLoad(\''+esc(sid)+'\')">'+
+      '<span class="sLeadBadge" aria-hidden="true">'+esc(sidebarBadgeText(title))+'</span>'+
+      sidebarMiniCardHtml()+
+      '<span class="sNm">'+esc((s&&s.title)||sid)+'</span>'+
+      '<span class="sMeta"><span class="sPct">'+pct+'%</span></span>'+
+      '<span class="sPub'+pubCls+'" title="'+pubTitle+'" onclick="event.stopPropagation();toggleSetPublic(\''+esc(sid)+'\');return false;">'+pubLabel+'</span>'+
+      '<span class="sDirty" title="Niet opgeslagen"></span></button>';
   }).join('');
   if(!list.length&&Array.isArray(S.sets)&&S.sets.length&&!q){
     setList.innerHTML='<div class="empty" style="padding:10px 0;color:var(--k3)">Er ging iets mis bij het tonen van de sets.</div>';
   }
   initSbDrag();
+}
+function reqLoadSpace(){
+  if(S.activeKind==='space')return;
+  if(S.dirty&&S.activeKind==='set'){
+    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(S.activeId)+'</strong>?</p>'+
+      '<div class="mAct">'+
+      '<button class="mCa" onclick="closeModal();loadSpaceEditor()">Niet opslaan</button>'+
+      '<button class="mOk" onclick="closeModal();saveSet(function(){loadSpaceEditor();})">Opslaan</button>'+
+      '</div>');
+    return;
+  }
+  loadSpaceEditor();
 }
 function calcPct(id){
   if(id!==S.activeId){
@@ -673,6 +859,7 @@ function calcPct(id){
 }
 function initSbDrag(){
   g('setList').querySelectorAll('.sItem').forEach(function(btn){
+    if(!btn.dataset.sid)return;
     btn.addEventListener('dragstart',function(e){dragSrc=this;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',this.dataset.sid);this.style.opacity='.5';});
     btn.addEventListener('dragend',function(){this.style.opacity='';g('setList').querySelectorAll('.sItem').forEach(function(b){b.style.boxShadow='';});});
     btn.addEventListener('dragover',function(e){e.preventDefault();this.style.boxShadow='0 0 0 2px var(--tl)';});
@@ -693,12 +880,13 @@ function initSbDrag(){
 // LOAD SET
 // ═══════════════════════════════════════════
 function reqLoad(id){
-  if(id===S.activeId)return;
+  if(id===S.activeId&&S.activeKind==='set')return;
   if(S.dirty){
-    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(S.activeId)+'</strong>?</p>'+
+    var activeName=(S.sets.find(function(s){return s.id===S.activeId;})||{}).title||S.activeId;
+    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(activeName)+'</strong>?</p>'+
       '<div class="mAct">'+
-      '<button class="mCa" onclick="closeModal();loadSet(\''+esc(id)+'\')">Weggooien</button>'+
-      '<button class="mOk" onclick="closeModal();saveSet(function(){loadSet(\''+esc(id)+'\');})">Eerst opslaan</button>'+
+      '<button class="mCa" onclick="closeModal();loadSet(\''+esc(id)+'\')">Niet opslaan</button>'+
+      '<button class="mOk" onclick="closeModal();saveSet(function(){loadSet(\''+esc(id)+'\');})">Opslaan</button>'+
       '</div>');
     return;
   }
@@ -706,9 +894,10 @@ function reqLoad(id){
 }
 function loadSet(id,opts){
   opts=opts||{};
+  S.activeKind='set';
   S.activeId=id;S.dirty=false;S.wizStep=0;S.clTab='opmaken';S.opmPane='vragen';S.infoSlideIdx=0;
   STYLE_PREVIEW_KEY=null;
-  COVER_TEXT_SELECTED_MULTI=[];
+  resetTransientEditorState();
   if(!opts.silent){
     lbStart();
     g('mc').innerHTML='<div class="welcome" style="opacity:.3"><p style="font-size:11.5px;color:var(--k3)">Laden…</p></div>';
@@ -725,20 +914,100 @@ function loadSet(id,opts){
     normalizeLegacyCardSurfaceMeta(S.d.meta);
     cacheSetBundle(id,cloneSetBundle(S.d));
     var draft=parse(lsGet('pk_draft_'+id));
-    if(draft&&draft.ts&&draft.ts>Date.now()-86400000){
+    var draftSeen=sessionStorage.getItem('pk_draft_seen_'+id);
+    var draftFromOtherSession=draft&&(!draft.sid||draft.sid!==SESSION_ID);
+    if(draft&&draft.ts&&draft.ts>Date.now()-7200000&&!draftSeen&&draftFromOtherSession){
+      var draftSetName=esc((S.sets.find(function(s){return s.id===id;})||{}).title||id);
       g('mc').innerHTML='<div class="welcome" style="gap:12px">'+
-        '<p style="font-size:13px;color:var(--k2);max-width:340px;line-height:1.6">Er is een lokaal concept van <strong>'+esc(id)+'</strong>.<br>Opgeslagen '+timeAgo(draft.ts)+'</p>'+
+        '<p style="font-size:13px;color:var(--k2);max-width:340px;line-height:1.6">Er is een lokaal concept van <strong>'+draftSetName+'</strong>.<br>Opgeslagen '+timeAgo(draft.ts)+'</p>'+
         '<div style="display:flex;gap:8px">'+
-        '<button class="btnS" onclick="discardDraft()">Weggooien</button>'+
+        '<button class="btnS" onclick="discardDraft()">Negeren</button>'+
         '<button class="btn" onclick="restoreDraft()">Concept herstellen</button>'+
         '</div></div>';
       window._pd=draft;return;
     }
+    if(draft)lsDel('pk_draft_'+id);
     afterLoad(id);
   }).catch(function(e){lbFail();toast('Laden mislukt: '+e.message,'red');});
 }
+function loadSpaceEditor(opts){
+  opts=opts||{};
+  S.activeKind='space';
+  S.opmPane=(S.opmPane==='info')?'info':'space';
+  S.dirty=false;
+  S.infoSlideIdx=0;
+  STYLE_PREVIEW_KEY=null;
+  resetTransientEditorState();
+  if(!opts.silent){
+    lbStart();
+    g('mc').innerHTML='<div class="welcome" style="opacity:.3"><p style="font-size:11.5px;color:var(--k3)">Ruimte laden…</p></div>';
+  }
+  renderSidebar();
+  var sid=(Array.isArray(S.sets)&&S.sets.length)
+    ? ((S.activeId&&S.sets.some(function(s){return s.id===S.activeId;})) ? S.activeId : S.sets[0].id)
+    : null;
+  Promise.resolve().then(function(){
+    var bundle=buildSpaceEditorBundle();
+    S.d=bundle;
+    normalizeLegacyCardSurfaceMeta(S.d.meta);
+    S.activeId=sid||null;
+    _savedSpaceSig=historyStateSigForSpace(S.d);
+    resetHistory(S.d);
+    syncDirtyFromSnapshot();
+    lbDone();
+    renderEditor();
+  }).catch(function(e){
+    lbFail();
+    toast('Ruimte laden mislukt: '+e.message,'red');
+  });
+}
+function defaultSpaceEditorBundle(){
+  var spaceName=(S.space&&S.space.name)||'Home';
+  var base=mkMeta('ruimte',spaceName);
+  base.themes=[];
+  base.infoPages=[];
+  base.ui=base.ui||{};
+  base.ui.index=base.ui.index||{};
+  base.ui.index.layout='hero-grid';
+  return {
+    meta: base,
+    metaSha: null,
+    questions: {},
+    questionsSha: null,
+    uitleg: {cover:''},
+    uitlegSha: null,
+    intro: {slides:[{key:'cover',title:spaceName,body:'',img:'cards/info_cover.svg',alt:spaceName}],hint:'← → swipe'},
+    introSha: null
+  };
+}
+function normalizeSpaceEditorBundle(raw){
+  var bundle=cloneSetBundle(raw||defaultSpaceEditorBundle());
+  var fallback=defaultSpaceEditorBundle();
+  bundle.meta=bundle.meta&&typeof bundle.meta==='object'?bundle.meta:fallback.meta;
+  bundle.meta.title='Home';
+  bundle.meta.themes=Array.isArray(bundle.meta.themes)?bundle.meta.themes:[];
+  bundle.meta.infoPages=Array.isArray(bundle.meta.infoPages)?bundle.meta.infoPages:[];
+  bundle.questions=bundle.questions&&typeof bundle.questions==='object'?bundle.questions:{};
+  bundle.uitleg=bundle.uitleg&&typeof bundle.uitleg==='object'?bundle.uitleg:{cover:''};
+  bundle.intro=bundle.intro&&typeof bundle.intro==='object'?bundle.intro:{slides:[],hint:'← → swipe'};
+  bundle.intro.slides=Array.isArray(bundle.intro.slides)?bundle.intro.slides:fallback.intro.slides;
+  if(!bundle.intro.slides.length)bundle.intro.slides=fallback.intro.slides;
+  return bundle;
+}
+function buildSpaceEditorBundle(){
+  var settings=((S.space&&S.space.settings)||{});
+  var publicPage=(settings&&typeof settings.publicPage==='object')?settings.publicPage:{};
+  var savedBundle=(publicPage.editorBundle&&typeof publicPage.editorBundle==='object')?publicPage.editorBundle:null;
+  var bundle=normalizeSpaceEditorBundle(savedBundle);
+  if(publicPage.layout){
+    bundle.meta.ui=bundle.meta.ui||{};
+    bundle.meta.ui.index=bundle.meta.ui.index||{};
+    bundle.meta.ui.index.layout=publicPage.layout;
+  }
+  return bundle;
+}
 function restoreDraft(){S.d=window._pd.data;normalizeLegacyCardSurfaceMeta(S.d.meta);resetHistory(S.d);lsDel('pk_draft_'+S.activeId);afterLoad(S.activeId);}
-function discardDraft(){lsDel('pk_draft_'+S.activeId);afterLoad(S.activeId);}
+function discardDraft(){sessionStorage.setItem('pk_draft_seen_'+S.activeId,'1');lsDel('pk_draft_'+S.activeId);afterLoad(S.activeId);}
 function afterLoad(id){
   lbDone();
   applyCardFormat();
@@ -747,6 +1016,7 @@ function afterLoad(id){
   resetHistory(S.d);
   syncDirtyFromSnapshot();
   startAutoSave();
+  setTopSaveStatus('idle','');
   // Start preloading card images immediately in background
   setTimeout(loadCardPreviews,100);
   renderEditor();
@@ -755,9 +1025,14 @@ function startAutoSave(){
   clearInterval(asTimer);
   asTimer=setInterval(function(){
     if(!S.dirty||!S.activeId)return;
-    localStorage.setItem('pk_draft_'+S.activeId,JSON.stringify({ts:Date.now(),data:S.d}));
+    localStorage.setItem('pk_draft_'+S.activeId,JSON.stringify({ts:Date.now(),sid:SESSION_ID,data:S.d}));
+    setTopSaveStatus('draft','Concept bewaard',2200);
     var b=g('asBanner');if(b){b.classList.add('on');setTimeout(function(){b.classList.remove('on');},2200);}
   },15000);
+}
+function buildTopSaveStatusHtml(){
+  var show=S.activeKind!=='space'&&!!SAVE_UI.text;
+  return '<div class="tbRStatus'+(show?' on':'')+(SAVE_UI.state?' is-'+SAVE_UI.state:'')+'" id="saveMiniStatus" aria-live="polite">'+(show?esc(SAVE_UI.text):'')+'</div>';
 }
 
 // ═══════════════════════════════════════════
@@ -771,37 +1046,1094 @@ function goChecklist(){S.mode='checklist';S.clTab='opmaken';S.opmPane='vragen';S
 function closeInstPage(){
   switchTab(S.prevMainTab||'opmaken');
 }
+function resolveTopProfileMenu(el){
+  if(!el)return null;
+  if(el.classList&&el.classList.contains('tbRProfileMenu'))return el;
+  return el.closest?el.closest('.tbRProfileMenu'):null;
+}
+function clearTopProfileMenuCloseAnim(det){
+  if(!det||!det._closeAnimTimer)return;
+  clearTimeout(det._closeAnimTimer);
+  det._closeAnimTimer=null;
+}
+function closeTopProfileMenu(el){
+  var det=resolveTopProfileMenu(el);
+  if(!det)return;
+  clearTopProfileMenuAutoClose(det);
+  clearTopProfileMenuCloseAnim(det);
+  if(!det.open){
+    det.classList.remove('is-closing');
+    return;
+  }
+  det.classList.add('is-closing');
+  det._closeAnimTimer=setTimeout(function(){
+    det._closeAnimTimer=null;
+    det.classList.remove('is-closing');
+    det.open=false;
+  },180);
+}
+function closeAllTopProfileMenus(exceptEl){
+  var keep=resolveTopProfileMenu(exceptEl);
+  Array.prototype.slice.call(document.querySelectorAll('.tbRProfileMenu[open]')).forEach(function(det){
+    if(det!==keep){
+      closeTopProfileMenu(det);
+    }
+  });
+}
+function clearTopProfileMenuAutoClose(det){
+  if(!det||!det._autoCloseTimer)return;
+  clearTimeout(det._autoCloseTimer);
+  det._autoCloseTimer=null;
+}
+function scheduleTopProfileMenuAutoClose(det,delay){
+  if(!det)return;
+  clearTopProfileMenuAutoClose(det);
+  det._autoCloseTimer=setTimeout(function(){
+    det._autoCloseTimer=null;
+    closeTopProfileMenu(det);
+  },delay||2800);
+}
+function openTopProfileMenu(el){
+  var det=resolveTopProfileMenu(el);
+  if(!det)return;
+  clearTopProfileMenuCloseAnim(det);
+  det.classList.remove('is-closing');
+  if(!det.open)det.open=true;
+}
+function toggleTopProfileMenu(ev,el){
+  if(ev){
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+  var det=resolveTopProfileMenu(el);
+  if(!det)return false;
+  if(det.open&&!det.classList.contains('is-closing')){
+    closeTopProfileMenu(det);
+    return false;
+  }
+  closeAllTopProfileMenus(det);
+  openTopProfileMenu(det);
+  return false;
+}
+function adminSignOut(){
+  if(window._supa&&window._supa.auth){
+    window._supa.auth.signOut().then(function(){location.href='/login/';});
+  }
+}
+function openTopSettings(){
+  closeAllTopProfileMenus();
+  if(S.activeKind==='space'){
+    setOpmakenPane('space');
+    if(S.clTab!=='opmaken')switchTab('opmaken');
+    else renderEditor();
+    return;
+  }
+  switchTab('inst');
+}
+function topProfileName(){
+  return String(S._userName||S._email||'');
+}
+function topProfileAvatarUrl(){
+  return String(S._userAvatar||'').trim();
+}
+function topProfileInitials(){
+  var raw=topProfileName().trim();
+  if(!raw)return'U';
+  var parts=raw.split(/\s+/).filter(Boolean);
+  if(parts.length>1)return(parts[0].charAt(0)+parts[1].charAt(0)).toUpperCase();
+  var base=raw.split('@')[0]||raw;
+  return base.slice(0,2).toUpperCase();
+}
+function topProfileBadgeHtml(cls){
+  var name=esc(topProfileName()||'Account');
+  var avatar=topProfileAvatarUrl();
+  var initials=esc(topProfileInitials());
+  if(avatar){
+    var fbStyle='display:none;width:100%;height:100%';
+    return '<img class="'+cls+'" src="'+esc(avatar)+'" alt="'+name+'" onerror="this.style.display=\'none\';var fb=this.nextElementSibling;if(fb)fb.style.display=\'inline-flex\'">'
+      +'<span class="'+cls+' is-fallback" style="'+fbStyle+'" aria-hidden="true">'+initials+'</span>';
+  }
+  return '<span class="'+cls+' is-fallback" aria-hidden="true">'+initials+'</span>';
+}
+function buildTopProfileMenuHtml(){
+  var adminNight=adminNightMode();
+  var adminNightIcon=adminNight
+    ? '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.9 1.8a5.8 5.8 0 1 0 3.3 10.7 6.2 6.2 0 1 1-3.3-10.7Z"></path></svg>'
+    : '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.4"></circle><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"></path></svg>';
+  var settingsSvg='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+  var logoutSvg='<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
+  var name=esc(topProfileName()||'Account');
+  var email=esc(String(S._email||''));
+  return '<details class="tbRProfileMenu">'+
+    '<summary class="tbRProfileBtn" title="Account en instellingen" aria-label="Account en instellingen" onclick="return toggleTopProfileMenu(event,this)">'+
+      topProfileBadgeHtml('tbRProfileAvatar')+
+    '</summary>'+
+    '<div class="tbRMenuPop">'+
+      '<div class="tbRMenuAccount">'+
+        topProfileBadgeHtml('tbRMenuAvatar')+
+        '<div class="tbRMenuMeta">'+
+          '<div class="tbRMenuName">'+name+'</div>'+
+          '<div class="tbRMenuMail">'+email+'</div>'+
+        '</div>'+
+      '</div>'+
+      '<button class="tbRMenuItem'+(adminNight?' is-active':'')+'" type="button" onclick="toggleAdminNight();closeTopProfileMenu(this)" title="'+(adminNight?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'">'+adminNightIcon+'<span>Nachtmodus</span></button>'+
+      '<button class="tbRMenuItem" type="button" onclick="openTopSettings();closeTopProfileMenu(this)">'+settingsSvg+'<span>Instellingen</span></button>'+
+      '<button class="tbRMenuItem tbRMenuItem-danger" type="button" onclick="adminSignOut();closeTopProfileMenu(this)">'+logoutSvg+'<span>Uitloggen</span></button>'+
+    '</div>'+
+  '</details>';
+}
 
 // ═══════════════════════════════════════════
 // RENDER EDITOR
 // ═══════════════════════════════════════════
 function renderEditor(){
+  if(S.activeKind==='space'){ renderSpaceEditor(); return; }
   hideFloatingTextBar(true);
-  var adminNight=adminNightMode();
-  var adminNightIcon=adminNight
-    ? '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.9 1.8a5.8 5.8 0 1 0 3.3 10.7 6.2 6.2 0 1 1-3.3-10.7Z"></path></svg>'
-    : '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.4"></circle><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"></path></svg>';
-  var settingsBtn='<button class="btnIcon'+(S.clTab==='inst'?' is-active':'')+'" type="button" title="Instellingen" aria-label="Instellingen" onclick="switchTab(\'inst\')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>';
-  var backToStyleBtn=S.clTab==='inst'
-    ? '<button class="btnS clBackBtn" type="button" onclick="closeInstPage()" title="Terug naar Opmaak">← Opmaak</button>'
-    : '';
+  var profileMenu=buildTopProfileMenuHtml();
+  var saveStatus=buildTopSaveStatusHtml();
   var setTitle=esc((S.d&&S.d.meta&&S.d.meta.title)||S.activeId||'');
   var headTitle='<div class="clHeadTitle">'+
     '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="'+setTitle+'" placeholder="Setnaam" oninput="updateStyleSetName(this.value)">'+
     '<span class="clHeadThemeSep" id="editorThemeSep" style="display:none"></span>'+
     '<input id="editorThemeTitle" class="clHeadThemeInput" type="text" value="" placeholder="Thema" style="display:none" oninput="updateActiveHeaderThemeName(this.value)">'+
   '</div>';
-  var headActions='<div class="tbR">'+
-    '<button class="btnS" type="button" onclick="showLivePreview()" style="font-size:11.5px" title="Bekijk set in telefoonweergave">↗ Live</button>'+
-    '<button class="btnIcon" id="undoBtn" type="button" onclick="undoSetChanges()"'+(canUndo()?'':' disabled')+' title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
-    '<button class="btnIcon" id="redoBtn" type="button" onclick="redoSetChanges()"'+(canRedo()?'':' disabled')+' title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
-    '<button class="btnIcon'+(adminNight?' is-active':'')+'" type="button" onclick="toggleAdminNight()" title="'+(adminNight?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" aria-label="'+(adminNight?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'">'+adminNightIcon+'</button>'+
-    backToStyleBtn+
-    settingsBtn+
+  var headActions='<div class="tbRWrap"><div class="tbR">'+
+    '<div class="tbRActions">'+
+      '<button class="btnIcon" id="undoBtn" type="button" onclick="undoSetChanges()"'+(canUndo()?'':' disabled')+' title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
+      '<button class="btnIcon" id="redoBtn" type="button" onclick="redoSetChanges()"'+(canRedo()?'':' disabled')+' title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
+    '</div>'+
     '<button class="btnIconDanger" type="button" onclick="doDelete()" title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
-    '<button class="btn" id="saveBtn" onclick="saveSet()">Opslaan</button>'+
+    '<button class="btn tbRSaveBtn" id="saveBtn" onclick="saveSet()"><span>Opslaan</span></button>'+
+    profileMenu+
+  '</div>'+saveStatus+'</div>';
+  renderEditorShell(headTitle,headActions);
+}
+function renderSpaceEditor(){
+  hideFloatingTextBar(true);
+  var spaceName=esc((S.space&&S.space.name)||S.spaceSlug||'Home');
+  var profileMenu=buildTopProfileMenuHtml();
+  var saveStatus=buildTopSaveStatusHtml();
+  var headTitle='<div class="clHeadTitle">'+
+    '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="Home" readonly>'+
+    '<span class="clHeadThemeSep" id="editorThemeSep"></span>'+
+    '<input id="editorThemeTitle" class="clHeadThemeInput is-static" type="text" value="'+spaceName+'" readonly>'+
   '</div>';
-  g('mc').innerHTML='<div class="clHead">'+headTitle+headActions+'</div><div class="clBody" id="pw"></div>';
+  var headActions='<div class="tbRWrap"><div class="tbR">'+
+    '<div class="tbRActions">'+
+      '<button class="btnIcon" id="undoBtn" type="button" onclick="undoSetChanges()"'+(canUndo()?'':' disabled')+' title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
+      '<button class="btnIcon" id="redoBtn" type="button" onclick="redoSetChanges()"'+(canRedo()?'':' disabled')+' title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
+    '</div>'+
+    '<button class="btnIconDanger" type="button" onclick="toast(\'Nog niet actief in home-editor\',\'amber\')" title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
+    '<button class="btn tbRSaveBtn" id="saveSpaceBtn" type="button" onclick="saveSpaceSettings()"><span>Opslaan</span></button>'+
+    profileMenu+
+  '</div>'+saveStatus+'</div>';
+  renderEditorShell(headTitle,headActions);
+}
+function currentSpaceLayoutMode(){
+  var publicPage=currentSpacePublicPage();
+  return String(publicPage.layout||S.spaceLayoutMode||'hero-grid');
+}
+function currentSpacePublicPage(){
+  var settings=((S.space&&S.space.settings)||{});
+  return settings&&typeof settings.publicPage==='object'?settings.publicPage:{};
+}
+function currentHomeIsEnabled(){
+  var publicPage=currentSpacePublicPage();
+  return publicPage.enabled!==false;
+}
+function ensureSpacePublicPage(){
+  if(!S.space)S.space={};
+  S.space.settings=S.space.settings&&typeof S.space.settings==='object'?S.space.settings:{};
+  S.space.settings.publicPage=S.space.settings.publicPage&&typeof S.space.settings.publicPage==='object'
+    ? S.space.settings.publicPage
+    : {};
+  return S.space.settings.publicPage;
+}
+function touchSpaceSettings(){
+  S.dirty=true;
+  setTopSaveStatus('dirty','Wijzigingen…');
+  if(g('spaceSaveHint')){
+    g('spaceSaveHint').className='spaceSaveHint';
+    g('spaceSaveHint').textContent='Nog niet opgeslagen.';
+  }
+  refreshTopBarControls();
+}
+function setSpacePublicPageField(key,value){
+  var publicPage=ensureSpacePublicPage();
+  publicPage[key]=value;
+  touchSpaceSettings();
+  buildStijlPreserveBg(g('pw'));
+}
+function currentHomeSortMode(){
+  return String(currentSpacePublicPage().sortMode||'manual');
+}
+function setHomeSortMode(mode){
+  setSpacePublicPageField('sortMode',String(mode||'manual'));
+}
+function currentHomeHeroMode(){
+  return String(currentSpacePublicPage().heroMode||'auto');
+}
+function setHomeHeroMode(mode){
+  setSpacePublicPageField('heroMode',String(mode||'auto'));
+}
+function currentHomePlaceholderCount(){
+  var n=parseInt(currentSpacePublicPage().placeholderCount,10);
+  return isFinite(n)?Math.max(0,Math.min(8,n)):0;
+}
+function setHomePlaceholderCount(value){
+  var n=parseInt(value,10);
+  if(!isFinite(n))n=0;
+  setSpacePublicPageField('placeholderCount',Math.max(0,Math.min(8,n)));
+}
+function setSpaceLayoutMode(mode){
+  var publicPage=ensureSpacePublicPage();
+  publicPage.layout=mode||'hero-grid';
+  S.spaceLayoutMode=publicPage.layout;
+  touchSpaceSettings();
+  buildStijlPreserveBg(g('pw'));
+}
+function spaceInfoPages(){
+  var slides=((S.d&&S.d.intro&&S.d.intro.slides)||[]).slice();
+  if(!slides.length)return[{key:'cover',title:'Cover'}];
+  return slides.map(function(slide,idx){
+    return {
+      key: slide.key||('slide-'+idx),
+      title: slide.title||slide.label||('Pagina '+(idx+1))
+    };
+  });
+}
+function setSpaceInfoPage(key){
+  INFO_SLIDE_KEY=key||'cover';
+  buildStijlPreserveBg(g('pw'));
+}
+function spaceLayoutOptions(){
+  return [
+    {id:'grid',label:'Grid',thumb:'grid'},
+    {id:'list',label:'Onder elkaar',thumb:'list'},
+    {id:'hero-grid',label:'Uitgesproken',thumb:'hero'}
+  ];
+}
+function spacePreviewBackgroundDataUrl(width,height,isNight){
+  var W2=Math.max(80,Math.round(width||SPACE_PREVIEW_W));
+  var H2=Math.max(80,Math.round(height||SPACE_PREVIEW_H));
+  var canvas=document.createElement('canvas');
+  canvas.width=W2*2;
+  canvas.height=H2*2;
+  var ctx=canvas.getContext('2d');
+  if(!ctx)return '';
+  paintSharedPreviewBackground(ctx,canvas.width,canvas.height,{isNight:isNight,baseFill:previewMainIndexBaseFill(isNight)});
+  return canvas.toDataURL('image/png');
+}
+function spaceLayoutThumbCard(item,cls,idx){
+  var tones=['#6EA2B3','#AFC9D4','#B8D0D8','#C5D9DF'];
+  var tone=tones[idx%tones.length]||tones[0];
+  var inner='<div class="spaceLayoutMiniFallback is-uniform" style="--space-card-accent:'+esc(tone)+'"></div>';
+  return '<div class="spaceLayoutMiniCard'+(cls?' '+cls:'')+'">'+inner+'</div>';
+}
+function spaceLayoutThumbHtml(kind){
+  var items=spacePreviewSets();
+  var bg=spacePreviewBackgroundDataUrl(170,110,false);
+  var topbar='<div class="spaceLayoutThumbTopbar">'+
+    '<span class="spaceLayoutThumbLogo"></span>'+
+    '<span class="spaceLayoutThumbBrand"></span>'+
+    '<svg class="spaceLayoutThumbMenuSvg" viewBox="0 0 8 6" fill="none" aria-hidden="true">'+
+      '<path d="M0 .6h8M0 3h8M0 5.4h8" stroke="#9eb0b8" stroke-width="1.1" stroke-linecap="round"/>'+
+    '</svg>'+
+  '</div>';
+  var body='';
+  if(kind==='list'){
+    body='<div class="spaceLayoutMiniList">'+
+      '<div class="spaceLayoutMiniRow">'+spaceLayoutThumbCard(items[0],'is-list',0)+'</div>'+
+      '<div class="spaceLayoutMiniRow">'+spaceLayoutThumbCard(items[1],'is-list',1)+'</div>'+
+    '</div>';
+  }else if(kind==='hero'){
+    body='<div class="spaceLayoutMiniHeroWrap">'+
+      spaceLayoutThumbCard(items[0],'is-hero',0)+
+      '<div class="spaceLayoutMiniGrid compact">'+
+        spaceLayoutThumbCard(items[1],'',1)+
+        spaceLayoutThumbCard(items[2],'',2)+
+      '</div>'+
+    '</div>';
+  }else if(kind==='featured'){
+    body='<div class="spaceLayoutMiniFeatured">'+
+      spaceLayoutThumbCard(items[0],'is-featured',0)+
+      '<div class="spaceLayoutMiniSide">'+
+        spaceLayoutThumbCard(items[1],'is-side',1)+
+        spaceLayoutThumbCard(items[2],'is-side',2)+
+      '</div>'+
+    '</div>';
+  }else{
+    body='<div class="spaceLayoutMiniGrid">'+
+      spaceLayoutThumbCard(items[0],'',0)+
+      spaceLayoutThumbCard(items[1],'',1)+
+      spaceLayoutThumbCard(items[2],'',2)+
+      spaceLayoutThumbCard(items[3],'',3)+
+    '</div>';
+  }
+  return '<div class="spaceLayoutThumbDoc">'+
+    (bg?'<img class="spaceLayoutThumbBg" src="'+esc(bg)+'" alt="">':'')+
+    topbar+
+    body+
+  '</div>';
+}
+function spaceLayoutCardHtml(opt,selectedId){
+  var cls='stijlSlideCard'+(opt.id===selectedId?' sel':'');
+  return '<div class="'+cls+'" data-space-layout="'+esc(opt.id)+'" onclick="setSpaceLayoutMode(\''+esc(opt.id)+'\')">'+
+    '<div class="stijlSlideThumb">'+
+      spaceLayoutThumbHtml(opt.thumb)+
+    '</div>'+
+    '<div class="stijlSlideBody"><div class="stijlSlideName">'+esc(opt.label)+'</div></div>'+
+  '</div>';
+}
+function spaceLayoutStripHtml(currentId){
+  return '<div class="stijlSlideRail">'+spaceLayoutOptions().map(function(opt){
+    return spaceLayoutCardHtml(opt,currentId);
+  }).join('')+'</div>';
+}
+function spacePreviewBgMode(){
+  var settings=((S.space&&S.space.settings)||{});
+  var publicPage=(settings&&typeof settings.publicPage==='object')?settings.publicPage:{};
+  return String(publicPage.background||'zacht');
+}
+function spacePreviewText(str,fallback){
+  var out=String(str||'').trim();
+  return out||fallback||'';
+}
+function spacePreviewCountQuestions(bundle){
+  var questions=(bundle&&bundle.questions)||{};
+  return Object.keys(questions).reduce(function(total,key){
+    return total+(Array.isArray(questions[key])?questions[key].length:0);
+  },0);
+}
+function spacePreviewCountThemes(bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  return Array.isArray(meta.themes)?meta.themes.length:0;
+}
+function spacePreviewLeadTheme(bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  var themes=Array.isArray(meta.themes)?meta.themes:[];
+  var first=themes[0]||null;
+  return spacePreviewText(first&&(first.label||first.title),'Kaartenset');
+}
+function spacePreviewNormalizeText(value){
+  return String(value||'')
+    .replace(/[*_`>#-]+/g,' ')
+    .replace(/\[(.*?)\]\((.*?)\)/g,'$1')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+function spacePreviewTrimText(value){
+  var text=spacePreviewNormalizeText(value);
+  if(text.length<=160)return text;
+  return text.slice(0,157).trim()+'...';
+}
+function spacePreviewDescription(bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  var uitleg=(bundle&&bundle.uitleg)||{};
+  return spacePreviewTrimText(meta.description||meta.subtitle||meta.tagline||uitleg.cover||uitleg.intro||'Open deze set om de thema\'s en vragen te bekijken.');
+}
+function spacePreviewLeadQuestion(bundle){
+  var questions=(bundle&&bundle.questions)||{};
+  var keys=Object.keys(questions);
+  for(var i=0;i<keys.length;i++){
+    var arr=Array.isArray(questions[keys[i]])?questions[keys[i]]:[];
+    if(!arr.length)continue;
+    var q=arr[0];
+    var txt=spacePreviewText(q&&(q.front||q.text||q.question),'');
+    if(txt)return txt;
+  }
+  return '';
+}
+function spacePreviewSetBundle(set){
+  if(set&&set.id&&SC[set.id])return SC[set.id];
+  return (set&&set.bundle)||null;
+}
+function spacePreviewCoverTextBlocks(bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  var ui=(meta&&meta.ui&&typeof meta.ui==='object')?meta.ui:{};
+  var cssVars=meta.cssVars||{};
+  var baseFont=String(cssVars['--pk-font']||'IBM Plex Sans');
+  var baseColor=normalizeHexInput(cssVars['--pk-set-text'])||'#1a1a2e';
+  var list=Array.isArray(ui.coverTexts)?ui.coverTexts.slice(0,6).map(function(item,idx){
+    item=item&&typeof item==='object'?item:{};
+    return {
+      text:String(item.text||'').trim(),
+      x:isFinite(Number(item.x))?Number(item.x):50,
+      y:isFinite(Number(item.y))?Number(item.y):50,
+      size:Math.max(8,Math.min(48,parseInt(item.size,10)||(idx===0?18:12))),
+      align:(item.align==='center'||item.align==='right')?item.align:'left',
+      valign:(item.valign==='top'||item.valign==='bottom')?item.valign:'center',
+      weight:(item.weight==='medium'||item.weight==='semibold'||item.weight==='bold')?item.weight:'regular',
+      italic:!!item.italic,
+      underline:!!item.underline,
+      font:String(item.font||baseFont),
+      color:normalizeHexInput(item.color)||baseColor
+    };
+  }).filter(function(item){return !!item.text;}):[];
+  return list;
+}
+function spacePreviewShapeLayers(bundle,key){
+  var meta=(bundle&&bundle.meta)||{};
+  var ui=(meta&&meta.ui&&typeof meta.ui==='object')?meta.ui:{};
+  var cardShapes=(ui&&ui.cardShapes&&typeof ui.cardShapes==='object')?ui.cardShapes:{};
+  return Array.isArray(cardShapes[key])?cardShapes[key]:[];
+}
+function spacePreviewCoverTextSvg(block){
+  if(!block||!String(block.text||'').trim())return '';
+  var lines=String(block.text||'').split(/\r?\n/).map(function(line){return String(line||'').trim();}).filter(Boolean);
+  if(!lines.length)return '';
+  var fontSize=Math.max(3,Math.min(15,Number(block.size||12)*0.24));
+  var lineStep=fontSize*1.2;
+  var anchor=block.align==='center'?'middle':(block.align==='right'?'end':'start');
+  var baseline=block.valign==='top'?'hanging':(block.valign==='bottom'?'text-after-edge':'middle');
+  var weight=block.weight==='bold'?'700':block.weight==='semibold'?'600':block.weight==='medium'?'500':'400';
+  var centerY=Math.max(6,Math.min(94,Number(block.y)||50));
+  var startY=baseline==='middle'?(centerY-((lines.length-1)*lineStep)/2):centerY;
+  return '<text x="'+Math.max(6,Math.min(94,Number(block.x)||50))+'" y="'+startY.toFixed(2)+'" text-anchor="'+anchor+'" dominant-baseline="'+baseline+'" font-family="'+esc(block.font||'IBM Plex Sans')+'" font-size="'+fontSize.toFixed(2)+'" font-weight="'+weight+'" font-style="'+(block.italic?'italic':'normal')+'" text-decoration="'+(block.underline?'underline':'none')+'" fill="'+esc(block.color||'#1a1a2e')+'">'+
+    lines.map(function(line,idx){
+      return '<tspan x="'+Math.max(6,Math.min(94,Number(block.x)||50))+'"'+(idx?(' dy="'+lineStep.toFixed(2)+'"'):'')+'>'+esc(line)+'</tspan>';
+    }).join('')+
+  '</text>';
+}
+function spacePreviewSyntheticCoverSvg(bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  var cssVars=meta.cssVars||{};
+  var cardBg=cardBgForKey(meta,'cover')||cssVars['--pk-set-card']||cssVars['--pk-set-bg']||DEFAULT_CARD_SURFACE;
+  var coverShapes=spacePreviewShapeLayers(bundle,'cover').map(function(layer){
+    if(isTextLayerItem(layer))return '';
+    if(isGroupLayer(layer)){
+      var gx=Number(layer.x);if(!isFinite(gx))gx=50;
+      var gy=Number(layer.y);if(!isFinite(gy))gy=50;
+      var gs=Math.max(1,Number(layer.size)||42);
+      var gr=Number(layer.rotate)||0;
+      return (Array.isArray(layer.groupChildren)?layer.groupChildren:[]).map(function(child){
+        if(isTextLayerItem(child))return '';
+        var cx=Number(child.x);if(!isFinite(cx))cx=50;
+        var cy=Number(child.y);if(!isFinite(cy))cy=50;
+        var cs=Math.max(1,Number(child.size)||42);
+        var tx=gx+(cx-50)*gs/100;
+        var ty=gy+(cy-50)*gs/100;
+        var size=cs*gs/100;
+        var rot=gr+(Number(child.rotate)||0);
+        return '<g transform="translate('+tx.toFixed(2)+' '+ty.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-size/2).toFixed(2)+' '+(-size/2).toFixed(2)+') scale('+(size/100).toFixed(4)+')">'+shapeLayerRenderMarkup(child,'preview')+'</g>';
+      }).join('');
+    }
+    var size=Math.max(1,Number(layer.size)||42);
+    var x=Number(layer.x);if(!isFinite(x))x=50;
+    var y=Number(layer.y);if(!isFinite(y))y=50;
+    var rot=Number(layer.rotate)||0;
+    return '<g transform="translate('+x.toFixed(2)+' '+y.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-size/2).toFixed(2)+' '+(-size/2).toFixed(2)+') scale('+(size/100).toFixed(4)+')">'+shapeLayerRenderMarkup(layer,'preview')+'</g>';
+  }).join('');
+  var coverTexts=spacePreviewCoverTextBlocks(bundle).map(spacePreviewCoverTextSvg).join('');
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">'+
+    '<rect width="100" height="100" rx="7" fill="'+esc(cardBg)+'"/>'+
+    coverShapes+
+    coverTexts+
+  '</svg>';
+}
+function spacePreviewSetCoverDataUrl(set,bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  var coverMode=cardBuildModeForKey(meta,'cover');
+  if(coverMode!=='self'){
+    var coverHit=cachedCardAssetForFile(set.id,'voorkant.svg')||cachedCardAssetForFile(set.id,'kaart.svg');
+    if(coverHit&&coverHit.asset&&coverHit.asset.dataUrl)return coverHit.asset.dataUrl;
+  }
+  return svgDataUrlFromMarkup(spacePreviewSyntheticCoverSvg(bundle));
+}
+function previewThemeTintPalette(meta,key){
+  meta=meta||{};
+  var source=
+    normalizeHexInput(cardBgBaseForKey(meta,key))||
+    normalizeHexInput((((meta.cssVars||{})['--pk-set-card'])||''))||
+    normalizeHexInput((((meta.cssVars||{})['--pk-set-bg'])||''))||
+    normalizeHexInput((((meta.cssVars||{})['--pk-set-accent'])||''))||
+    '#A8E1DD';
+  var tealBase='#8FBFAF';
+  var paper='#FAFAF8';
+  var accent=mixHexAdmin(source,tealBase,0.72);
+  return {
+    source:source,
+    paper:paper,
+    accent:mixHexAdmin(accent,'#ffffff',0.18),
+    accentSoft:mixHexAdmin(accent,'#ffffff',0.42),
+    accentDeep:mixHexAdmin(accent,'#5e9ca5',0.18),
+    stroke:mixHexAdmin('#5e9ca5','#ffffff',0.12)
+  };
+}
+function spacePreviewTilePalette(meta,key){
+  return previewThemeTintPalette(meta,key);
+}
+function homeMainIndexBaseBg(meta){
+  meta=meta||{};
+  var cssVars=meta.cssVars||{};
+  var explicit=normalizeHexInput(cssVars['--setsBaseBg'])||normalizeHexInput(cssVars['--setsHeaderBg']);
+  if(explicit)return explicit;
+  return sharedPreviewBaseVar('--pk-main-index-bg','#F4F7F5');
+}
+function previewMainIndexBaseFill(isNight){
+  if(isNight)return sharedPreviewBaseVar('--pk-main-index-dark-bg','#18123c');
+  return homeMainIndexBaseBg((S.d&&S.d.meta)||{});
+}
+function previewCardsBaseFill(isNight){
+  if(isNight)return sharedPreviewBaseVar('--pk-cards-index-dark-bg','#1b1840');
+  var bg=bgCfg();
+  if(bg&&bg.autoTint===false)return '#F8FAFA';
+  var meta=(S.d&&S.d.meta)||{};
+  var cssVars=meta.cssVars||{};
+  return normalizeHexInput(cssVars['--cardsPageBg'])||sharedPreviewBaseVar('--pk-cards-index-bg','#FAFAF8');
+}
+function sharedPreviewBaseVar(name,fallback){
+  if(window.PK&&window.PK.previewBackground&&typeof window.PK.previewBackground.baseVar==='function'){
+    return window.PK.previewBackground.baseVar(name,fallback,document.documentElement);
+  }
+  try{
+    var value=getComputedStyle(document.documentElement).getPropertyValue(name)||'';
+    var hex=normalizeHexInput(value);
+    if(hex)return hex;
+  }catch(_e){}
+  return fallback;
+}
+var ADMIN_BG_SHAPE_WEIGHT={organic:1,circle:1,rounded:.95,oval:.9,pill:.9,triangle:.9,diamond:.82,star:.52,heart:.46,hexagon:.8,octagon:.78,cloud:.58,leaf:.62,drop:.62,arch:.7,spark:.56,burst:.42,grid:.35};
+var ADMIN_BG_SHAPE_GROUP={organic:'base',circle:'base',rounded:'base',oval:'base',pill:'base',triangle:'structural',diamond:'structural',hexagon:'structural',octagon:'structural',arch:'structural',cloud:'accent',leaf:'accent',drop:'accent',star:'accent',heart:'accent',spark:'accent',burst:'accent',grid:'structural'};
+function normalizeAdminBgShapeType(type){
+  var v=String(type||'').toLowerCase().trim();
+  if(!v)return '';
+  var map={blob:'organic',band:'rounded',bar:'rounded',column:'pill',side:'oval',hill:'arch',star4:'star',spark4:'spark',petal:'leaf',crescent:'organic',slope:'triangle',cornerwide:'rounded',corner:'rounded',shield:'rounded',parallelogram:'diamond',plus:'diamond',wave:'organic',arrow:'diamond'};
+  return map[v]||v;
+}
+function adminBgShapeWeight(type){
+  var key=normalizeAdminBgShapeType(type);
+  return Object.prototype.hasOwnProperty.call(ADMIN_BG_SHAPE_WEIGHT,key)?ADMIN_BG_SHAPE_WEIGHT[key]:0;
+}
+function adminBgShapeGroup(type){
+  var key=normalizeAdminBgShapeType(type);
+  return ADMIN_BG_SHAPE_GROUP[key]||'base';
+}
+function adminExpandWeightedBgShapes(shapeCount){
+  var entries=Object.keys(shapeCount||{}).map(function(key){
+    var normalized=normalizeAdminBgShapeType(key);
+    return {shape:normalized,count:shapeCount[key]||0,weight:adminBgShapeWeight(normalized),group:adminBgShapeGroup(normalized)};
+  }).filter(function(item){return !!item.shape&&item.weight>0&&item.count>0;});
+  entries.sort(function(a,b){return (b.count*b.weight)-(a.count*a.weight);});
+  var grouped={base:[],structural:[],accent:[]};
+  entries.forEach(function(item){(grouped[item.group]||grouped.base).push(item);});
+  var ordered=entries.map(function(item){return item.shape;}).filter(function(shape,idx,arr){return arr.indexOf(shape)===idx;});
+  if(!ordered.length)ordered=['organic'];
+  var totalSlots=24,expanded=[];
+  ordered.forEach(function(shape){expanded.push(shape);});
+  entries.forEach(function(item){
+    var factor=item.group==='accent'?2.6:(item.group==='structural'?3.1:3.6);
+    var repeats=Math.max(1,Math.min(7,Math.round(item.count*item.weight*factor)));
+    for(var i=0;i<repeats;i++)expanded.push(item.shape);
+  });
+  var basePool=grouped.base.map(function(item){return item.shape;});
+  var structuralPool=grouped.structural.map(function(item){return item.shape;});
+  while(expanded.length<totalSlots){
+    if(basePool.length)expanded.push(basePool[expanded.length%basePool.length]);
+    if(expanded.length>=totalSlots)break;
+    if(structuralPool.length)expanded.push(structuralPool[expanded.length%structuralPool.length]);
+    if(!basePool.length&&!structuralPool.length)expanded.push('organic');
+  }
+  expanded=expanded.slice(0,totalSlots);
+  if(!expanded.length)expanded=['organic'];
+  return {ordered:ordered,expanded:expanded};
+}
+function spacePreviewMutedShapeLayer(layer,palette,depth){
+  if(!layer||typeof layer!=='object')return layer;
+  if(isTextLayerItem(layer))return cloneJson(layer);
+  var level=Math.max(0,Number(depth)||0);
+  if(isGroupLayer(layer)){
+    var group=cloneJson(layer);
+    group.groupChildren=(Array.isArray(layer.groupChildren)?layer.groupChildren:[]).map(function(child){
+      return spacePreviewMutedShapeLayer(child,palette,level+1);
+    });
+    return group;
+  }
+  var next=cloneJson(layer);
+  var fillChoice=level%3===0?palette.accent:(level%3===1?palette.accentSoft:palette.accentDeep);
+  if(next.fill&&next.fill!=='transparent')next.fill=fillChoice;
+  if(next.stroke&&next.stroke!=='transparent')next.stroke=palette.stroke;
+  if(next.type==='imported'){
+    if(next.importedHasFill!==false)next.fill=fillChoice;
+    if(next.importedHasStroke!==false)next.stroke=palette.stroke;
+  }
+  return next;
+}
+function spacePreviewThemeImageDataUrl(set,bundle,key,file){
+  var meta=(bundle&&bundle.meta)||{};
+  var mode=cardBuildModeForKey(meta,key||'algemeen');
+  if(mode!=='self'&&file){
+    var hit=cachedCardAssetForFile(set.id,file);
+    if(hit&&hit.asset&&hit.asset.dataUrl)return hit.asset.dataUrl;
+  }
+  var palette=spacePreviewTilePalette(meta,key||'algemeen');
+  return svgDataUrlFromMarkup(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">'+
+      '<rect width="100" height="100" rx="7" fill="'+esc(palette.paper)+'"/>'+
+      spacePreviewShapeLayers(bundle,key||'algemeen').map(function(layer){
+        var muted=spacePreviewMutedShapeLayer(layer,palette,0);
+        if(isTextLayerItem(layer))return '';
+        if(isGroupLayer(muted)){
+          var gx=Number(muted.x);if(!isFinite(gx))gx=50;
+          var gy=Number(muted.y);if(!isFinite(gy))gy=50;
+          var gs=Math.max(1,Number(muted.size)||42);
+          var gr=Number(muted.rotate)||0;
+          return (Array.isArray(muted.groupChildren)?muted.groupChildren:[]).map(function(child){
+            if(isTextLayerItem(child))return '';
+            var cx=Number(child.x);if(!isFinite(cx))cx=50;
+            var cy=Number(child.y);if(!isFinite(cy))cy=50;
+            var cs=Math.max(1,Number(child.size)||42);
+            var tx=gx+(cx-50)*gs/100;
+            var ty=gy+(cy-50)*gs/100;
+            var size=cs*gs/100;
+            var rot=gr+(Number(child.rotate)||0);
+            return '<g transform="translate('+tx.toFixed(2)+' '+ty.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-size/2).toFixed(2)+' '+(-size/2).toFixed(2)+') scale('+(size/100).toFixed(4)+')">'+shapeLayerRenderMarkup(child,'preview')+'</g>';
+          }).join('');
+        }
+        var size=Math.max(1,Number(muted.size)||42);
+        var x=Number(muted.x);if(!isFinite(x))x=50;
+        var y=Number(muted.y);if(!isFinite(y))y=50;
+        var rot=Number(muted.rotate)||0;
+        return '<g transform="translate('+x.toFixed(2)+' '+y.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-size/2).toFixed(2)+' '+(-size/2).toFixed(2)+') scale('+(size/100).toFixed(4)+')">'+shapeLayerRenderMarkup(muted,'preview')+'</g>';
+      }).join('')+
+    '</svg>'
+  );
+}
+function spacePreviewThemeRecords(set){
+  var bundle=spacePreviewSetBundle(set);
+  var meta=(bundle&&bundle.meta)||{};
+  var questions=(bundle&&bundle.questions)||{};
+  var themes=Array.isArray(meta.themes)?meta.themes:[];
+  return themes.map(function(theme,idx){
+    var key=theme&&theme.key?theme.key:('thema-'+idx);
+    var file=theme&&theme.card?theme.card:(key+'.svg');
+    var list=Array.isArray(questions[key])?questions[key]:[];
+    var first=list[0]||{};
+    return {
+      key:key,
+      label:spacePreviewText((theme&&theme.label)||key,'Thema'),
+      thumb:spacePreviewThemeImageDataUrl(set,bundle,key,file),
+      img:spacePreviewThemeImageDataUrl(set,bundle,key,file),
+      frontText:spacePreviewText(first&&((first.voorkant||first.front||first.q||first.text||first.question)||''),''),
+      backText:spacePreviewText(first&&((first.achterkant||first.back)||''),'')
+    };
+  });
+}
+function spacePreviewPageData(){
+  return spacePreviewSets().filter(function(item){return item&&!item.placeholder;}).map(function(item){
+    var set=(S.sets||[]).find(function(candidate){return candidate&&candidate.id===item.id;})||null;
+    var bundle=spacePreviewSetBundle(set||{id:item.id,bundle:item.bundle||null});
+    return {
+      id:item.id||'',
+      title:item.title||'Kaartenset',
+      cover:item.coverDataUrl||'',
+      menuThumb:item.coverDataUrl||'',
+      infoText:spacePreviewInfoBodyText(),
+      themes:spacePreviewThemeRecords(set||{id:item.id,title:item.title,bundle:bundle})
+    };
+  });
+}
+function spacePreviewSets(){
+  var sets=(Array.isArray(S.sets)?S.sets:[]).slice();
+  var sortMode=currentHomeSortMode();
+  if(!sets.length){
+    return spacePreviewAppendPlaceholders([]);
+  }
+  if(sortMode==='alpha-asc'){
+    sets.sort(function(a,b){return String(a.title||'').localeCompare(String(b.title||''),'nl');});
+  }else if(sortMode==='alpha-desc'){
+    sets.sort(function(a,b){return String(b.title||'').localeCompare(String(a.title||''),'nl');});
+  }else if(sortMode==='public-first'){
+    sets.sort(function(a,b){
+      var ap=a.isPublic!==false?0:1;
+      var bp=b.isPublic!==false?0:1;
+      return ap-bp || String(a.title||'').localeCompare(String(b.title||''),'nl');
+    });
+  }
+  return spacePreviewAppendPlaceholders(sets.slice(0,6).map(function(set){
+    var bundle=spacePreviewSetBundle(set);
+    var meta=(bundle&&bundle.meta)||{};
+    var cssVars=meta.cssVars||{};
+    return {
+      id:set.id||'',
+      title:spacePreviewText(set.title||meta.title,'Kaartenset'),
+      theme:spacePreviewLeadTheme(bundle),
+      lead:spacePreviewLeadQuestion(bundle)||spacePreviewDescription(bundle),
+      themes:spacePreviewCountThemes(bundle),
+      questions:spacePreviewCountQuestions(bundle),
+      isPublic:set.isPublic!==false,
+      cardFormat:spacePreviewCardFormatLabel(meta.cardFormat),
+      cardBg:spacePreviewText(cardBgForKey(meta,'cover')||cssVars['--pk-set-card']||cssVars['--pk-set-bg'],''),
+      accent:spacePreviewText(cssVars['--pk-set-accent'],''),
+      coverDataUrl:spacePreviewSetCoverDataUrl(set,bundle)
+    };
+  }));
+}
+function spacePreviewAppendPlaceholders(items){
+  var list=(items||[]).slice();
+  var count=currentHomePlaceholderCount();
+  var palette=spacePreviewPalette();
+  for(var i=0;i<count&&list.length<8;i++){
+    list.push({
+      title:'',
+      theme:'',
+      lead:'',
+      themes:0,
+      questions:0,
+      isPublic:true,
+      cardFormat:'',
+      coverDataUrl:'',
+      placeholder:true,
+      placeholderColor:palette[(list.length+i)%palette.length]||'#E5EDF0'
+    });
+  }
+  return list;
+}
+function spacePreviewPalette(){
+  var cfg=bgCfg();
+  var palette=(cfg&&Array.isArray(cfg.palette)&&cfg.palette.length?cfg.palette:null)||['#9CCAB8','#D7E4F7','#F4EEF9','#F5D9DF','#FBE9D7','#E0E8C9'];
+  return palette.slice(0,6);
+}
+function spacePreviewCardFormatLabel(value){
+  var id=String(value||'').toLowerCase();
+  if(id==='portrait-63x88')return 'Speelkaart';
+  if(id==='square-88x88')return 'Vierkant';
+  if(id==='portrait-70x120')return 'Tarot';
+  return 'Standaard';
+}
+function spacePreviewResolveLayout(mode){
+  mode=String(mode||'grid').toLowerCase();
+  if(mode==='list')return 'list';
+  if(mode==='featured')return 'featured';
+  if(mode==='hero-grid')return 'hero-grid';
+  return 'grid';
+}
+function getPreviewIframe(){return document.querySelector('.spaceLiveFrame');}
+function reloadPreviewHome(){
+  var f=getPreviewIframe();
+  if(!f)return;
+  f.removeAttribute('src');
+  var doc=spaceSitePreviewDocumentHtml();
+  f.srcdoc=doc;
+}
+function openSpacePreviewCards(id){
+  if(!id)return;
+  SPACE_PREVIEW_CARDS_MODE=true;
+  SPACE_PREVIEW_CURRENT_SET_ID=id;
+  var f=getPreviewIframe();
+  if(!f)return;
+  f.src='/kaarten/index.html?set='+encodeURIComponent(id);
+}
+function closeSpacePreviewCards(){
+  SPACE_PREVIEW_CARDS_MODE=false;
+  SPACE_PREVIEW_CURRENT_SET_ID='';
+  reloadPreviewHome();
+}
+function previewNavBack(){
+  if(SPACE_PREVIEW_CARDS_MODE){
+    var data=spacePreviewPageData();
+    var idx=-1;for(var i=0;i<data.length;i++){if(data[i]&&data[i].id===SPACE_PREVIEW_CURRENT_SET_ID){idx=i;break;}}
+    if(idx>0){openSpacePreviewCards(data[idx-1].id);}else{closeSpacePreviewCards();}
+    return;
+  }
+  var f=getPreviewIframe();
+  if(!f||!f.contentWindow)return;
+  if(typeof f.contentWindow.previewGoBack==='function'){f.contentWindow.previewGoBack();}
+  else{reloadPreviewHome();}
+}
+function previewNavForward(){
+  if(SPACE_PREVIEW_CARDS_MODE){
+    var data=spacePreviewPageData();
+    var idx=-1;for(var i=0;i<data.length;i++){if(data[i]&&data[i].id===SPACE_PREVIEW_CURRENT_SET_ID){idx=i;break;}}
+    if(idx>=0&&idx<data.length-1){openSpacePreviewCards(data[idx+1].id);}
+    return;
+  }
+  var f=getPreviewIframe();
+  if(!f||!f.contentWindow)return;
+  if(typeof f.contentWindow.previewGoForward==='function')f.contentWindow.previewGoForward();
+}
+function previewNavHome(){
+  if(SPACE_PREVIEW_CARDS_MODE){closeSpacePreviewCards();return;}
+  var f=getPreviewIframe();
+  if(!f||!f.contentWindow)return;
+  if(typeof f.contentWindow.previewGoHome==='function'){f.contentWindow.previewGoHome();}
+  else{reloadPreviewHome();}
+}
+function spaceSitePreviewHtml(){
+  var doc=spaceSitePreviewDocumentHtml();
+  return '<div class="spaceLiveFrameScale" id="spaceLiveFrameScale">'+
+    '<iframe class="spaceLiveFrame" title="Ruimte-preview" loading="lazy" referrerpolicy="no-referrer" srcdoc="'+esc(doc)+'"></iframe>'+
+  '</div>';
+}
+function spacePreviewMenuSettings(){
+  var ui=((S.d&&S.d.meta&&S.d.meta.ui)||{});
+  return ui.menu&&typeof ui.menu==='object'?ui.menu:{showInfo:true,showShuffle:true,showAllSets:true};
+}
+function spacePreviewDocLayoutMode(){
+  var mode=spacePreviewResolveLayout(currentSpaceLayoutMode());
+  if(mode==='featured')return 'carousel';
+  if(mode==='list')return 'list-preview';
+  return mode;
+}
+function spacePreviewMenuToolsHtml(){
+  var menu=spacePreviewMenuSettings();
+  var contrastBtn='<button id="menuContrastToggle" class="menuMiniBtn" type="button" aria-label="Contrastmodus" aria-pressed="'+((previewNightMode()||adminNightMode())?'true':'false')+'"><svg class="gmIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18"></path><path d="M12 3v18"></path></svg></button>';
+  var infoBtn=menu.showInfo!==false
+    ?'<button id="menuInfoBtn" class="menuMiniBtn" type="button" aria-label="Informatie"><svg class="gmIcon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 10v7"></path><path d="M12 7h.01"></path></svg></button>'
+    :'';
+  var shuffleBtn=menu.showShuffle!==false
+    ?'<button id="menuShuffleToggle" class="menuMiniBtn" type="button" aria-label="Shuffle" aria-pressed="false"><svg class="gmIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3h5v5"></path><path d="M4 20l16-16"></path><path d="M4 4l8 8"></path><path d="M12 12l8 8"></path><path d="M21 16v5h-5"></path></svg></button>'
+    :'';
+  return '<div class="menuHeaderTools" aria-label="Acties">'+contrastBtn+infoBtn+shuffleBtn+'</div>';
+}
+function spacePreviewCardSurfaceHtml(item,idx,kind){
+  var palette=spacePreviewPalette();
+  var bg=(item&&item.cardBg?String(item.cardBg):'')||(palette[idx%palette.length]||'#CFE6D8');
+  var cover=item&&item.coverDataUrl?String(item.coverDataUrl):'';
+  if(cover){
+    return '<div class="spaceIndexCardSurface'+(kind==='hero'?' is-hero':'')+'" style="--space-card-bg:'+esc(bg)+'">'+
+      '<img class="spaceIndexCardImage" src="'+esc(cover)+'" alt="">'+
+    '</div>';
+  }
+  return '<div class="spaceIndexCardSurface'+(kind==='hero'?' is-hero':'')+'" style="--space-card-bg:'+esc(bg)+'"></div>';
+}
+function spacePreviewMenuItemHtml(item,idx){
+  return '<button class="menuItem" type="button" data-preview-order="'+idx+'">'+
+    '<span class="miLabel">'+esc(item.title||'Kaartenset')+'</span>'+
+    '<span class="miThumbRight"><span class="menuThumbCard">'+spacePreviewCardSurfaceHtml(item,idx,'menu')+'</span></span>'+
+  '</button>';
+}
+function publicMenuListHtml(items,renderItem){
+  return '<div class="menuList">'+items.map(function(item,idx){
+    return renderItem(item,idx);
+  }).join('')+'</div>';
+}
+function publicSetsMainHtml(heroHtml,gridHtml){
+  return window.PublicIndexShell.setsMainHtml({
+    heroHtml:heroHtml||'',
+    gridHtml:gridHtml||''
+  });
+}
+function publicSetsHeroHtml(heroItems){
+  return window.PublicIndexShell.setsHeroShellHtml({
+    carouselHtml:'<div id="setsCarousel" class="setsHeroCarousel" aria-label="Kaartenset carrousel">'+heroItems.map(function(item,idx){return spacePreviewHeroSlideHtml(item,idx);}).join('')+'</div>',
+    dotsHtml:'<div id="setsDots" class="setsDots" aria-hidden="true">'+heroItems.map(function(_,idx){return '<span class="setsDot'+(idx===0?' is-active':'')+'" data-preview-order="'+idx+'"></span>';}).join('')+'</div>'
+  });
+}
+function publicSetsGridHtml(gridItems){
+  return window.PublicIndexShell.setsGridShellHtml({
+    gridHtml:'<div id="setsGrid" class="setsGrid">'+gridItems.map(function(item,idx){return spacePreviewGridCardHtml(item,idx);}).join('')+'</div>'
+  });
+}
+function publicIndexShellHtml(opts){
+  opts=opts||{};
+  var mode=opts.mode||'grid';
+  var items=opts.items||[];
+  var menuItems=opts.menuItems||items;
+  var heroItems=opts.heroItems||[];
+  var gridItems=opts.gridItems||[];
+  return window.PublicIndexShell.indexShellHtml({
+    brandText:opts.brandText||'Uitgesproken',
+    iconSrc:'/assets/logo-icons/masters/master-transparent.svg',
+    topBarAriaLabel:'Menu',
+    menuHtml:spacePreviewThemeMenuHtml(menuItems),
+    infoSheetHtml:publicInfoSheetShellHtml({
+      title:opts.infoTitle||'Uitgesproken',
+      sub:opts.infoSub||'',
+      body:opts.infoBody||''
+    }),
+    mainHtml:publicSetsMainHtml(
+      (mode!=='grid'&&mode!=='list-preview')?publicSetsHeroHtml(heroItems):'',
+      publicSetsGridHtml(gridItems)
+    )
+  });
+}
+function spacePreviewThemeMenuHtml(items){
+  var menu=spacePreviewMenuSettings();
+  var realItems=(items||[]).filter(function(item){ return item && !item.placeholder; });
+  return window.PublicIndexShell.menuShellHtml({
+    title:'Kaartensets',
+    toolsHtml:spacePreviewMenuToolsHtml(),
+    listHtml:publicMenuListHtml(realItems.slice(0,4),spacePreviewMenuItemHtml),
+    showAllSets:menu.showAllSets
+  });
+}
+function spacePreviewHeroSlideHtml(item,idx){
+  var clickable=!(item&&item.placeholder);
+  return '<div class="setsHeroSlide"'+(clickable?' data-set-order="'+idx+'"':'')+'>'+
+    '<div class="setsHeroSlideInner">'+
+      '<a class="setsHeroCard" href="#">'+
+        '<div class="cardInner">'+spacePreviewCardSurfaceHtml(item,idx,'hero')+'</div>'+
+      '</a>'+
+    '</div>'+
+  '</div>';
+}
+function spacePreviewGridCardHtml(item,idx){
+  var clickable=!(item&&item.placeholder);
+  return '<a class="setGridCard" href="#" style="--card-i:'+idx+'"'+(clickable?' data-set-order="'+idx+'"':'')+'>'+
+    '<div class="cardInner">'+spacePreviewCardSurfaceHtml(item,idx,'grid')+'</div>'+
+  '</a>';
+}
+function spacePreviewInfoBodyText(){
+  if(!isInfoSlideEnabled((S.d&&S.d.meta)||{},'cover'))return '';
+  var slides=((S.d&&S.d.intro&&S.d.intro.slides)||[]);
+  var coverSlide=slides.find(function(sl){return sl&&(sl.key==='cover'||sl.source==='cover');})||slides[0]||null;
+  var raw=(coverSlide&&coverSlide.body)||((S.d&&S.d.uitleg&&S.d.uitleg.cover)||'');
+  return String(raw||'').trim();
+}
+function infoCoverFile(){
+  return S.activeKind==='space'?'info_cover.svg':'voorkant.svg';
+}
+function publicInfoSheetCoverHtml(title,sub){
+  return window.PublicIndexShell.infoSheetCoverHtml({
+    title:title,
+    sub:sub,
+    iconSrc:'/assets/logo-icons/masters/logo-ballon-gradient.svg'
+  });
+}
+function publicInfoSheetTextHtml(body){
+  return window.PublicIndexShell.infoSheetTextHtml({body:body||''});
+}
+function publicInfoSheetShellHtml(opts){
+  opts=opts||{};
+  return window.PublicIndexShell.infoSheetShellHtml({
+    title:opts.title||'Uitgesproken',
+    sub:opts.sub||'',
+    body:opts.body||'',
+    coverHtml:opts.coverHtml||publicInfoSheetCoverHtml(opts.title||'Uitgesproken',opts.sub||''),
+    textHtml:opts.textHtml||publicInfoSheetTextHtml(opts.body||'')
+  });
+}
+function publicPreviewBehaviorScript(){
+  return '(function(){'
+    +'var dataEl=document.getElementById("spacePreviewData");'
+    +'var previewData=[];'
+    +'try{previewData=JSON.parse(dataEl&&dataEl.textContent||"[]")||[];}catch(_e){previewData=[];}'
+    +'var pill=document.getElementById("themePill");'
+    +'var themePillText=document.getElementById("themePillText");'
+    +'var menuHeaderTitle=document.getElementById("menuHeaderTitle");'
+    +'var menu=document.getElementById("themeMenu");'
+    +'var overlay=document.getElementById("themeMenuOverlay");'
+    +'var menuList=document.getElementById("menuList");'
+    +'var allSetsBtn=document.getElementById("naarOverzicht");'
+    +'var contrastBtn=document.getElementById("menuContrastToggle");'
+    +'var infoBtn=document.getElementById("menuInfoBtn");'
+    +'var shuffleBtn=document.getElementById("menuShuffleToggle");'
+    +'var infoOverlay=document.getElementById("indexInfoOverlay");'
+    +'var infoSheet=document.getElementById("indexInfoSheet");'
+    +'var infoClose=document.getElementById("indexInfoClose");'
+    +'var infoText=document.getElementById("indexInfoSlideText");'
+    +'if(!pill||!menu||!overlay)return;'
+    +'var closeTimer=0;'
+    +'var autoCloseTimer=0;'
+    +'var shuffled=false;'
+    +'var currentSetId=(previewData[0]&&previewData[0].id)||"";'
+    +'function clearClose(){if(closeTimer){clearTimeout(closeTimer);closeTimer=0;}}'
+    +'function clearAutoClose(){if(autoCloseTimer){clearTimeout(autoCloseTimer);autoCloseTimer=0;}}'
+    +'function scheduleAutoClose(){clearAutoClose();if(menu.hidden)return;autoCloseTimer=setTimeout(function(){closeMenu();},5000);}'
+    +'function formatText(value){return String(value||"").split("&").join("&amp;").split("<").join("&lt;").split(">").join("&gt;").split(\'"\').join("&quot;").split("\\\'").join("&#39;").split("\\n").join("<br>");}'
+    +'function closeInfo(immediate){if(!infoSheet||!infoOverlay)return;infoSheet.classList.remove("open");infoOverlay.classList.remove("open");if(immediate){infoSheet.hidden=true;infoOverlay.hidden=true;return;}setTimeout(function(){infoSheet.hidden=true;infoOverlay.hidden=true;},220);}'
+    +'function openMenu(){clearClose();closeInfo(true);menu.hidden=false;overlay.hidden=false;menu.classList.remove("is-closing");overlay.style.pointerEvents="auto";pill.setAttribute("aria-expanded","true");scheduleAutoClose();}'
+    +'function finishClose(){clearAutoClose();menu.hidden=true;overlay.hidden=true;overlay.style.pointerEvents="none";menu.classList.remove("is-closing");pill.setAttribute("aria-expanded","false");}'
+    +'function closeMenu(){if(menu.hidden)return;clearClose();clearAutoClose();menu.classList.add("is-closing");overlay.style.pointerEvents="none";pill.setAttribute("aria-expanded","false");closeTimer=setTimeout(finishClose,220);}'
+    +'function toggleMenu(){(menu.hidden||menu.classList.contains("is-closing"))?openMenu():closeMenu();}'
+    +'function setContrast(on){document.documentElement.setAttribute("data-contrast",on?"dark":"light");if(contrastBtn)contrastBtn.setAttribute("aria-pressed",on?"true":"false");}'
+    +'function openInfo(){if(!infoSheet||!infoOverlay)return;infoSheet.hidden=false;infoOverlay.hidden=false;requestAnimationFrame(function(){infoSheet.classList.add("open");infoOverlay.classList.add("open");});closeMenu();}'
+    +'function renderGridMenu(){if(themePillText)themePillText.textContent="Kaartensets";if(menuHeaderTitle)menuHeaderTitle.textContent="Kaartensets";if(infoText)infoText.innerHTML=\'<p class="infoTextIntro">\'+formatText("'+esc(spacePreviewInfoBodyText())+'")+\'</p>\';if(!menuList)return;menuList.innerHTML=previewData.map(function(set,idx){return \'<button class="menuItem" type="button" data-set-id="\'+set.id+\'" data-preview-order="\'+idx+\'"><span class="miLabel">\'+formatText(set.title)+\'</span><span class="miThumbRight"><span class="menuThumbCard">\' + (set.menuThumb?\'<img src="\'+set.menuThumb+\'" alt="">\':\'\') + \'</span></span></button>\';}).join("");menuList.querySelectorAll(".menuItem").forEach(function(btn){btn.addEventListener("click",function(){var sid=btn.getAttribute("data-set-id")||"";if(sid)openSet(sid);});});}'
+    +'function openSet(id){if(!id)return;currentSetId=id;window.parent.postMessage({uitgesproken:1,type:"openSet",id:id},"*");closeMenu();}'
+    +'function openSetByOrder(order){var set=previewData[order]||null;if(set)openSet(set.id);}'
+    +'function bindGridLinks(){'
+    +'document.addEventListener("click",function(e){var t=e.target;if(!t||!t.closest)return;var el=t.closest("[data-set-order]");if(!el)return;e.preventDefault();e.stopImmediatePropagation();var order=parseInt(el.getAttribute("data-set-order"),10);openSetByOrder(order);},true);'
+    +'}'
+    +'function applyShuffle(on){shuffled=!!on;if(shuffleBtn)shuffleBtn.setAttribute("aria-pressed",shuffled?"true":"false");renderGridMenu();bindGridLinks();}'
+    +'pill.addEventListener("click",function(e){e.preventDefault();toggleMenu();});'
+    +'overlay.addEventListener("click",function(){closeMenu();});'
+    +'document.addEventListener("keydown",function(e){if(e.key==="Escape"){closeMenu();closeInfo();}});'
+    +'menu.addEventListener("click",function(e){e.stopPropagation();scheduleAutoClose();});'
+    +'menu.addEventListener("pointermove",function(){scheduleAutoClose();});'
+    +'menu.addEventListener("pointerenter",function(){clearAutoClose();});'
+    +'document.addEventListener("click",function(e){if(menu.hidden)return;if(e.target===pill||pill.contains(e.target))return;if(e.target===menu||menu.contains(e.target))return;closeMenu();});'
+    +'if(contrastBtn)contrastBtn.addEventListener("click",function(){setContrast(document.documentElement.getAttribute("data-contrast")!=="dark");});'
+    +'if(infoBtn)infoBtn.addEventListener("click",function(){openInfo();});'
+    +'if(infoOverlay)infoOverlay.addEventListener("click",function(){closeInfo();});'
+    +'if(infoClose)infoClose.addEventListener("click",function(){closeInfo();});'
+    +'if(shuffleBtn)shuffleBtn.addEventListener("click",function(){applyShuffle(!shuffled);});'
+    +'renderGridMenu();bindGridLinks();'
+    +'window.previewGoHome=function(){};'
+  +'})();';
+}
+function spaceSitePreviewDocumentHtml(){
+  var mode=spacePreviewDocLayoutMode();
+  var items=spacePreviewSets();
+  var realItems=items.filter(function(item){ return item && !item.placeholder; });
+  var heroItems=(mode==='carousel'?items.slice(0,Math.min(items.length,4)||1):items.slice(0,1));
+  var gridItems=(mode==='carousel'?[]:items.slice(0,6));
+  var bgLight=spacePreviewBackgroundDataUrl(SPACE_PREVIEW_W,SPACE_PREVIEW_H,false);
+  var bgDark=spacePreviewBackgroundDataUrl(SPACE_PREVIEW_W,SPACE_PREVIEW_H,true);
+  var previewScript=publicPreviewBehaviorScript();
+  var previewData=JSON.stringify(spacePreviewPageData());
+  var infoTitle='Uitgesproken';
+  var infoSub=spacePreviewText((S.space&&S.space.name)||'','');
+  var previewBody=publicIndexShellHtml({
+    mode:mode,
+    items:items,
+    menuItems:realItems,
+    heroItems:heroItems,
+    gridItems:gridItems,
+    brandText:'Uitgesproken',
+    infoTitle:infoTitle,
+    infoSub:infoSub,
+    infoBody:spacePreviewInfoBodyText()
+  });
+  return '<!doctype html><html lang="nl" data-contrast="'+(previewNightMode()||adminNightMode()?'dark':'light')+'"><head>'+
+    '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'+
+    '<base href="'+esc(location.origin||'/')+'/">'+
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'+
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'+
+    '<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">'+
+    '<link rel="stylesheet" href="/css/shell.css?v=4.0.72">'+
+    '<link rel="stylesheet" href="/css/sets.css?v=3.7.2.49">'+
+    '<link rel="stylesheet" href="/css/index.css?v=3.7.1.164">'+
+    '<link rel="stylesheet" href="/templates/page-background-tokens.css">'+
+    '<link rel="stylesheet" href="/templates/ui-base.css?v=3.7.1.16">'+
+    '<link rel="stylesheet" href="/templates/main-index.css?v=3.7.1.46">'+
+    '<link rel="stylesheet" href="/templates/cards-index.css?v=3.7.1.9">'+
+    '<script src="/js/shared-background-preview.js"><\/script>'+
+    '<script type="module" src="/js/components/autoBackground.js"><\/script>'+
+    '<style>'+
+      'html,body{margin:0;height:100%;overflow:auto}'+
+      'body{background:transparent !important}'+
+      (bgLight?'html{background:url('+bgLight+') top center/cover fixed no-repeat !important}':'')+
+      (bgDark?'html[data-contrast=dark]{background:url('+bgDark+') top center/cover fixed no-repeat !important}':'')+
+      'body.setsIndex{min-height:100dvh;--topBarInset:64px;--setsTopGap:12px;--setsHeroPadExtra:24px;--setsSectionStartPad:10px;--previewLayoutStartExtra:48px}'+
+      '.previewFrame{position:relative;min-height:100dvh}'+
+      'body.setsIndex[data-index-layout="list-preview"] .setsHero{display:none !important}'+
+      'body.setsIndex[data-index-layout="list-preview"] .setsGridSection{padding-top:calc(var(--setsTopOffset) + var(--setsSectionStartPad) + var(--previewLayoutStartExtra))}'+
+      'body.setsIndex[data-index-layout="list-preview"] .setsGrid{grid-template-columns:1fr !important}'+
+      'body.setsIndex[data-index-layout="grid"] .setsGridSection{padding-top:calc(var(--setsTopOffset) + var(--setsSectionStartPad) + var(--previewLayoutStartExtra)) !important}'+
+      '#indexBg{display:none !important}'+
+      '.setsHeroCarousel{overflow:hidden !important;touch-action:auto !important}'+
+      '.setsHeroSlide,.setsHeroCard,.setGridCard{cursor:pointer !important}'+
+      '.topBar{position:fixed !important;top:calc(env(safe-area-inset-top,0px) + var(--topBarInset,24px)) !important;left:16px !important;right:16px !important;z-index:100 !important}'+
+      '.setsIndexMain{position:relative !important;z-index:1 !important;padding-top:0 !important}'+
+      '.setsHero{padding-top:calc(var(--setsTopOffset) + var(--setsSectionStartPad) + var(--previewLayoutStartExtra)) !important}'+
+      '.spaceIndexCardSurface{position:relative;width:100%;height:100%;background:var(--space-card-bg,#CFE6D8);overflow:hidden}'+
+      '.spaceIndexCardSurface::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.03) 0%, rgba(0,0,0,.03) 100%)}'+
+      '.spaceIndexCardImage{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;object-position:top center;z-index:0}'+
+      '.setsHeroCard .spaceIndexCardSurface{border-radius:var(--setsHeroRadius)}'+
+      '.setGridCard .spaceIndexCardSurface{border-radius:var(--setsGridRadius)}'+
+      '.menuThumbCard .spaceIndexCardImage{object-position:center center}'+
+      'body.setsIndex #indexInfoClose.indexInfoClose.infoClose{display:inline-flex !important;visibility:visible !important}'+
+    '</style></head>'+
+    '<body data-page="grid" class="setsIndex previewFrame" data-brand-icon="1" data-index-layout="'+esc(mode)+'">'+
+      '<canvas id="indexBg" class="indexBg" aria-hidden="true"></canvas>'+
+      previewBody+
+      '<script id="spacePreviewData" type="application/json">'+esc(previewData)+'</script>'+
+      '<script>'+previewScript+'</script>'+
+    '</body></html>';
+}
+function renderEditorShell(headTitle,headActions,headCenter){
+  g('mc').innerHTML='<div class="clHead">'+headTitle+(headCenter?'<div class="clHeadCenter">'+headCenter+'</div>':'')+headActions+'</div><div class="clBody" id="pw"></div>';
   updateEditorHeaderTheme();
   renderClPanel();
   afterRender();
@@ -847,7 +2179,7 @@ function stepDone(id){
   if(id==='opmaken'){
     return cardsStepDoneForState(S.activeId,(S.d&&S.d.meta)||{}) &&
       (Object.values(S.d.questions||{}).some(function(a){return Array.isArray(a)&&a.length>0;})||!(S.d.meta&&S.d.meta.themes&&S.d.meta.themes.length)) &&
-      !!(S.d.uitleg&&S.d.uitleg.cover);
+      (isInfoSlideEnabled((S.d&&S.d.meta)||{},'cover')?!!(S.d.uitleg&&S.d.uitleg.cover):true);
   }
   return true;
 }
@@ -855,7 +2187,7 @@ function buildClWidget(){
   var items=[
     {id:'kaart',label:'Kaart',done:cardsStepDoneForState(S.activeId,(S.d&&S.d.meta)||{})},
     {id:'vragen',label:'Vragen',done:Object.values(S.d.questions||{}).some(function(a){return Array.isArray(a)&&a.length>0;})||!(S.d.meta&&S.d.meta.themes&&S.d.meta.themes.length)},
-    {id:'info',label:'Infosheet',done:!!(S.d.uitleg&&S.d.uitleg.cover)},
+    {id:'info',label:'Infopagina',done:(isInfoSlideEnabled((S.d&&S.d.meta)||{},'cover')?!!(S.d.uitleg&&S.d.uitleg.cover):true)},
     {id:'inst',label:'Instellingen',done:true}
   ];
   var n=items.filter(function(x){return x.done;}).length,pct=Math.round(n/items.length*100);
@@ -917,8 +2249,23 @@ function buildStijlPreserveBg(target){
   }
   scheduleBg();
 }
+function selectSpaceSet(id){
+  if(!id)return;
+  S.activeId=id;
+  S.activeKind='space';
+  renderSidebar();
+  renderSpaceEditor();
+}
+function normalizeSpaceQuestion(question){
+  if(question&&typeof question==='object')return question.voorkant||question.q||question.title||'';
+  return String(question||'');
+}
 function setOpmakenPane(pane){
-  S.opmPane=(pane==='info')?'info':'vragen';
+  var contentEl=document.querySelector('.content');
+  var keepScrollTop=contentEl?contentEl.scrollTop:0;
+  var keepScrollLeft=contentEl?contentEl.scrollLeft:0;
+  var isSpace=S.activeKind==='space';
+  S.opmPane=(pane==='info')?'info':(isSpace?'space':'vragen');
   var meta=S.d&&S.d.meta||{};
   if(S.opmPane==='vragen'){
     var qOpts=stylePreviewOptions(meta);
@@ -936,18 +2283,66 @@ function setOpmakenPane(pane){
     buildStijlPreserveBg(g('pw'));
     updateEditorHeaderTheme();
     setTimeout(loadCardPreviews,50);
+    if(contentEl){
+      requestAnimationFrame(function(){
+        contentEl.scrollTop=keepScrollTop;
+        contentEl.scrollLeft=keepScrollLeft;
+      });
+    }
   }
 }
 function opmakenPaneTabsHtml(active){
-  var panes=[
-    {id:'vragen', label:'Vragen',     desc:'Kaartinhoud'},
-    {id:'info',   label:'Infosheet',  desc:'Uitleg per thema'}
-  ];
+  var panes=S.activeKind==='space'
+    ? [
+        {id:'space', label:'Home', desc:'Jouw ruimte'},
+        {id:'info',  label:'Infopagina', desc:'Uitleg'}
+      ]
+    : [
+        {id:'vragen', label:'Vragen', desc:'Kaartinhoud'},
+        {id:'info',   label:'Infopagina', desc:'Uitleg per thema'}
+      ];
   return '<div class="paneModeSwitcher">'+panes.map(function(item){
     return '<button class="paneMode'+(active===item.id?' sel':'')+'" type="button" onclick="setOpmakenPane(\''+item.id+'\')">'
       +'<span class="paneModeLabel">'+esc(item.label)+'</span>'
       +'</button>';
   }).join('')+'</div>';
+}
+function buildSidePanelShell(opts){
+  opts=opts||{};
+  var panelClass='questionsPanel'+(opts.panelClass?' '+opts.panelClass:'');
+  var shellClass='questionsPanelShell'+(opts.shellClass?' '+opts.shellClass:'');
+  var beforeShellHtml=opts.beforeShellHtml||'';
+  var afterShellHtml=opts.afterShellHtml||'';
+  var contentHtml=opts.contentHtml||'';
+  var headerHtml='';
+  if(opts.metaHtml||opts.actionsHtml){
+    headerHtml=
+      '<div class="questionsPanelHead">'+
+        '<div class="questionsMeta">'+(opts.metaHtml||'')+'</div>'+
+        (opts.actionsHtml||'')+
+      '</div>';
+  }
+  if(opts.bodyClass){
+    contentHtml='<div class="'+opts.bodyClass+'">'+contentHtml+'</div>';
+  }
+  return '<div class="'+panelClass+'">'+
+    beforeShellHtml+
+    '<div class="'+shellClass+'">'+
+      headerHtml+
+      contentHtml+
+    '</div>'+
+    afterShellHtml+
+  '</div>';
+}
+function buildSidePanelEmpty(message){
+  return buildSidePanelShell({
+    contentHtml:'<div class="questionsEmptyState">'+message+'</div>'
+  });
+}
+function buildSpacePane(target){
+  target.innerHTML=buildSidePanelShell({
+    contentHtml:'<div class="spaceEditorEmpty">Instellingen voor jouw ruimte bouwen we hier straks samen rustig op.</div>'
+  });
 }
 function setInfoSlideFocus(idx){
   var slides=ensureIntroSlides();
@@ -965,6 +2360,25 @@ function deleteInfoCustomPage(key){
     var opts=infoSlideOptions(meta).filter(function(o){return !o.excluded;});
     INFO_SLIDE_KEY=(opts[0]||{}).key||'cover';
   }
+  buildStijlPreserveBg(g('pw'));
+}
+function isInfoSlideEnabled(meta,key){
+  var excluded=(meta&&meta.infoExcluded)||[];
+  return excluded.indexOf(key)<0;
+}
+function setInfoCoverEnabled(enabled){
+  var meta=S.d.meta=S.d.meta||{};
+  meta.infoExcluded=Array.isArray(meta.infoExcluded)?meta.infoExcluded:[];
+  if(enabled)meta.infoExcluded=meta.infoExcluded.filter(function(k){return k!=='cover';});
+  else if(meta.infoExcluded.indexOf('cover')<0)meta.infoExcluded.push('cover');
+  markDirty();
+  buildStijlPreserveBg(g('pw'));
+  updateEditorHeaderTheme();
+}
+function setInfoStandardCoverEnabled(enabled){
+  if(!S.d||!S.d.meta)return;
+  S.d.meta.infoCoverSkip=!enabled;
+  markDirty();
   buildStijlPreserveBg(g('pw'));
 }
 function updateInfoCustomPageLabel(key,val){
@@ -1097,21 +2511,33 @@ function syncInfoPreviewExtent(){
 }
 function buildInfoPane(target){
   var key=INFO_SLIDE_KEY||'cover';
-  var themes=S.d.meta.themes||[];
-  var infoPages=S.d.meta.infoPages||[];
+  var meta=S.d.meta||{};
+  var themes=meta.themes||[];
+  var infoPages=meta.infoPages||[];
   var u=S.d.uitleg||{};
+  var isSpace=S.activeKind==='space';
   var isCover=key==='cover';
+  var coverEnabled=isInfoSlideEnabled(meta,'cover');
+  var standardCoverEnabled=meta.infoCoverSkip!==true;
   var th=isCover?null:themes.find(function(t){return t.key===key;});
   var cp=(!isCover&&!th)?infoPages.find(function(p){return p.key===key;}):null;
   var label=isCover?'Cover':(th?esc(th.label||th.key):(cp?esc(cp.label||cp.key):''));
-  var emptyHint='<p class="infoFieldHint">Laat leeg als je geen infopagina voor je kaartenset wilt.</p>';
   var fieldHtml='';
+  var toggleHtml='';
   if(isCover){
-    fieldHtml=buildRichTextarea('u_cover',u.cover||'',9,'Omschrijf de set — doel, gebruik, context')+emptyHint;
+    toggleHtml='<div class="infoToggleStrip">'+
+      '<div class="togRow infoToggleMini"><div class="infoToggleMiniText"><label for="info_cover_enabled" title="Bepaal of deze cover in de infosheet wordt gebruikt.">Infopagina</label></div><label class="tog"><input type="checkbox" id="info_cover_enabled"'+(coverEnabled?' checked':'')+'><span class="togSl"></span></label></div>'+
+      (isSpace?'<div class="togRow infoToggleMini"><div class="infoToggleMiniText"><label for="info_standard_cover" title="Gebruik de automatische cover met logo en titel.">Standaard cover</label></div><label class="tog"><input type="checkbox" id="info_standard_cover"'+(standardCoverEnabled?' checked':'')+'><span class="togSl"></span></label></div>':'')+
+    '</div>';
+  }
+  if(isCover){
+    fieldHtml=(coverEnabled
+      ?buildRichTextarea('u_cover',u.cover||'',9,(isSpace?'Omschrijf de pagina':'Omschrijf de set')+' — doel, gebruik, context')
+      :'<p class="infoFieldHint">Deze infopagina staat uit.</p>');
   }else if(th){
-    fieldHtml=buildRichTextarea('u_'+th.key,u[th.key]||'',9,'Toelichting bij '+(th.label||th.key))+emptyHint;
+    fieldHtml=buildRichTextarea('u_'+th.key,u[th.key]||'',9,'Toelichting bij '+(th.label||th.key));
   }else if(cp){
-    fieldHtml=buildRichTextarea('u_'+cp.key,u[cp.key]||'',9,'Tekst voor '+(cp.label||cp.key))+emptyHint;
+    fieldHtml=buildRichTextarea('u_'+cp.key,u[cp.key]||'',9,'Tekst voor '+(cp.label||cp.key));
   }else{
     fieldHtml='<p class="emptyHint">Kies een kaart in de slider hierboven.</p>';
   }
@@ -1119,9 +2545,13 @@ function buildInfoPane(target){
     fieldHtml+='<hr class="sep">'+
       fR('Titel op kaart','text','info_mid_title',infoMidTitleText((th||cp).key),'Leeg laten om de titel te verbergen');
   }
-  target.innerHTML=
-    '<div class="infoTopBar">'+(label?'<span class="fLbl">'+label+'</span>':'')+'</div>'+
-    '<div class="infoContent">'+fieldHtml+'</div>';
+  target.innerHTML=buildSidePanelShell({
+    beforeShellHtml:toggleHtml,
+    shellClass:'infoPanelShell',
+    metaHtml:(label?'<div class="questionsTheme">'+label+'</div>':''),
+    bodyClass:'infoPanelBody',
+    contentHtml:'<div class="infoContent">'+fieldHtml+'</div>'
+  });
   function wireRichCe(el,storeKey){
     if(!el)return;
     el.oninput=function(){
@@ -1136,6 +2566,10 @@ function buildInfoPane(target){
   wireRichCe(g('u_cover'),'cover');
   themes.forEach(function(thm){wireRichCe(g('u_'+thm.key),thm.key);});
   infoPages.forEach(function(p){wireRichCe(g('u_'+p.key),p.key);});
+  var coverToggle=g('info_cover_enabled');
+  if(coverToggle)coverToggle.onchange=function(){setInfoCoverEnabled(!!this.checked);};
+  var standardCoverToggle=g('info_standard_cover');
+  if(standardCoverToggle)standardCoverToggle.onchange=function(){setInfoStandardCoverEnabled(!!this.checked);};
   if(th||cp){
     var mt=g('info_mid_title');
     if(mt)mt.oninput=function(){setInfoMidTitleText((th||cp).key,this.value);};
@@ -1178,7 +2612,7 @@ function buildBasis(target){
       '<button class="bs rd" data-action="delth" data-i="'+i+'">✕</button></div>';
   }).join('');
   target.innerHTML='<div class="panel">'+
-    fR('Naam van de set','text','b_title',m.title||'','bijv. "Samen onderzoeken"')+
+    fR('Naam van de set','text','b_title',m.title||'','bijv. "Teamreflectie"')+
     '<hr class="sep">'+
     '<div class="sLbl" style="margin-top:0">Thema\'s <span style="font-weight:400;color:var(--k3);font-size:11px">(optioneel)</span></div>'+
     '<p style="font-size:12px;color:var(--k2);margin-bottom:10px;line-height:1.6">Groepeer je kaarten in thema\'s. Heb je maar één kaartenset? Dan hoef je geen thema\'s toe te voegen.</p>'+
@@ -1188,7 +2622,17 @@ function buildBasis(target){
   g('b_title').oninput=function(){S.d.meta.title=this.value;markDirty();};
   initThDrag();
 }
-function setCV(k,v){S.d.meta.cssVars=S.d.meta.cssVars||{};S.d.meta.cssVars[k]=v;markDirty();}
+function setCV(k,v){
+  var meta=S.d.meta=S.d.meta||{};
+  var key=activeStyleEditKey();
+  var store=(key===BACK_STYLE_KEY)
+    ?backStyleCssVarStore(meta)
+    :(String(key||'').indexOf('__back_card__:')===0
+      ?backStyleCardEntry(meta,key).cssVars
+      :(meta.cssVars=meta.cssVars||{}));
+  store[k]=v;
+  markDirty();
+}
 
 // ═══════════════════════════════════════════
 // STEP: THEMA'S
@@ -1604,6 +3048,211 @@ function deleteGhFile(path,message){
   return api('/contents/'+path).then(function(info){
     return api('/contents/'+path,'DELETE',{message:message||('Remove: '+path),sha:info.sha});
   });
+}
+function infoCoverTitleInput(el){
+  var txt=(el.innerText||'').trim();
+  if(!S.d||!S.d.meta)return;
+  if(S.d.meta.infoCoverTitle!==txt){S.d.meta.infoCoverTitle=txt;markDirty();}
+}
+function infoCoverSubInput(el){
+  var txt=(el.innerText||'').trim();
+  if(!S.d||!S.d.meta)return;
+  if(S.d.meta.infoCoverSub!==txt){S.d.meta.infoCoverSub=txt;markDirty();}
+}
+function removeCoverLogo(){
+  if(!S.d||!S.d.meta)return;
+  S.d.meta.infoCoverLogoRemoved=true;
+  markDirty();
+  buildStijlPreserveBg(g('pw'));
+}
+function skipAutoInfoCover(){
+  if(!S.d||!S.d.meta)return;
+  if(!confirm('Automatische cover verwijderen? Je kunt daarna zelf een cover uploaden of opbouwen.'))return;
+  S.d.meta.infoCoverSkip=true;
+  markDirty();
+  buildStijlPreserveBg(g('pw'));
+}
+function removeCoverSub(){
+  if(!S.d||!S.d.meta)return;
+  S.d.meta.infoCoverSub='';
+  markDirty();
+  buildStijlPreserveBg(g('pw'));
+}
+function removeCoverTitle(){
+  if(!S.d||!S.d.meta)return;
+  S.d.meta.infoCoverTitle='';
+  markDirty();
+  buildStijlPreserveBg(g('pw'));
+}
+function selectCoverElem(type){
+  COVER_ELEM_SEL=(COVER_ELEM_SEL===type)?null:type;
+  setShapeSelection('cover',[],-1);
+  COVER_TEXT_SELECTED_MULTI=[];
+  COVER_TEXT_ACTIVE=-1;
+  COVER_TEXT_DESELECTED=true;
+  patchCoverElemTargets();
+  refreshShapeEditors('cover');
+}
+function removeSelectedCoverElem(){
+  if(COVER_ELEM_SEL==='logo')removeCoverLogo();
+  else if(COVER_ELEM_SEL==='title')removeCoverTitle();
+  else if(COVER_ELEM_SEL==='sub')removeCoverSub();
+  COVER_ELEM_SEL=null;
+  refreshShapeEditors('cover');
+}
+function infoCoverDefaultSubText(){
+  return spacePreviewText((S.space&&S.space.name)||((S.d&&S.d.meta&&S.d.meta.title)||''),'');
+}
+function infoCoverTitleText(){
+  var meta=(S.d&&S.d.meta)||{};
+  return String(meta.infoCoverTitle||'Uitgesproken');
+}
+function infoCoverSubText(){
+  var meta=(S.d&&S.d.meta)||{};
+  return String(meta.infoCoverSub!=null?meta.infoCoverSub:(infoCoverDefaultSubText()||''));
+}
+function coverElemStore(){
+  if(!S.d)S.d={};
+  var meta=S.d.meta=S.d.meta||{};
+  meta.ui=meta.ui||{};
+  meta.ui.infoCoverElems=meta.ui.infoCoverElems||{};
+  return meta.ui.infoCoverElems;
+}
+function coverElemDefaultLayout(type){
+  if(type==='logo')return{x:50,y:34,size:22};
+  if(type==='title')return{x:50,y:63};
+  if(type==='sub')return{x:50,y:74};
+  return{x:50,y:50};
+}
+function getCoverElemLayout(type){
+  var base=coverElemDefaultLayout(type);
+  var raw=coverElemStore()[type]||{};
+  var x=Number(raw.x); if(!isFinite(x))x=base.x;
+  var y=Number(raw.y); if(!isFinite(y))y=base.y;
+  var out={x:Math.max(8,Math.min(92,Math.round(x))),y:Math.max(8,Math.min(92,Math.round(y)))};
+  if(typeof base.size==='number'){
+    var size=Number(raw.size); if(!isFinite(size))size=base.size;
+    out.size=Math.max(12,Math.min(42,Math.round(size)));
+  }
+  return out;
+}
+function getCoverElemThumbLayout(type){
+  var layout=getCoverElemLayout(type);
+  if(type==='logo'&&typeof layout.size==='number'){
+    var size=Math.max(12,Math.min(28,Number(layout.size)||22));
+    var half=size/2;
+    layout.size=size;
+    layout.x=Math.max(half+4,Math.min(96-half,layout.x));
+    layout.y=Math.max(half+6,Math.min(94-half,layout.y));
+  }else{
+    layout.x=Math.max(12,Math.min(88,layout.x));
+    layout.y=Math.max(12,Math.min(88,layout.y));
+  }
+  return layout;
+}
+function setCoverElemSelection(type){
+  COVER_ELEM_SEL=type||null;
+  setShapeSelection('cover',[],-1);
+  COVER_TEXT_SELECTED_MULTI=[];
+  COVER_TEXT_ACTIVE=-1;
+  COVER_TEXT_DESELECTED=true;
+  patchCoverElemTargets();
+  refreshShapeEditors('cover');
+}
+function patchCoverElemTargets(){
+  ['logo','title','sub'].forEach(function(type){
+    var node=coverEditorQuery('.adminInfoCoverElem[data-cover-elem="'+type+'"]');
+    if(!node)return;
+    var layout=getCoverElemLayout(type);
+    node.classList.toggle('is-selected',COVER_ELEM_SEL===type);
+    node.style.left=layout.x+'%';
+    node.style.top=layout.y+'%';
+    if(type==='logo'){
+      node.style.width=layout.size+'%';
+      node.style.height=layout.size+'%';
+    }
+  });
+}
+var COVER_ELEM_DRAG=null;
+var COVER_ELEM_EDITING=null;
+function updateCoverElemPosition(type,x,y,silent){
+  var store=coverElemStore();
+  var item=store[type]=store[type]||{};
+  item.x=Math.max(8,Math.min(92,Math.round(Number(x)||50)));
+  item.y=Math.max(8,Math.min(92,Math.round(Number(y)||50)));
+  markDirty();
+  patchCoverElemTargets();
+  if(!silent)refreshShapeEditors('cover');
+}
+function dragCoverElemTo(clientX,clientY){
+  if(!COVER_ELEM_DRAG||!COVER_ELEM_DRAG.hostEl)return;
+  var rect=COVER_ELEM_DRAG.hostEl.getBoundingClientRect();
+  if(!rect.width||!rect.height)return;
+  var rawX=((clientX-(COVER_ELEM_DRAG.offsetX||0))-rect.left)/rect.width*100;
+  var rawY=((clientY-(COVER_ELEM_DRAG.offsetY||0))-rect.top)/rect.height*100;
+  COVER_ELEM_DRAG.moved=true;
+  updateCoverElemPosition(COVER_ELEM_DRAG.type,rawX,rawY,true);
+}
+function startCoverElemDrag(ev,type){
+  var node=ev.currentTarget||ev.target.closest('.adminInfoCoverElem[data-cover-elem]');
+  if(!node)return;
+  if(COVER_ELEM_EDITING===type||node.classList.contains('is-editing'))return;
+  if(type!=='logo'&&(ev.detail||0)>1)return;
+  if(ev&&ev.button===2){
+    setCoverElemSelection(type);
+    ev.preventDefault();
+    ev.stopPropagation();
+    return;
+  }
+  if(ev&&ev.button!==0)return;
+  setCoverElemSelection(type);
+  var host=node.closest('.adminInfoCardFill.is-space-default');
+  if(!host)return;
+  var rect=host.getBoundingClientRect();
+  var layout=getCoverElemLayout(type);
+  var px=rect.left+(layout.x/100)*rect.width;
+  var py=rect.top+(layout.y/100)*rect.height;
+  COVER_ELEM_DRAG={type:type,hostEl:host,elemEl:node,offsetX:ev.clientX-px,offsetY:ev.clientY-py,moved:false};
+  node.classList.add('dragging');
+  ev.preventDefault();
+  ev.stopPropagation();
+}
+function startCoverElemInlineEdit(ev,type){
+  if(type==='logo')return false;
+  if(ev){
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+  setCoverElemSelection(type);
+  var node=coverEditorQuery('.adminInfoCoverElem[data-cover-elem="'+type+'"]');
+  if(!node)return false;
+  var text=node.querySelector(type==='title'?'.adminInfoBrandTitle':'.adminInfoBrandSub');
+  if(!text)return false;
+  node.classList.add('is-editing');
+  text.setAttribute('contenteditable','true');
+  text.spellcheck=false;
+  COVER_ELEM_EDITING=type;
+  try{
+    text.focus();
+    var range=document.createRange();
+    range.selectNodeContents(text);
+    range.collapse(false);
+    var sel=window.getSelection();
+    if(sel){sel.removeAllRanges();sel.addRange(range);}
+  }catch(_e){}
+  return false;
+}
+function finishCoverElemInlineEdit(type,el){
+  var node=(el&&el.closest)?el.closest('.adminInfoCoverElem'):coverEditorQuery('.adminInfoCoverElem[data-cover-elem="'+type+'"]');
+  var text=el||(node&&node.querySelector(type==='title'?'.adminInfoBrandTitle':'.adminInfoBrandSub'));
+  if(text)text.setAttribute('contenteditable','false');
+  if(node)node.classList.remove('is-editing');
+  if(COVER_ELEM_EDITING===type)COVER_ELEM_EDITING=null;
+  if(S.clTab==='opmaken')buildStijlPreserveBg(g('pw'));
+  else{
+    patchCoverElemTargets();
+    refreshShapeEditors('cover');
+  }
 }
 function toggleThumbAdv(){
   S.thumbsOpen=!S.thumbsOpen;
@@ -2214,6 +3863,128 @@ function uploadAndLink(input,ti,folder){
 // ═══════════════════════════════════════════
 // STEP: VRAGEN
 // ═══════════════════════════════════════════
+var TIP_CURRENT_PANE='vragen';
+var TIP_HOVER_TIMER=null;
+var TIP_HOVERS_WIRED=false;
+function getTipBlock(){return document.getElementById('globalTipBlock');}
+function initTipHovers(){
+  if(TIP_HOVERS_WIRED)return;
+  TIP_HOVERS_WIRED=true;
+  document.addEventListener('mouseover',function(e){
+    var tb=getTipBlock();
+    // Entering the tip block → cancel any pending reset, keep current tip
+    if(tb&&(e.target===tb||tb.contains(e.target))){
+      if(TIP_HOVER_TIMER){clearTimeout(TIP_HOVER_TIMER);TIP_HOVER_TIMER=null;}
+      return;
+    }
+    var el=e.target&&e.target.closest?e.target.closest('[data-tip]'):null;
+    if(!el)return;
+    var id=el.dataset.tip;
+    if(!id||!TIP_TIPS[id])return;
+    if(TIP_HOVER_TIMER){clearTimeout(TIP_HOVER_TIMER);TIP_HOVER_TIMER=null;}
+    renderGlobalTip(id,true);
+  });
+  document.addEventListener('mouseout',function(e){
+    var el=e.target&&e.target.closest?e.target.closest('[data-tip]'):null;
+    if(!el)return;
+    var rel=e.relatedTarget;
+    if(rel&&el.contains(rel))return; // still inside zone
+    // Moving to the tip block → don't reset
+    var tb=getTipBlock();
+    if(tb&&rel&&(rel===tb||tb.contains(rel)))return;
+    if(TIP_HOVER_TIMER)clearTimeout(TIP_HOVER_TIMER);
+    TIP_HOVER_TIMER=setTimeout(function(){
+      renderGlobalTip(TIP_CURRENT_PANE,true);
+      TIP_HOVER_TIMER=null;
+    },120);
+  });
+}
+var TIP_TIPS={
+  vragen:[
+    'Stel open vragen die uitnodigen tot gesprek. Vermijd ja/nee-vragen — hoe opener, hoe rijker de reacties.',
+    'Groepeer vragen per thema voor meer structuur. Deelnemers kunnen zo gerichter een kaart kiezen.',
+    'Kort is krachtig — één heldere zin nodigt meer uit dan een lange omschrijving.'
+  ],
+  info:[
+    'De infopagina verschijnt vóór de kaarten. Gebruik hem om context te geven of spelregels uit te leggen.',
+    'Voeg per thema een korte toelichting toe — dat helpt deelnemers om de juiste kaart te kiezen.',
+    'Houd de tekst beknopt: twee à drie zinnen per thema is genoeg om richting te geven.'
+  ],
+  space:[
+    'De homepage toont al je sets op één plek. Kies een lay-out die past bij jouw presentatiestijl.',
+    'Zet je meest gebruikte sets bovenaan — je kunt ze eenvoudig herschikken via slepen in de zijbalk.',
+    'Een publieke set is zichtbaar voor iedereen met de link. Privé sets zijn alleen zichtbaar in het dashboard.'
+  ],
+  vormen:[
+    'Kies vormen die passen bij de sfeer van je set. Minder is meer — twee of drie vormen geven al karakter.',
+    'Combineer een grote achtergrondvorm met kleinere accenten voor diepte en variatie op elke kaart.'
+  ],
+  achtergrond:[
+    'De achtergrond volgt automatisch de kleuren van je vormen. Zet de intensiteit lager voor een subtielere look.',
+    'Een effen kleur als achtergrond werkt goed voor sets waarbij de tekst centraal staat.'
+  ],
+  tekst:[
+    'Gebruik lettergrootte en gewicht om hiërarchie aan te brengen. Een grote, vette vraag trekt meteen de aandacht.',
+    'Kies een lettertype dat past bij de toon van je set — speels, zakelijk of warm en persoonlijk.'
+  ],
+  kleur:[
+    'De kaartkleur bepaalt de sfeer van je set. Kies kleuren die bij je merk of thema passen.',
+    'Combineer een donkerdere kaartkleur met lichte vormen voor een rustig, stijlvol contrast.'
+  ]
+};
+var TIP_INDEX={};
+function tipBlockHtml(id){
+  try{if(localStorage.getItem('tip_dismissed_'+id)==='1')return'';}catch(e){}
+  var tips=TIP_TIPS[id];
+  if(!Array.isArray(tips)||!tips.length)return'';
+  var idx=TIP_INDEX[id]||0;
+  if(idx>=tips.length)idx=0;
+  TIP_INDEX[id]=idx;
+  var total=tips.length;
+  var tekst=tips[idx];
+  var tipIcon='<svg class="tipBlockSvgIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21h6"/><path d="M9 18h6"/><path d="M9 15c0-1-.4-1.9-1.2-2.6a6 6 0 1 1 8.4 0C15.4 13.1 15 14 15 15H9z"/></svg>';
+  var closeIcon='<svg viewBox="0 0 10 10"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>';
+  var navHtml='';
+  if(total>1){
+    var prevSvg='<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6.5,1.5 3,5 6.5,8.5"/></svg>';
+    var nextSvg='<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3.5,1.5 7,5 3.5,8.5"/></svg>';
+    navHtml='<div class="tipBlockNav">'+
+      '<button class="tipNavBtn" type="button" onclick="tipNav(\''+esc(id)+'\',-1)" title="Vorige tip"'+(idx===0?' disabled':'')+'>'+prevSvg+'</button>'+
+      '<span class="tipNavCount">'+(idx+1)+' / '+total+'</span>'+
+      '<button class="tipNavBtn" type="button" onclick="tipNav(\''+esc(id)+'\',1)" title="Volgende tip"'+(idx===total-1?' disabled':'')+'>'+nextSvg+'</button>'+
+    '</div>';
+  }
+  return'<div class="tipBlock" id="tipBlock_'+esc(id)+'">'+
+    '<div class="tipBlockHead">'+
+      '<span class="tipBlockIcon">'+tipIcon+'</span>'+
+      '<span class="tipBlockLabel">Tip</span>'+
+      navHtml+
+      '<button class="tipBlockClose" type="button" onclick="dismissTip(\''+esc(id)+'\')" title="Sluiten">'+closeIcon+'</button>'+
+    '</div>'+
+    '<div class="tipBlockText">'+esc(tekst)+'</div>'+
+  '</div>';
+}
+function tipNav(id,dir){
+  var tips=TIP_TIPS[id];
+  if(!Array.isArray(tips)||tips.length<=1)return;
+  var idx=(TIP_INDEX[id]||0)+dir;
+  if(idx<0)idx=tips.length-1;
+  if(idx>=tips.length)idx=0;
+  TIP_INDEX[id]=idx;
+  renderGlobalTip(id);
+}
+function dismissTip(id){
+  try{localStorage.setItem('tip_dismissed_'+id,'1');}catch(e){}
+  var el=document.getElementById('tipBlock_'+id);
+  if(el)el.classList.add('dismissed');
+}
+function renderGlobalTip(paneId,isHover){
+  var el=document.getElementById('globalTipBlock');
+  if(!el)return;
+  if(!isHover)TIP_CURRENT_PANE=paneId||'vragen';
+  el.innerHTML=tipBlockHtml(paneId||TIP_CURRENT_PANE);
+}
+
 function buildVragen(target,opts){
   opts=opts||{};
   var filterKey=opts.filterKey||'';
@@ -2228,11 +3999,11 @@ function buildVragen(target,opts){
     // No hint needed — default group behaviour is self-explanatory
   }
   if(meta.isCover&&meta.hasThemes){
-    target.innerHTML='<div class="questionsPanel"><div class="questionsEmptyState">Kies een thema in de slider om de bijbehorende vragen te bewerken.</div></div>';
+    target.innerHTML=buildSidePanelEmpty('Kies een thema in de slider om de bijbehorende vragen te bewerken.');
     return;
   }
   if(!theme){
-    target.innerHTML='<div class="questionsPanel"><div class="questionsEmptyState">Geen vragen gevonden voor deze selectie.</div></div>';
+    target.innerHTML=buildSidePanelEmpty('Geen vragen gevonden voor deze selectie.');
     return;
   }
   var key=theme.key;
@@ -2240,38 +4011,49 @@ function buildVragen(target,opts){
   var selectedIdx=ensureQuestionSelection(key);
   var selected=qs[selectedIdx]||null;
   var isBackOpen=!!QUESTION_EDITOR_BACK_OPEN[key];
-  html+='<div class="questionsPanel">';
   var showBacks=!!QUESTION_BACKS_EDITOR_OPEN[key];
   var iconBulk='<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5v10"/><path d="M8.5 9 12 5.5 15.5 9"/><path d="M7 18.5h10"/></svg>';
-  var iconBacks='<svg class="flipIconStd" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6.5h6a4.75 4.75 0 0 1 0 9.5H6.75"/><path d="M9 4 5.25 6.75 9 9.5"/></svg>';
+  var iconBacks='<span style="font-size:14px;line-height:1;display:block">↺</span>';
   var iconAdd='<svg viewBox="0 0 16 16"><path d="M8 2.5v11M2.5 8h11"/></svg>';
   var themeIdxQ=(S.d.meta.themes||[]).map(function(t){return t.key;}).indexOf(theme.key);
   var themeNameHtml=(themeIdxQ>=0&&theme.key!=='algemeen')
     ?'<input class="questionsTheme questionsThemeInput" type="text" value="'+esc(theme.label||theme.key)+'" placeholder="Naam van het thema" oninput="updateStyleThemeName('+themeIdxQ+',this.value)">'
     :'<div class="questionsTheme">'+esc(theme.label||theme.key)+'</div>';
-  html+='<div class="questionsPanelShell">'+
-    '<div class="questionsPanelHead">'+
-      '<div class="questionsMeta">'+themeNameHtml+'<div class="questionsCount">'+qs.length+' '+(qs.length===1?'vraag':'vragen')+'</div></div>'+
-      '<div class="questionsHeadActions">'+
-        '<button class="qHeadBtn" type="button" onclick="showBulkImport(\''+esc(key)+'\')" title="Vragen in bulk importeren" aria-label="Vragen in bulk importeren">'+iconBulk+'</button>'+
-        '<button class="qHeadBtn'+(showBacks?' sel':'')+'" type="button" onclick="toggleBacksEditor(\''+esc(key)+'\')" title="Achterkanten tonen/verbergen">'+iconBacks+'</button>'+
-        '<button class="qHeadBtn qHeadBtnAdd" type="button" onclick="addQ(\''+esc(key)+'\')" title="Vraag toevoegen">'+iconAdd+'</button>'+
+  var questionsHeaderActions=
+    '<div class="questionsHeadActions">'+
+      '<button class="qHeadBtn qHeadBtnSecondary'+(showBacks?' sel':'')+'" type="button" onclick="toggleBacksEditor(\''+esc(key)+'\')" title="'+(showBacks?'Verberg achterkanttekst':'Toon achterkanttekst')+'" aria-label="'+(showBacks?'Verberg achterkanttekst':'Toon achterkanttekst')+'">'+iconBacks+'</button>'+
+      '<div class="questionsHeadActionsGroup">'+
+        '<button class="qHeadBtn qHeadBtnPrimary" type="button" onclick="showBulkImport(\''+esc(key)+'\')" title="Meerdere vragen importeren" aria-label="Meerdere vragen importeren">'+iconBulk+'</button>'+
+        '<div class="questionsHeadActionsDivider" aria-hidden="true"></div>'+
+        '<button class="qHeadBtn qHeadBtnPrimary qHeadBtnAdd" type="button" onclick="addQ(\''+esc(key)+'\')" title="Vraag toevoegen">'+iconAdd+'</button>'+
       '</div>'+
-    '</div>'+
-    '<div class="questionListShell">';
+    '</div>';
+  var questionListHtml='<div class="questionListShell">';
   html+='<div class="questionList">';
   if(!qs.length){
-    html+='<div class="questionListEmpty">Nog geen vragen. Voeg er eentje toe of gebruik bulk.</div>';
+    html+='<div class="questionListEmpty">'+
+      '<strong>Nog geen vragen.</strong>'+
+      '<div class="qListEmptyHint">Voeg er eentje toe of importeer meerdere tegelijk.</div>'+
+      '<button class="qListEmptyBtn" type="button" onclick="addQ(\''+esc(key)+'\')">+ Vraag toevoegen</button>'+
+    '</div>';
   }else{
     html+=qs.map(function(card,qi){
-      var line=(card.voorkant||card.q||'').trim()||'Lege vraag';
+      var lineRaw=(card.voorkant||card.q||'').trim();
+      var line=lineRaw||'Formuleer een vraag.';
       var back=card.achterkant||card.back||'';
+      var backLine=back.trim();
       if(qi===selectedIdx){
         return '<div class="questionListItem active editing">'+
           '<span class="questionListNum">'+(qi+1)+'</span>'+
           '<div class="questionItemFields">'+
-            '<div class="richCe questionRichCe" contenteditable="true" data-rich-type="question" data-rich-field="voorkant" data-rich-qkey="'+esc(key)+'" data-rich-qi="'+qi+'" data-placeholder="Voorkant…" spellcheck="false" oninput="richCeQuestionInput(this)" onfocus="syncSelectedQuestionPreview(\''+esc(key)+'\')">'+mdToHtml(line)+'</div>'+
-            (showBacks?'<textarea class="questionListBack" rows="1" placeholder="Achterkant…" oninput="updQ(\''+esc(key)+'\','+qi+',\'achterkant\',this.value);autoH(this)">'+esc(back)+'</textarea>':'')+
+            '<div class="questionItemFace questionItemFace-front">'+
+              (showBacks?'<div class="questionSideLabel">Voorkant</div>':'')+
+              '<div class="richCe questionRichCe" contenteditable="true" data-rich-type="question" data-rich-field="voorkant" data-rich-qkey="'+esc(key)+'" data-rich-qi="'+qi+'" data-placeholder="Formuleer een vraag." spellcheck="false" oninput="richCeQuestionInput(this)" onfocus="syncSelectedQuestionPreview(\''+esc(key)+'\')">'+mdToHtml(lineRaw)+'</div>'+
+            '</div>'+
+            (showBacks?'<div class="questionItemFace questionItemFace-back">'+
+              '<div class="questionSideLabel">Achterkant</div>'+
+              '<div class="richCe questionRichCe questionRichCeBackInline" contenteditable="true" data-rich-type="question" data-rich-field="achterkant" data-rich-qkey="'+esc(key)+'" data-rich-qi="'+qi+'" data-placeholder="Voeg tekst toe." spellcheck="false" oninput="richCeQuestionInput(this)" onfocus="syncSelectedQuestionPreview(\''+esc(key)+'\')">'+mdToHtml(back)+'</div>'+
+            '</div>':'')+
           '</div>'+
           '<div class="questionItemActions">'+
             '<button class="questionItemBtn" type="button" title="Dupliceren" onclick="duplicateQ(\''+esc(key)+'\','+qi+')">⧉</button>'+
@@ -2279,33 +4061,44 @@ function buildVragen(target,opts){
           '</div>'+
         '</div>';
       }
-      return '<div class="questionListItem" onclick="setSelectedQuestion(\''+esc(key)+'\','+qi+')">'+
+      return '<div class="questionListItem'+(showBacks?' has-back':'')+'" onclick="setSelectedQuestion(\''+esc(key)+'\','+qi+')">'+
         '<span class="questionListNum">'+(qi+1)+'</span>'+
         '<div class="questionItemFields">'+
-          '<span class="questionListText">'+esc(line)+'</span>'+
-          (showBacks?'<textarea class="questionListBack" rows="1" placeholder="Achterkant…" oninput="updQ(\''+esc(key)+'\','+qi+',\'achterkant\',this.value);autoH(this)">'+esc(back)+'</textarea>':'')+
+          '<div class="questionItemFace questionItemFace-front">'+
+            (showBacks?'<div class="questionSideLabel">Voorkant</div>':'')+
+            '<span class="questionListText'+(lineRaw?'':' is-empty')+'">'+esc(line)+'</span>'+
+          '</div>'+
+          (showBacks?'<div class="questionItemFace questionItemFace-back">'+
+            '<div class="questionSideLabel">Achterkant</div>'+
+            '<span class="questionListText questionListTextBack'+(backLine?'':' is-empty')+'">'+esc(backLine||'Voeg tekst toe.')+'</span>'+
+          '</div>':'')+
         '</div>'+
       '</div>';
     }).join('');
   }
-  html+='</div></div></div>';
-  html+='<div class="questionEditor">';
+  questionListHtml+=html+'</div></div>';
+  var questionEditorHtml='<div class="questionEditor">';
   if(!selected){
-    html+='<div class="questionsEmptyState">Selecteer of voeg een vraag toe om rechts te bewerken.</div>';
+    questionEditorHtml+='<div class="questionsEmptyState">Selecteer of voeg een vraag toe om rechts te bewerken.</div>';
   }else{
     var back=selected.achterkant||selected.back||'';
     var MAX=90;
-    html+='<div class="questionEditorHead"><div class="questionEditorTitle">Vraag '+(selectedIdx+1)+'</div><div class="questionEditorActions"><button class="iconAction" type="button" title="Dupliceren" onclick="duplicateQ(\''+esc(key)+'\','+selectedIdx+')">⧉</button><button class="iconAction danger" type="button" title="Verwijderen" onclick="delQ(\''+esc(key)+'\','+selectedIdx+')">✕</button></div></div>';
-    html+='<div class="questionCounter top" id="cc-f-'+key+'-'+selectedIdx+'">'+(selected.voorkant||selected.q||'').length+'/'+MAX+'</div>';
-    html+='<div class="questionBackToggle"><button class="ghostToggle'+(isBackOpen?' open':'')+'" type="button" onclick="toggleQuestionBackEditor(\''+esc(key)+'\')">'+(isBackOpen?'Achterkant verbergen':'Achterkant bewerken')+'</button></div>';
+    questionEditorHtml+='<div class="questionEditorHead"><div class="questionEditorTitle">Vraag '+(selectedIdx+1)+'</div><div class="questionEditorActions"><button class="iconAction" type="button" title="Dupliceren" onclick="duplicateQ(\''+esc(key)+'\','+selectedIdx+')">⧉</button><button class="iconAction danger" type="button" title="Verwijderen" onclick="delQ(\''+esc(key)+'\','+selectedIdx+')">✕</button></div></div>';
+    questionEditorHtml+='<div class="questionCounter top" id="cc-f-'+key+'-'+selectedIdx+'">'+(selected.voorkant||selected.q||'').length+'/'+MAX+'</div>';
+    questionEditorHtml+='<div class="questionBackToggle"><button class="ghostToggle'+(isBackOpen?' open':'')+'" type="button" onclick="toggleQuestionBackEditor(\''+esc(key)+'\')">'+(isBackOpen?'Achterkant verbergen':'Achterkant bewerken')+'</button></div>';
     if(isBackOpen){
-      html+='<label class="questionFieldLabel">Achterkant</label>'+
-        '<div class="richCe questionRichCe questionRichCeBack" contenteditable="true" data-rich-type="question" data-rich-field="achterkant" data-rich-qkey="'+esc(key)+'" data-rich-qi="'+selectedIdx+'" data-placeholder="Optionele achterkant of toelichting" spellcheck="false" oninput="richCeQuestionInput(this)" onfocus="syncSelectedQuestionPreview(\''+esc(key)+'\')">'+mdToHtml(back)+'</div>'+
+      questionEditorHtml+='<label class="questionFieldLabel">Achterkant</label>'+
+        '<div class="richCe questionRichCe questionRichCeBack" contenteditable="true" data-rich-type="question" data-rich-field="achterkant" data-rich-qkey="'+esc(key)+'" data-rich-qi="'+selectedIdx+'" data-placeholder="Voeg tekst toe…" spellcheck="false" oninput="richCeQuestionInput(this)" onfocus="syncSelectedQuestionPreview(\''+esc(key)+'\')">'+mdToHtml(back)+'</div>'+
         '<div class="questionCounter" id="cc-b-'+key+'-'+selectedIdx+'">'+back.length+'/'+MAX+'</div>';
     }
   }
-  html+='</div></div>';
-  target.innerHTML=html;
+  questionEditorHtml+='</div>';
+  target.innerHTML=buildSidePanelShell({
+    metaHtml:themeNameHtml+'<div class="questionsCount">'+qs.length+' '+(qs.length===1?'vraag':'vragen')+'</div>',
+    actionsHtml:questionsHeaderActions,
+    contentHtml:questionListHtml,
+    afterShellHtml:questionEditorHtml
+  });
   target.querySelectorAll('.questionListBack').forEach(function(t){setTimeout(function(){autoH(t);},0);});
   if(theme)syncSelectedQuestionPreview(theme.key);
 }
@@ -2340,9 +4133,8 @@ function cpSetSide(key,side,btn){
   // Update back text
   var backEl=g('cpback-'+key);
   if(backEl){
-    var backMode=S.d.meta.backMode||'mirror';
-    var blankColor=(S.d.meta.blankBackColors&&S.d.meta.blankBackColors[key])||S.d.meta.blankBackColor||'#F8E4D2';
-    backEl.style.background=backMode==='blank'?blankColor:'transparent';
+    var backCfg=backPreviewConfig(key);
+    backEl.style.background=backCfg.custom?backCfg.bg:'transparent';
     var backOverlay=backEl.querySelector('.cpOverlay');
     if(backOverlay)backOverlay.innerHTML=q2.achterkant?esc(q2.achterkant):'';
   }
@@ -2371,14 +4163,19 @@ function updateCardPreview(key,frontTxt,backTxt){
   }
   var backEl=g('cpback-'+key);
   if(backEl){
-    var backMode=S.d.meta.backMode||'mirror';
-    var blankColor=(S.d.meta.blankBackColors&&S.d.meta.blankBackColors[key])||S.d.meta.blankBackColor||'#F8E4D2';
-    backEl.style.background=backMode==='blank'?blankColor:'transparent';
-    backEl.style.fontFamily=font;
-    backEl.style.fontSize=fs;
-    backEl.style.color=color;
+    var backCfg=backPreviewConfig(key);
+    var backCv=backCfg.cssVars||cv;
+    var backFont="'"+(backCv['--pk-font']||cv['--pk-font']||'IBM Plex Sans')+"',sans-serif";
+    var backFs=fontSizeCss(backCv['--pk-font-size']||cv['--pk-font-size']||'12');
+    var backColor=backCv['--pk-set-text']||color;
+    var backAlign=backCv['--pk-text-align']||halign;
+    var backValign=backCv['--pk-text-valign']||valign;
+    backEl.style.background=backCfg.custom?backCfg.bg:'transparent';
+    backEl.style.fontFamily=backFont;
+    backEl.style.fontSize=backFs;
+    backEl.style.color=backColor;
     var bov=backEl.querySelector('.cpOverlay');
-    if(bov){bov.style.alignItems=valign==='top'?'flex-start':valign==='bottom'?'flex-end':'center';bov.style.justifyContent=halign==='left'?'flex-start':halign==='right'?'flex-end':'center';}
+    if(bov){bov.style.alignItems=backValign==='top'?'flex-start':backValign==='bottom'?'flex-end':'center';bov.style.justifyContent=backAlign==='left'?'flex-start':backAlign==='right'?'flex-end':'center';bov.style.textAlign=backAlign;}
     backEl.querySelector('.cpOverlay').innerHTML=backTxt?esc(backTxt):'';
   }
 }
@@ -2416,9 +4213,11 @@ function cardBgBaseForKey(meta,key){
   meta=meta||{};
   var maps=cardBgMaps(meta);
   var byKey=normalizeHexInput(maps.base[key||''])||'';
+  var isBackKey=(key===BACK_STYLE_KEY||String(key||'').indexOf('__back_card__:')===0);
+  var backDefault=isBackKey?(normalizeHexInput(meta.blankBackColor||'')||''):'';
   var legacy=normalizeHexInput((((meta.ui||{}).cardBgBase)||''))||'';
   var css=normalizeHexInput((((meta.cssVars||{})['--pk-set-bg'])||''))||'';
-  return normalizedCardSurface(byKey||legacy||css||DEFAULT_CARD_SURFACE);
+  return normalizedCardSurface(byKey||backDefault||legacy||css||DEFAULT_CARD_SURFACE);
 }
 function cardBgToneForKey(meta,key){
   meta=meta||{};
@@ -2434,7 +4233,8 @@ function sharedCardPreviewHtml(opts){
   var cached=opts.file?(((cachedCardAssetForFile(S.activeId,opts.file)||{}).asset)||null):null;
   var imgSrc=cached&&cached.dataUrl?cached.dataUrl:'';
   if(opts.forceNoImage)imgSrc='';
-  var cv=(S.d.meta.cssVars||{});
+  var previewKey=opts.previewKey||'algemeen';
+  var cv=styleCssVarsForKey(S.d.meta,previewKey);
   var font=cv['--pk-font']||'IBM Plex Sans';
   var fs=fontSizeCss(cv['--pk-font-size']||'12');
   var baseFontPt=parseInt(normFontSize(cv['--pk-font-size']||'12'),10)||12;
@@ -2442,24 +4242,64 @@ function sharedCardPreviewHtml(opts){
   var textColor=cv['--pk-set-text']||'rgba(48,96,136,0.95)';
   var halign=cv['--pk-text-align']||'center';
   var valign=cv['--pk-text-valign']||'center';
-  var accentColor=cv['--pk-set-accent']||'#CFE6DF';
-  var cardBg=normalizedCardSurface(opts.cardBg||cardBgForKey(S.d.meta,opts.previewKey)||(cv['--pk-set-bg']||DEFAULT_CARD_SURFACE));
+  var accentColor=cv['--pk-set-accent']||'#A8E1DD';
+  var cardBg=normalizedCardSurface(opts.cardBg||cardBgForKey(S.d.meta,previewKey)||(cv['--pk-set-bg']||DEFAULT_CARD_SURFACE));
   var emptyBg=normalizedCardSurface(opts.emptyBg||cardBg);
-  var backMode=opts.backMode||S.d.meta.backMode||'mirror';
-  var blankColor=(S.d.meta.blankBackColors&&S.d.meta.blankBackColors[opts.themeKey])||S.d.meta.blankBackColor||'#F8E4D2';
+  var backCfg=backPreviewConfig(opts.themeKey||previewKey);
+  var backMode=opts.backMode||backCfg.mode||'mirror';
+  var backCv=backCfg.cssVars||cv;
+  var backFont=backCv['--pk-font']||font;
+  var backFs=fontSizeCss(backCv['--pk-font-size']||cv['--pk-font-size']||'12');
+  var backTextColor=backCv['--pk-set-text']||textColor;
+  var backHalign=backCv['--pk-text-align']||halign;
+  var backValign=backCv['--pk-text-valign']||valign;
+  var backAlignItems=backValign==='top'?'flex-start':backValign==='bottom'?'flex-end':'center';
+  var backJustifyContent=backHalign==='left'?'flex-start':backHalign==='right'?'flex-end':'center';
+  var backShapeKey=backCfg.styleKey||previewKey;
+  var backBgHtml=backCfg.mirrorImage
+    ?(imgSrc?'<img class="cpBg'+(backCfg.reflect?' is-reflect':'')+'" src="'+imgSrc+'" alt="">':'<div class="cpBgEmpty" style="'+cardBgStyle(emptyBg)+';position:absolute;inset:0"></div>')
+    :'<div class="cpBgEmpty" style="'+cardBgStyle(backCfg.bg)+';position:absolute;inset:0"></div>';
   var alignItems=valign==='top'?'flex-start':valign==='bottom'?'flex-end':'center';
   var justifyContent=halign==='left'?'flex-start':halign==='right'?'flex-end':'center';
   var wrapCls=opts.wrapClass||'cardPrevWrap';
   var wrapStyle=opts.wrapStyle||'';
+  var isSpaceInfoCover=!!(S.activeKind==='space'&&opts.infoRichCe&&opts.previewKey==='cover'&&isInfoSlideEnabled((S.d&&S.d.meta)||{},'cover')&&!((S.d.meta||{}).infoCoverSkip));
+  var spaceInfoName=spacePreviewText((S.space&&S.space.name)||((S.d&&S.d.meta&&S.d.meta.title)||''),'');
+  var coverTitle=infoCoverTitleText();
+  var coverSub=infoCoverSubText();
+  var logoHidden=!!(S.d&&S.d.meta&&S.d.meta.infoCoverLogoRemoved);
+  var spaceInfoDefaultBg=normalizedCardSurface('#A8E1DD');
+  var logoLayout=getCoverElemLayout('logo');
+  var titleLayout=getCoverElemLayout('title');
+  var subLayout=getCoverElemLayout('sub');
+  var spaceInfoDefaultCoverHtml='<div class="adminInfoCardFill is-space-default" style="'+cardBgStyle(spaceInfoDefaultBg)+'">'
+    +(!logoHidden
+      ?'<div class="adminInfoCoverElem adminInfoCoverElem-logo'+(COVER_ELEM_SEL==='logo'?' is-selected':'')+'" data-cover-elem="logo" onmousedown="startCoverElemDrag(event,\'logo\')" style="left:'+logoLayout.x+'%;top:'+logoLayout.y+'%;width:'+logoLayout.size+'%;height:'+logoLayout.size+'%">'+
+        '<div class="adminInfoBrandMark adminInfoCoverElem-static">'+
+          '<img src="/assets/logo-icons/masters/master-transparent.svg" alt="" class="adminInfoBrandLogo" aria-hidden="true">'+
+        '</div>'+
+      '</div>'
+      :'')
+    +'<div class="adminInfoCoverElem adminInfoCoverElem-text'+(COVER_ELEM_SEL==='title'?' is-selected':'')+(COVER_ELEM_EDITING==='title'?' is-editing':'')+'" data-cover-elem="title" onmousedown="startCoverElemDrag(event,\'title\')" ondblclick="return startCoverElemInlineEdit(event,\'title\')" style="left:'+titleLayout.x+'%;top:'+titleLayout.y+'%">'+
+      '<div class="adminInfoBrandTitle" oninput="infoCoverTitleInput(this)" onblur="finishCoverElemInlineEdit(\'title\',this)">'+esc(coverTitle)+'</div>'+
+    '</div>'+
+    (coverSub
+      ?'<div class="adminInfoCoverElem adminInfoCoverElem-text'+(COVER_ELEM_SEL==='sub'?' is-selected':'')+(COVER_ELEM_EDITING==='sub'?' is-editing':'')+'" data-cover-elem="sub" onmousedown="startCoverElemDrag(event,\'sub\')" ondblclick="return startCoverElemInlineEdit(event,\'sub\')" style="left:'+subLayout.x+'%;top:'+subLayout.y+'%">'+
+        '<div class="adminInfoBrandSub" oninput="infoCoverSubInput(this)" onblur="finishCoverElemInlineEdit(\'sub\',this)">'+esc(coverSub)+'</div>'+
+      '</div>'
+      :'')+
+  '</div>';
   // In infoRichCe mode we always render the richCe text area, even on the cover slide
   var isCover=!opts.infoRichCe&&opts.previewKey==='cover'&&!!opts.showCoverTexts;
   var isCoverPreview=!opts.infoRichCe&&opts.previewKey==='cover'&&!opts.showCoverTexts;
   // Info mode: use a single sheet-like card on the same footprint as the question preview.
   if(opts.infoRichCe){
-    var previewLabel=opts.label||'Infosheet';
+    var previewLabel=opts.label||'Infopagina';
     var previewTitle=esc(previewLabel);
     var midTitleText=String(opts.infoMidTitleText!=null?opts.infoMidTitleText:(opts.label||'')).trim();
-    var mediaHtml=(imgSrc?'<img class="adminInfoCardImg" src="'+imgSrc+'" alt="'+previewTitle+'">':'<div class="adminInfoCardFill" style="'+cardBgStyle(emptyBg)+'"></div>')+
+    var mediaHtml=(imgSrc
+      ?'<img class="adminInfoCardImg" src="'+imgSrc+'" alt="'+previewTitle+'">'
+      :(isSpaceInfoCover?spaceInfoDefaultCoverHtml:'<div class="adminInfoCardFill" style="'+cardBgStyle(emptyBg)+'"></div>'))+
       '<div class="cpShapeLayer" data-shape-key="'+esc(opts.previewKey||'algemeen')+'">'+cardShapesLayerHtml(opts.previewKey||'algemeen')+'</div>'+
       (opts.showInfoMidTitle
         ?'<div class="infoSlideMidTitle" contenteditable="true" spellcheck="false" data-info-mid-title-key="'+esc(opts.infoMidTitleKey||'')+'" oninput="infoMidTitleInput(this)" style="font-family:\''+esc(font)+'\',sans-serif;color:'+esc(textColor)+';font-size:'+esc(titleFontSize)+';font-weight:700">'+esc(midTitleText)+'</div>'
@@ -2469,7 +4309,7 @@ function sharedCardPreviewHtml(opts){
         '<div class="infoSlideInner adminInfoSlideInner">'+
           '<div class="adminInfoSlideCard"'+(opts.faceId?' id="'+esc(opts.faceId)+'"':'')+' style="'+cardBgStyle(cardBg)+'">'+mediaHtml+'</div>'+
           '<div class="infoSlideText adminInfoSlideText adminInfoSlideTextEdit"'+(opts.frontId?' id="'+esc(opts.frontId)+'"':'')+'>'+
-            '<div class="richCe infoRichCe" contenteditable="true" data-rich-type="info" data-rich-key="'+esc(opts.infoRichCeKey||'')+'" data-placeholder="Typ hier de infotekst..." spellcheck="false" oninput="richCeInfoInput(this)">'+(opts.frontTxt||'')+'</div>'+
+            '<div class="richCe infoRichCe" contenteditable="true" data-rich-type="info" data-rich-key="'+esc(opts.infoRichCeKey||'')+'" data-placeholder="Typ hier je tekst om deze pagina te introduceren..." spellcheck="false" oninput="richCeInfoInput(this)" onfocus="activateRichCe(this)" onblur="deactivateRichCe()">'+(opts.frontTxt||'')+'</div>'+
           '</div>'+
         '</div>'+
       '</div>'+
@@ -2481,20 +4321,20 @@ function sharedCardPreviewHtml(opts){
       '<div class="cardFaceInner'+(opts.flipped?' flipped':'')+'"'+(opts.faceId?' id="'+esc(opts.faceId)+'"':'')+'>'+
         '<div class="cardFaceFront" style="'+cardBgStyle(cardBg)+'">'+
           (imgSrc?'<img class="cpBg" src="'+imgSrc+'" alt="'+esc(opts.label||'Kaartpreview')+'">':'<div class="cpBgEmpty" style="'+cardBgStyle(emptyBg)+';position:absolute;inset:0"></div>')+
-          '<div class="cpShapeLayer" data-shape-key="'+esc(opts.previewKey||'algemeen')+'">'+cardShapesLayerHtml(opts.previewKey||'algemeen')+'</div>'+
+          '<div class="cpShapeLayer" data-shape-key="'+esc(previewKey)+'">'+cardShapesLayerHtml(previewKey)+'</div>'+
           (isCover?'<div class="cpTextLayer" data-cover-texts="1">'+coverTextLayerHtml()+'</div>':'')+
           '<div class="cpOverlay'+(isCoverPreview?' coverPreview':'')+'" style="align-items:'+alignItems+';justify-content:'+justifyContent+'">'+
             '<div class="cpFront'+(isCoverPreview?' coverPreviewText':'')+'"'+(opts.frontId?' id="'+esc(opts.frontId)+'"':'')+' style="font-family:\''+esc(font)+'\',sans-serif;font-size:'+(isCoverPreview?'clamp(15px,1.65vw,23px)':esc(fs))+';color:'+esc(textColor)+';text-align:'+halign+'">'+
               (isCover?'':(opts.infoRichCe
-                ?'<div class="richCe infoRichCe" contenteditable="true" data-rich-type="info" data-rich-key="'+esc(opts.infoRichCeKey||'')+'" data-placeholder="Typ hier de tekst voor de infopagina..." spellcheck="false" oninput="richCeInfoInput(this)">'+(opts.frontTxt||'')+'</div>'
+                ?'<div class="richCe infoRichCe" contenteditable="true" data-rich-type="info" data-rich-key="'+esc(opts.infoRichCeKey||'')+'" data-placeholder="Typ hier je tekst om deze pagina te introduceren..." spellcheck="false" oninput="richCeInfoInput(this)" onfocus="activateRichCe(this)" onblur="deactivateRichCe()">'+(opts.frontTxt||'')+'</div>'
                 :'<span class="cpFrontInner">'+(opts.frontTxt?esc(opts.frontTxt):(opts.suppressEmptyFrontHint?'':'<span class="cpHint">Voorkant tekst</span>'))+'</span>'))+
             '</div>'+
           '</div>'+
         '</div>'+
-        '<div class="cardFaceBack'+(backMode==='reflect'?' is-reflect':'')+'"'+(opts.backId?' id="'+esc(opts.backId)+'"':'')+' style="background:'+(backMode==='blank'?esc(blankColor):'transparent')+';font-family:\''+esc(font)+'\',sans-serif;font-size:'+esc(fs)+';color:'+esc(textColor)+'">'+
-          ((backMode==='mirror'||backMode==='reflect')?(imgSrc?'<img class="cpBg'+(backMode==='reflect'?' is-reflect':'')+'" src="'+imgSrc+'" alt="">':'<div style="position:absolute;inset:0;background:'+esc(emptyBg)+'"></div>'):'')+
-          '<div class="cpShapeLayer'+(backMode==='reflect'?' is-reflect':'')+'" data-shape-key="'+esc(opts.previewKey||'algemeen')+'">'+cardShapesLayerHtml(opts.previewKey||'algemeen')+'</div>'+
-          '<div class="cpOverlay" style="position:absolute;inset:0;display:flex;align-items:'+alignItems+';justify-content:'+justifyContent+';padding:10px;text-align:'+halign+'">'+(opts.backTxt?esc(opts.backTxt):'')+'</div>'+
+        '<div class="cardFaceBack'+(backCfg.reflect?' is-reflect':'')+'"'+(opts.backId?' id="'+esc(opts.backId)+'"':'')+' style="background:'+(backCfg.custom?esc(backCfg.bg):'transparent')+';font-family:\''+esc(backFont)+'\',sans-serif;font-size:'+esc(backFs)+';color:'+esc(backTextColor)+'">'+
+          backBgHtml+
+          '<div class="cpShapeLayer'+(backCfg.reflect?' is-reflect':'')+'" data-shape-key="'+esc(backShapeKey)+'">'+cardShapesLayerHtml(backShapeKey)+'</div>'+
+          '<div class="cpOverlay" style="position:absolute;inset:0;display:flex;align-items:'+backAlignItems+';justify-content:'+backJustifyContent+';padding:10px;text-align:'+backHalign+'">'+(opts.backTxt?esc(opts.backTxt):'')+'</div>'+
         '</div>'+
       '</div>'+
     '</div>'+
@@ -2533,6 +4373,10 @@ function selectedQuestionCard(key){
 }
 function setSelectedQuestion(key,qi){
   QUESTION_SELECTION[key]=Math.max(0,parseInt(qi,10)||0);
+  if(S.clTab==='opmaken'&&S.opmPane==='vragen'&&isCustomBackMode((S.d&&S.d.meta)||{})&&backStyleScope((S.d&&S.d.meta)||{})==='card'){
+    buildStijlPreserveBg(g('pw'));
+    return;
+  }
   rebuildVragen();
 }
 function toggleQuestionBackEditor(key){
@@ -2543,7 +4387,9 @@ function duplicateQ(key,qi){
   var list=S.d.questions[key]||[];
   var src=list[qi];
   if(!src)return;
-  list.splice(qi+1,0,cloneJson(src));
+  var dup=cloneJson(src);
+  delete dup._qid;
+  list.splice(qi+1,0,dup);
   QUESTION_SELECTION[key]=qi+1;
   markDirty();
   rebuildVragen();
@@ -2632,7 +4478,7 @@ function buildQRow(key,qi,card){
     '<div class="qFields">'+
       '<textarea class="qIn" rows="1" placeholder="Voorkant — de vraag" oninput="updQ(\''+esc(key)+'\','+qi+',\'voorkant\',this.value);autoH(this);updCC(this,'+MAX+');liveQ(\''+esc(key)+'\','+qi+',true,this.value)">'+esc(front)+'</textarea>'+
       '<div class="charCount'+(fcCls?' '+fcCls:'')+'" id="cc-f-'+key+'-'+qi+'">'+fc+'/'+MAX+'</div>'+
-      '<textarea class="qInBack" rows="1" placeholder="Achterkant — toelichting of antwoord (optioneel)" oninput="updQ(\''+esc(key)+'\','+qi+',\'achterkant\',this.value);autoH(this);updCC(this,'+MAX+');liveQ(\''+esc(key)+'\','+qi+',false,this.value)">'+esc(back)+'</textarea>'+
+      '<textarea class="qInBack" rows="1" placeholder="Voeg tekst toe…" oninput="updQ(\''+esc(key)+'\','+qi+',\'achterkant\',this.value);autoH(this);updCC(this,'+MAX+');liveQ(\''+esc(key)+'\','+qi+',false,this.value)">'+esc(back)+'</textarea>'+
       (back?'<div class="charCount'+(bcCls?' '+bcCls:'')+'" id="cc-b-'+key+'-'+qi+'">'+bc+'/'+MAX+'</div>':'')+
     '</div>'+
     '<button class="qEdit" type="button" onclick="showQEditor(\''+esc(key)+'\','+qi+')" title="Kaarteditor">□</button>'+
@@ -2640,7 +4486,7 @@ function buildQRow(key,qi,card){
 }
 function showBulkImport(key){
   var th=S.d.meta.themes.find(function(t){return t.key===key;})||{};
-  showModal('<h3>Bulk importeren — '+esc(th.label||key)+'</h3>'+
+  showModal('<h3>Meerdere vragen importeren — '+esc(th.label||key)+'</h3>'+
     '<p>Plak je vragen hieronder. Elke regel = één vraag op de voorkant.<br>Voorkant en achterkant scheiden met een <code>|</code> (pipe): <em>Vraag | Antwoord</em></p>'+
     '<textarea class="bulkArea" id="bulkTa" placeholder="Wat neem jij mee uit dit gesprek?\nWat doet dit met jou? | Ruimte voor reflectie\n…"></textarea>'+
     '<div class="mAct"><button class="mCa" onclick="closeModal()">Annuleren</button><button class="mOk" onclick="execBulk(\''+esc(key)+'\')">Importeren</button></div>');
@@ -2653,13 +4499,13 @@ function execBulk(key){
   if(!S.d.questions[key])S.d.questions[key]=[];
   lines.forEach(function(line){
     var parts=line.split('|');
-    S.d.questions[key].push({voorkant:parts[0].trim(),achterkant:(parts[1]||'').trim(),q:parts[0].trim(),back:(parts[1]||'').trim()});
+    S.d.questions[key].push({_qid:nextQuestionEntityId(),voorkant:parts[0].trim(),achterkant:(parts[1]||'').trim(),q:parts[0].trim(),back:(parts[1]||'').trim()});
   });
   markDirty();closeModal();rebuildVragen();toast(lines.length+' vragen toegevoegd','green');
 }
 function addQ(key){
   if(!S.d.questions[key])S.d.questions[key]=[];
-  S.d.questions[key].push({voorkant:'',achterkant:'',q:'',back:''});
+  S.d.questions[key].push({_qid:nextQuestionEntityId(),voorkant:'',achterkant:'',q:'',back:''});
   QUESTION_SELECTION[key]=S.d.questions[key].length-1;
   QUESTION_EDITOR_BACK_OPEN[key]=false;
   markDirty();
@@ -2807,7 +4653,7 @@ function normalizeInfoSlide(slide,i){
   if(out.source==='theme'&&!out.themeKey&&themeMatch)out.themeKey=themeMatch.key;
   if(out.source==='cover'){
     out.key=out.key||'cover';
-    if(!out.img||/^cards\//.test(out.img))out.img='cards/voorkant.svg';
+    if(!out.img||/^cards\//.test(out.img))out.img='cards/'+infoCoverFile();
   }else if(out.source==='theme'){
     if(!out.themeKey&&themes[0])out.themeKey=themes[0].key;
     if(out.themeKey&&(!out.img||/^cards\//.test(out.img))){
@@ -2828,7 +4674,7 @@ function ensureIntroSlides(){
       source:'cover',
       title:(S.d.meta&&S.d.meta.title)||'',
       body:((S.d.uitleg||{}).cover)||'',
-      img:'cards/voorkant.svg',
+      img:'cards/'+infoCoverFile(),
       alt:(S.d.meta&&S.d.meta.title)||''
     });
   }
@@ -2841,7 +4687,7 @@ function ensureIntroSlides(){
   if(S.d.intro.slides[0]){
     S.d.intro.slides[0].source='cover';
     S.d.intro.slides[0].key='cover';
-    S.d.intro.slides[0].img='cards/voorkant.svg';
+    S.d.intro.slides[0].img='cards/'+infoCoverFile();
     if((S.d.uitleg||{}).cover!=null)S.d.intro.slides[0].body=(S.d.uitleg||{}).cover||'';
     if(!S.d.intro.slides[0].alt)S.d.intro.slides[0].alt=(S.d.meta&&S.d.meta.title)||'';
   }
@@ -2854,7 +4700,7 @@ function getInfoAdminMode(){
 }
 function getInfoSlidePreviewPath(slide){
   var sl=normalizeInfoSlide(slide,0);
-  if(sl.source==='cover')return cardAssetPathForSet(S.activeId,'voorkant.svg');
+  if(sl.source==='cover')return cardAssetPathForSet(S.activeId,infoCoverFile());
   if(sl.source==='theme'&&sl.themeKey)return infoThemeCardPath(sl.themeKey);
   if(!sl.img)return '';
   if(/^sets\//.test(sl.img))return sl.img;
@@ -2863,7 +4709,7 @@ function getInfoSlidePreviewPath(slide){
 }
 function getInfoSlideSourceLabel(slide){
   var sl=normalizeInfoSlide(slide,0);
-  if(sl.source==='cover')return 'Koppeling: cover';
+  if(sl.source==='cover')return S.activeKind==='space'?'Standaard infosheet-cover':'Koppeling: cover';
   if(sl.source==='theme'&&sl.themeKey)return 'Koppeling: '+infoThemeLabel(sl.themeKey);
   return sl.img?'Eigen afbeelding':'Klik of sleep afbeelding';
 }
@@ -2885,7 +4731,7 @@ function setInfoSlideSource(i,source){
   sl.source=source;
   if(source==='cover'){
     sl.themeKey='';
-    sl.img='cards/voorkant.svg';
+    sl.img='cards/'+infoCoverFile();
     if(!sl.key||/^page-/.test(sl.key))sl.key='cover';
     if(!sl.alt)sl.alt=(S.d.meta&&S.d.meta.title)||'';
   }else if(source==='theme'){
@@ -3331,7 +5177,7 @@ function infoSlideOptions(meta){
   var themes=(meta&&meta.themes)||[];
   var infoPages=(meta&&meta.infoPages)||[];
   var excluded=(meta&&meta.infoExcluded)||[];
-  var all=[{key:'cover',label:'Cover',file:'voorkant.svg',isCustom:false}];
+  var all=[{key:'cover',label:'Cover',file:infoCoverFile(),isCustom:false}];
   themes.forEach(function(t,i){
     all.push({key:t.key,label:t.label||('Thema '+(i+1)),file:t.card||(t.key+'.svg'),isCustom:false});
   });
@@ -3370,7 +5216,7 @@ function infoSlideCardHtml(opt,selectedKey){
   var pictureIcon='<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.3"/><path d="M5 16l4.5-4.5 3 3 2.8-2.8L19 16"/></svg>';
   var isCover=opt.key==='cover';
   var isTheme=!isCover&&!opt.isCustom;
-  var cardPath=opt.isCustom?cardAssetPathForSet(S.activeId,'info_'+opt.key+'.svg'):(!isCover?styleCardPathForKey(opt.key):styleCardPathForKey('cover'));
+  var cardPath=opt.isCustom?cardAssetPathForSet(S.activeId,'info_'+opt.key+'.svg'):(!isCover?styleCardPathForKey(opt.key):cardAssetPathForSet(S.activeId,infoCoverFile()));
   var cardSid=safeid(cardPath);
   var hit=((cachedCardAssetForFile(S.activeId,opt.file)||{}).asset)||null;
   var cardLabel=isCover?'Cover':(opt.label||'Pagina');
@@ -3378,16 +5224,33 @@ function infoSlideCardHtml(opt,selectedKey){
     ?((opt.label&& !/^Pagina(?:\s+\d+)?$/i.test(String(opt.label).trim()))?String(opt.label):'')
     :'';
   // Thumbnail
+  var isAutoCoverThumb=isCover&&S.activeKind==='space'&&!((S.d.meta||{}).infoCoverSkip);
+  var _thumbMeta=(S.d&&S.d.meta)||{};
+  var _thumbLogoHidden=!!_thumbMeta.infoCoverLogoRemoved;
+  var _thumbTitle=infoCoverTitleText();
+  var _thumbSub=infoCoverSubText();
+  var _thumbLogoLayout=getCoverElemThumbLayout('logo');
+  var _thumbTitleLayout=getCoverElemThumbLayout('title');
+  var _thumbSubLayout=getCoverElemThumbLayout('sub');
   var thumbContent=hit&&hit.dataUrl
     ?'<img src="'+hit.dataUrl+'" alt="'+esc(cardLabel)+'">'
-    :'<div class="stijlSlidePlaceholder">'+pictureIcon+'<span>'+(isCover||opt.isCustom?'Achtergrond toevoegen':'Afbeelding kiezen')+'</span></div>';
+    :isAutoCoverThumb
+      ?'<div class="infoCoverThumbSheet">'+
+          '<div class="infoCoverThumbCard" style="'+cardBgStyle(normalizedCardSurface('#A8E1DD'))+'">'+
+            (!_thumbLogoHidden?'<div class="infoCoverThumbElem infoCoverThumbElem-logo" style="left:'+_thumbLogoLayout.x+'%;top:'+_thumbLogoLayout.y+'%;width:'+_thumbLogoLayout.size+'%;height:'+_thumbLogoLayout.size+'%"><div class="adminInfoBrandMark adminInfoCoverElem-static"><img src="/assets/logo-icons/masters/master-transparent.svg" alt="" class="adminInfoBrandLogo" aria-hidden="true"></div></div>':'')+
+            '<div class="infoCoverThumbElem infoCoverThumbElem-title" style="left:'+_thumbTitleLayout.x+'%;top:'+_thumbTitleLayout.y+'%"><div class="infoCoverThumbTitle">'+esc(_thumbTitle)+'</div></div>'+
+            (_thumbSub?'<div class="infoCoverThumbElem infoCoverThumbElem-sub" style="left:'+_thumbSubLayout.x+'%;top:'+_thumbSubLayout.y+'%"><div class="infoCoverThumbSub">'+esc(_thumbSub)+'</div></div>':'')+
+          '</div>'+
+          '</div>'
+      :'<div class="stijlSlidePlaceholder">'+pictureIcon+'<span>Achtergrond toevoegen</span></div>';
   var isDraggable=!opt.excluded&&!isCover;
   // Actions – identical to styleSlideCardHtml + include/exclude toggle
   var uploadLbl='<label class="stijlSlideUpload" title="SVG kiezen" onclick="event.stopPropagation()">'+uploadIcon+'<input type="file" accept=".svg,image/svg+xml" onclick="event.stopPropagation()" onchange="if(this.files&&this.files[0])uploadFile(this.files[0],\''+esc(cardPath)+'\',\''+cardSid+'\');this.value=\'\'"></label>';
   var cropBtn=hit&&hit.dataUrl?'<button class="stijlSlideMiniBtn" type="button" title="Bijsnijden" onclick="event.stopPropagation();recropStyleSlide(\''+esc(cardPath)+'\',\''+cardSid+'\')">'+cropIcon+'</button>':'';
   // Delete: cover image → delete file; custom page → delete page; themes are only excluded (not deleted) from info slider
   var deleteBtn=
-    (isCover&&hit&&hit.dataUrl?'<button class="stijlSlideMiniBtn danger" type="button" title="Afbeelding verwijderen" onclick="event.stopPropagation();deleteStyleSlideFile(\''+esc(cardPath)+'\',\''+cardSid+'\')">'+deleteIcon+'</button>':'')
+    (isCover&&hit&&hit.dataUrl?'<button class="stijlSlideMiniBtn danger" type="button" title="Afbeelding verwijderen" onclick="event.stopPropagation();deleteStyleSlideFile(\''+esc(cardPath)+'\',\''+cardSid+'\')">'+deleteIcon+'</button>'
+    :isCover&&S.activeKind==='space'&&!((S.d.meta||{}).infoCoverSkip)?'<button class="stijlSlideMiniBtn danger" type="button" title="Automatische cover verwijderen" onclick="event.stopPropagation();skipAutoInfoCover()">'+deleteIcon+'</button>':'')
     +(opt.isCustom?'<button class="stijlSlideMiniBtn danger" type="button" title="Pagina verwijderen" onclick="event.stopPropagation();deleteInfoCustomPage(\''+esc(opt.key)+'\')">'+deleteIcon+'</button>':'');
   // Include/exclude toggle
   var toggleBtn=opt.excluded
@@ -3429,6 +5292,115 @@ function previewTextStore(){
   meta.ui=meta.ui||{};
   meta.ui.previewTexts=meta.ui.previewTexts||{};
   return meta.ui.previewTexts;
+}
+function backStyleUi(meta){
+  meta=meta||{};
+  meta.ui=meta.ui||{};
+  meta.ui.backStyle=meta.ui.backStyle||{};
+  return meta.ui.backStyle;
+}
+function backStyleCssVarStore(meta){
+  var ui=backStyleUi(meta);
+  ui.cssVars=ui.cssVars||{};
+  return ui.cssVars;
+}
+function backStyleCardStore(meta){
+  var ui=backStyleUi(meta);
+  ui.byCard=ui.byCard||{};
+  return ui.byCard;
+}
+function backStyleCardEntry(meta,key){
+  var store=backStyleCardStore(meta);
+  store[key]=store[key]||{};
+  store[key].cssVars=store[key].cssVars||{};
+  return store[key];
+}
+function backStyleScope(meta){
+  var ui=backStyleUi(meta);
+  ui.scope=(ui.scope==='card')?'card':'set';
+  return ui.scope;
+}
+function questionEntityId(card){
+  if(!card||typeof card!=='object')return '';
+  if(!card._qid)card._qid=nextQuestionEntityId();
+  return String(card._qid||'');
+}
+function questionBackDesignKey(themeKey,qi){
+  var list=(S.d&&S.d.questions&&S.d.questions[themeKey])||[];
+  var idx=parseInt(qi,10);
+  if(isNaN(idx)||idx<0||idx>=list.length)return '';
+  var qid=questionEntityId(list[idx]);
+  return qid?('__back_card__:'+qid):'';
+}
+function currentBackDesignKey(themeKey){
+  var meta=S.d.meta||{};
+  var scope=backStyleScope(meta);
+  var key=themeKey||STYLE_PREVIEW_KEY||'algemeen';
+  if(scope!=='card')return BACK_STYLE_KEY;
+  var selectedKey=questionBackDesignKey(key,selectedQuestionIndex(key));
+  return selectedKey||BACK_STYLE_KEY;
+}
+function styleCssVarsForKey(meta,key){
+  meta=meta||{};
+  var front=meta.cssVars||{};
+  if(key!==BACK_STYLE_KEY&&String(key||'').indexOf('__back_card__:')!==0)return front;
+  var merged=cloneJson(front||{});
+  var back=(key===BACK_STYLE_KEY?backStyleCssVarStore(meta):backStyleCardEntry(meta,key).cssVars);
+  Object.keys(back).forEach(function(name){
+    merged[name]=back[name];
+  });
+  return merged;
+}
+function isCustomBackMode(meta){
+  return (((meta||{}).backMode||'mirror')==='blank');
+}
+function ensureBackDesignDefaults(meta){
+  meta=meta||S.d.meta||{};
+  var styleKey=currentBackDesignKey(STYLE_PREVIEW_KEY||'algemeen');
+  var maps=cardBgMaps(meta);
+  if(!normalizeHexInput(maps.base[styleKey]||'')){
+    maps.base[styleKey]=normalizeHexInput(meta.blankBackColor||'')||'#F8E4D2';
+  }
+  cardBuildStore(meta)[styleKey]='self';
+  if(styleKey===BACK_STYLE_KEY)backStyleCssVarStore(meta);
+  else if(String(styleKey||'').indexOf('__back_card__:')===0)backStyleCardEntry(meta,styleKey);
+  return meta;
+}
+function setBackDesignScope(scope){
+  var ui=backStyleUi(S.d.meta||{});
+  ui.scope=(scope==='card')?'card':'set';
+  if(STYLE_BACK_EDIT_SURFACE==='back')ensureBackDesignDefaults(S.d.meta||{});
+  buildStijlPreserveBg(g('pw'));
+  updateStijlPreview();
+}
+function setBackEditSurface(surface){
+  STYLE_BACK_EDIT_SURFACE=(surface==='back')?'back':'front';
+  if(STYLE_BACK_EDIT_SURFACE==='back')ensureBackDesignDefaults(S.d.meta||{});
+  CANVAS_CARD_FLIPPED=STYLE_BACK_EDIT_SURFACE==='back';
+  buildStijlPreserveBg(g('pw'));
+}
+function isEditingBackDesign(){
+  return S.clTab==='opmaken'&&S.opmPane==='vragen'&&isCustomBackMode((S.d||{}).meta||{})&&STYLE_BACK_EDIT_SURFACE==='back';
+}
+function backPreviewConfig(themeKey){
+  var meta=S.d.meta||{};
+  var mode=(meta.backMode||'mirror');
+  var key=themeKey||STYLE_PREVIEW_KEY||'algemeen';
+  var blankColor=(meta.blankBackColors&&meta.blankBackColors[key])||meta.blankBackColor||'#F8E4D2';
+  var custom=mode==='blank';
+  var styleKey=custom?currentBackDesignKey(key):key;
+  var bg=custom?(cardBgForKey(meta,styleKey)||normalizedCardSurface(blankColor)):'transparent';
+  return {
+    mode:mode,
+    custom:custom,
+    reflect:mode==='reflect',
+    mirrorImage:(mode==='mirror'||mode==='reflect'),
+    styleKey:styleKey,
+    cssVars:styleCssVarsForKey(meta,styleKey),
+    bg:bg,
+    blankColor:normalizedCardSurface(blankColor),
+    scope:backStyleScope(meta)
+  };
 }
 function updateStylePreviewText(key,val){
   var store=previewTextStore();
@@ -3735,6 +5707,7 @@ function styleSlideCardHtml(opt,selectedKey){
   var sid=safeid(path);
   var hit=((cachedCardAssetForFile(S.activeId,opt.file)||{}).asset)||null;
   var mode=cardBuildModeForKey(S.d.meta||{},opt.key);
+  var thumbModeClass=!hit?(' is-empty-thumb'+(mode==='self'?' is-self-thumb':'')):'';
   var isTheme=opt.key!=='cover'&&opt.key!=='algemeen';
   var isAlgemeen=opt.key==='algemeen';
   var infoMode=S.opmPane==='info';
@@ -3747,10 +5720,10 @@ function styleSlideCardHtml(opt,selectedKey){
   var pictureIcon='<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.3"/><path d="M5 16l4.5-4.5 3 3 2.8-2.8L19 16"/></svg>';
   var cardLabel=opt.key==='cover'?'Cover':(opt.key==='algemeen'?'Kaart':(opt.label||'Thema'));
   return '<div class="stijlSlideCard'+(opt.key===selectedKey?' sel':'')+(isTheme?' is-theme':'')+(isAlgemeen?' is-algemeen':'')+(infoMode?' info-mode':'')+(hasInfo?' has-info':'')+'" data-style-preview-key="'+esc(opt.key)+'" data-path="'+esc(path)+'" data-sid="'+sid+'"'+(isTheme?' draggable="true" data-theme-key="'+esc(opt.key)+'"':'')+(isAlgemeen?' data-theme-key="algemeen"':'')+' onclick="setStylePreviewKey(\''+esc(opt.key)+'\')">'+
-    '<div class="stijlSlideThumb">'+
+    '<div class="stijlSlideThumb'+thumbModeClass+'">'+
       (hit&&hit.dataUrl
         ?'<img src="'+hit.dataUrl+'" alt="'+esc(opt.label)+'">'
-        :'<div class="stijlSlidePlaceholder">'+pictureIcon+'<span>'+((opt.key==='cover'||opt.key==='algemeen')?'Achtergrond toevoegen':(mode==='self'?'Zelf maken':'Afbeelding kiezen'))+'</span></div>')+
+        :'<div class="stijlSlidePlaceholder">'+pictureIcon+'<span>Achtergrond toevoegen</span></div>')+
       '<div class="stijlSlideActions">'+
         ((opt.key==='cover')
           ?'<button class="stijlSlideMiniBtn" type="button" title="Set dupliceren" onclick="event.stopPropagation();dupSet()">'+duplicateIcon+'</button>'
@@ -3783,20 +5756,94 @@ function previewVarianceHint(previewKey){
   return '';
 }
 function wireStyleComposer(){
-  var _lastHintCard=null,_lastHintBefore=null;
   function clearStyleDragHints(){
-    _lastHintCard=null;_lastHintBefore=null;
     Array.prototype.slice.call(document.querySelectorAll('.stijlSlideRail.reordering')).forEach(function(rail){rail.classList.remove('reordering');});
+    Array.prototype.slice.call(document.querySelectorAll('.stijlSlideGap')).forEach(function(gap){gap.remove();});
     Array.prototype.slice.call(document.querySelectorAll('.stijlSlideCard.drop-before,.stijlSlideCard.drop-after,.infoSlideCard.drop-before,.infoSlideCard.drop-after')).forEach(function(el){
       el.classList.remove('drop-before','drop-after');
     });
   }
-  function setStyleDragHint(card,before){
+  function ensureStyleSlideGap(rail,width,height){
+    if(!rail)return null;
+    var gap=rail.querySelector('.stijlSlideGap');
+    if(!gap){
+      gap=document.createElement('div');
+      gap.className='stijlSlideGap';
+      gap.setAttribute('aria-hidden','true');
+    }
+    gap.style.width=Math.max(72,Math.round(width||108))+'px';
+    gap.style.height=Math.max(86,Math.round(height||96))+'px';
+    if(gap.parentNode!==rail)rail.appendChild(gap);
+    return gap;
+  }
+  function slideCardWidth(card){
+    if(!card)return 108;
+    var rect=card.getBoundingClientRect();
+    return rect&&rect.width?rect.width:Math.max(card.offsetWidth||0,108);
+  }
+  function slideCardHeight(card){
+    if(!card)return 96;
+    var rect=card.getBoundingClientRect();
+    return rect&&rect.height?rect.height:Math.max(card.offsetHeight||0,96);
+  }
+  function slideDragTargets(rail,type,dragCard){
+    var selector=type==='info'
+      ? '.infoSlideCard[data-info-key]:not(.info-excluded)'
+      : '.stijlSlideCard[data-theme-key]';
+    return Array.prototype.slice.call(rail.querySelectorAll(selector)).filter(function(card){
+      if(card===dragCard)return false;
+      if(type==='info')return card.dataset.infoKey!=='cover';
+      return !!card.dataset.themeKey && card.dataset.themeKey!=='algemeen';
+    });
+  }
+  function setStyleDragHint(anchor,before){
+    var state=STYLE_SLIDE_DND;
+    if(!state||!state.rail)return;
     clearStyleDragHints();
-    if(!card)return;
-    var rail=card.closest('.stijlSlideRail');
-    if(rail)rail.classList.add('reordering');
-    card.classList.add(before?'drop-before':'drop-after');
+    state.rail.classList.add('reordering');
+    var gap=ensureStyleSlideGap(state.rail,slideCardWidth(state.card),slideCardHeight(state.card));
+    if(!anchor){
+      state.overKey='';
+      state.overBefore=true;
+      state.anchorCard=null;
+      return;
+    }
+    state.anchorCard=anchor;
+    state.overBefore=before!==false;
+    state.overKey=state.type==='info'?anchor.dataset.infoKey:anchor.dataset.themeKey;
+    anchor.classList.add(state.overBefore?'drop-before':'drop-after');
+    if(state.overBefore)state.rail.insertBefore(gap,anchor);
+    else state.rail.insertBefore(gap,anchor.nextSibling);
+  }
+  function updateStyleDragHint(rail,clientX){
+    var state=STYLE_SLIDE_DND;
+    if(!state||state.rail!==rail)return;
+    var cards=slideDragTargets(rail,state.type,state.card);
+    if(!cards.length){
+      setStyleDragHint(null,true);
+      return;
+    }
+    var anchor=cards[cards.length-1];
+    var before=false;
+    for(var i=0;i<cards.length;i++){
+      var card=cards[i];
+      var rect=card.getBoundingClientRect();
+      var mid=rect.left+(rect.width/2);
+      if(clientX<mid){
+        anchor=card;
+        before=true;
+        break;
+      }
+    }
+    if(state.anchorCard===anchor&&state.overBefore===before)return;
+    setStyleDragHint(anchor,before);
+  }
+  function maybeAutoScrollRail(rail,clientX){
+    if(!rail)return;
+    var rect=rail.getBoundingClientRect();
+    var edge=42;
+    if(clientX<rect.left+edge)rail.scrollLeft-=14;
+    else if(clientX>rect.right-edge)rail.scrollLeft+=14;
   }
   var previewDrop=document.querySelector('[data-style-drop-preview]');
   if(previewDrop){
@@ -3836,11 +5883,13 @@ function wireStyleComposer(){
         }
         card.classList.add('dragging');
         clearStyleDragHints();
-        var rail=card.closest('.stijlSlideRail'); if(rail)rail.classList.add('reordering');
+        var rail=card.closest('.stijlSlideRail');
+        STYLE_SLIDE_DND={type:'info',key:card.dataset.infoKey,card:card,rail:rail,anchorCard:null,overKey:'',overBefore:true};
+        if(rail)rail.classList.add('reordering');
         e.dataTransfer.effectAllowed='move';
         e.dataTransfer.setData('text/plain',card.dataset.infoKey);
       });
-      card.addEventListener('dragend',function(){card.classList.remove('dragging');clearStyleDragHints();});
+      card.addEventListener('dragend',function(){card.classList.remove('dragging');STYLE_SLIDE_DND=null;clearStyleDragHints();});
     }
     if(card.dataset.themeKey){
       card.addEventListener('dragstart',function(e){
@@ -3851,31 +5900,32 @@ function wireStyleComposer(){
         }
         card.classList.add('dragging');
         clearStyleDragHints();
-        var rail=card.closest('.stijlSlideRail'); if(rail)rail.classList.add('reordering');
+        var rail=card.closest('.stijlSlideRail');
+        STYLE_SLIDE_DND={type:'theme',key:card.dataset.themeKey,card:card,rail:rail,anchorCard:null,overKey:'',overBefore:true};
+        if(rail)rail.classList.add('reordering');
         e.dataTransfer.effectAllowed='move';
         e.dataTransfer.setData('text/plain',card.dataset.themeKey);
       });
       card.addEventListener('dragend',function(){
         card.classList.remove('dragging');
         Array.prototype.slice.call(document.querySelectorAll('.stijlSlideCard.dragover,.infoSlideCard.dragover')).forEach(function(el){el.classList.remove('dragover');});
+        STYLE_SLIDE_DND=null;
         clearStyleDragHints();
       });
     }
     card.addEventListener('dragenter',function(e){
+      if(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.card) return;
       e.preventDefault();
       depth+=1;
       card.classList.add('dragover');
-      var rect=card.getBoundingClientRect();
-      setStyleDragHint(card,(e.clientX-rect.left)<rect.width/2);
     });
     card.addEventListener('dragover',function(e){
+      if(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.card) return;
       e.preventDefault();
       card.classList.add('dragover');
-      var rect=card.getBoundingClientRect();
-      var before=(e.clientX-rect.left)<rect.width/2;
-      if(card!==_lastHintCard||before!==_lastHintBefore){_lastHintCard=card;_lastHintBefore=before;setStyleDragHint(card,before);}
     });
     card.addEventListener('dragleave',function(e){
+      if(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.card) return;
       e.preventDefault();
       depth=Math.max(0,depth-1);
       if(!depth){
@@ -3884,25 +5934,45 @@ function wireStyleComposer(){
       }
     });
     card.addEventListener('drop',function(e){
+      if(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.card) return;
       e.preventDefault();
       depth=0;
       card.classList.remove('dragover');
-      var rect=card.getBoundingClientRect();
-      var before=(e.clientX-rect.left)<rect.width/2;
-      clearStyleDragHints();
-      var dragKey=e.dataTransfer&&e.dataTransfer.getData('text/plain');
-      if(dragKey&&card.dataset.infoKey){
-        reorderInfoSlides(dragKey,card.dataset.infoKey,before);
-        return;
-      }
-      if(dragKey&&card.dataset.themeKey){
-        reorderStyleThemes(dragKey,card.dataset.themeKey,before);
-        return;
-      }
       var files=e.dataTransfer&&e.dataTransfer.files;
       if(!(files&&files.length))return;
       assignStyleFiles(files,card.dataset.stylePreviewKey||STYLE_PREVIEW_KEY);
       setTimeout(function(){buildStijlPreserveBg(g('pw'));},30);
+    });
+  });
+  Array.prototype.slice.call(document.querySelectorAll('.stijlSlideRail')).forEach(function(rail){
+    rail.addEventListener('dragover',function(e){
+      if(!(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.rail===rail))return;
+      e.preventDefault();
+      maybeAutoScrollRail(rail,e.clientX);
+      updateStyleDragHint(rail,e.clientX);
+      if(e.dataTransfer)e.dataTransfer.dropEffect='move';
+    });
+    rail.addEventListener('dragleave',function(e){
+      if(!(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.rail===rail))return;
+      var rect=rail.getBoundingClientRect();
+      var inside=e.clientX>=rect.left&&e.clientX<=rect.right&&e.clientY>=rect.top&&e.clientY<=rect.bottom;
+      if(inside)return;
+      clearStyleDragHints();
+    });
+    rail.addEventListener('drop',function(e){
+      if(!(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.rail===rail))return;
+      e.preventDefault();
+      updateStyleDragHint(rail,e.clientX);
+      var state=STYLE_SLIDE_DND;
+      var dragKey=state.key;
+      var overKey=state.overKey;
+      var before=state.overBefore;
+      STYLE_SLIDE_DND=null;
+      Array.prototype.slice.call(document.querySelectorAll('.stijlSlideCard.dragover,.infoSlideCard.dragover')).forEach(function(el){el.classList.remove('dragover');});
+      clearStyleDragHints();
+      if(!dragKey||!overKey||dragKey===overKey)return;
+      if(state.type==='info')reorderInfoSlides(dragKey,overKey,before);
+      else reorderStyleThemes(dragKey,overKey,before);
     });
   });
 }
@@ -3941,7 +6011,10 @@ var COVER_TEXT_ACTIVE=0;
 var COVER_TEXT_LAST_FOCUSED=0;
 var COVER_TEXT_SELECTED_MULTI=[];
 var COVER_TEXT_SUPPRESS_CLICK_UNTIL=0;
+var COVER_TEXT_DESELECTED=false;
+var COVER_ELEM_SEL=null; // 'logo'|'title'|'sub'
 function currentCoverTextIdx(){
+  if(COVER_TEXT_DESELECTED)return -1;
   var blocks=coverTextStore();
   if(!blocks.length)return -1;
   var active=Number(COVER_TEXT_ACTIVE);
@@ -3964,6 +6037,7 @@ function normalizeCoverTextSelectedMulti(){
   return COVER_TEXT_SELECTED_MULTI.slice();
 }
 function getCoverTextSelectedIndices(){
+  if(COVER_TEXT_DESELECTED)return [];
   var list=normalizeCoverTextSelectedMulti();
   if(list.length)return list.slice();
   var idx=currentCoverTextIdx();
@@ -3980,6 +6054,7 @@ function setCoverTextSelection(indices,activeIdx){
   var list=(Array.isArray(indices)?indices:[indices]).map(function(v){return Number(v);}).filter(function(v,i,arr){
     return v>=0&&v<blocks.length&&arr.indexOf(v)===i;
   }).sort(function(a,b){return a-b;});
+  COVER_TEXT_DESELECTED=false;
   COVER_TEXT_SELECTED_MULTI=list;
   if(list.length){
     setCoverTextActiveState(typeof activeIdx==='number'&&list.indexOf(activeIdx)>=0?activeIdx:list[list.length-1]);
@@ -3995,8 +6070,9 @@ function toggleCoverTextSelection(idx){
   setCoverTextSelection(list,list.length?idx:-1);
 }
 function clearCoverTextSelection(){
-  if(!normalizeCoverTextSelectedMulti().length)return false;
+  if(!normalizeCoverTextSelectedMulti().length&&!COVER_TEXT_DESELECTED)return false;
   COVER_TEXT_SELECTED_MULTI=[];
+  COVER_TEXT_DESELECTED=true;
   patchCoverTextTargets();
   refreshShapeEditors('cover');
   return true;
@@ -4076,6 +6152,7 @@ function setCoverTextActiveState(idx){
   idx=Math.max(0,Math.min(max,Number(idx)||0));
   COVER_TEXT_ACTIVE=idx;
   COVER_TEXT_LAST_FOCUSED=idx;
+  COVER_TEXT_DESELECTED=false;
   return idx;
 }
 function syncCoverTextInputs(){
@@ -4182,6 +6259,7 @@ function selectCoverTextItem(idx,ev){
     if(ev){ev.preventDefault();ev.stopPropagation();}
     return;
   }
+  COVER_ELEM_SEL=null;
   if(ev&&(ev.shiftKey||ev.metaKey||ev.ctrlKey))toggleCoverTextSelection(idx);
   else{
     setShapeSelection('cover',[],-1);
@@ -4421,6 +6499,7 @@ function startCoverTextInlineEdit(ev,idx){
     span.classList.add('cpTextBlockHint');
   }
   span.contentEditable='true';
+  span.spellcheck=false;
   span.focus();
   var range=document.createRange();
   range.selectNodeContents(span);
@@ -4559,8 +6638,17 @@ function closeTextMenu(el){
 function setBackMode(mode){
   var m=S.d.meta=S.d.meta||{};
   m.backMode=(mode==='blank'||mode==='reflect')?mode:'mirror';
+  if(m.backMode==='blank'){
+    ensureBackDesignDefaults(m);
+    STYLE_BACK_EDIT_SURFACE='back';
+    CANVAS_CARD_FLIPPED=true;
+  }else{
+    STYLE_BACK_EDIT_SURFACE='front';
+    CANVAS_CARD_FLIPPED=false;
+  }
   markDirty();
   buildStijlPreserveBg(g('pw'));
+  updateStijlPreview();
 }
 function setTextWeight(val){
   val=(val==='medium'||val==='semibold'||val==='bold')?val:'regular';
@@ -4672,12 +6760,13 @@ function addCoverTextBlock(){
   var blocks=coverTextStore();
   if(blocks.length>=6){toast('Maximaal 6 tekstvakken','amber');return;}
   blocks.push(makeCoverTextBlock(blocks.length));
-  setCoverTextActiveState(blocks.length-1);
+  setCoverTextSelection([blocks.length-1],blocks.length-1);
   markDirty();
   updateStijlPreview();
   refreshCoverTextCard();
   refreshCoverTextDropdown();
   refreshShapeEditors('cover');
+  syncActiveCoverTextControls();
   var newIdx=currentCoverTextIdx();
   setTimeout(function(){startCoverTextInlineEdit(null,newIdx);},60);
 }
@@ -4748,25 +6837,24 @@ function buildFontSizeMenuHtml(curSize){
 }
 function buildTextColorMenuHtml(action,currentColor){
   var hex=normalizeHexInput(currentColor)||'#1a1a2e';
-  var meta=stylePaletteMeta(action);
-  var tcRows=[meta.quick.slice(0,8)].concat(BRAND_FAM_BG.slice(1));
+  var tcMeta=stylePaletteMeta('settc');
+  var tcRows=[tcMeta.quick.slice(0,8)].concat(BRAND_FAM_BG.slice(1));
   return '<details class="textToolbarMenu">'+
     '<summary class="textToolbarMenuBtn" title="Tekstkleur" data-text-color-btn="1">'+textColorButtonIcon(hex)+'<span class="textToolbarCaret">▾</span></summary>'+
     '<div class="textToolbarMenuPop brandPopPop">'+
-      brandPaletteHtml(action,hex,tcRows)+
+      brandTextColorPaletteHtml(action,hex,tcRows,{universal:true})+
     '</div>'+
   '</details>';
 }
 function buildTextBgMenuHtml(color){
   var hex=normalizeHexInput(color)||'';
-  var tbRows=BRAND_FAM_BG;
   var noSw='<button class="brandSw brandNoColorSw'+(hex?'':' sel')+'" type="button" title="Geen vlak" onclick="setTextBgMode(\'\')">'+
     '<svg viewBox="0 0 18 18" width="18" height="18"><line x1="3" y1="15" x2="15" y2="3" stroke="#d05050" stroke-width="1.5" stroke-linecap="round"/></svg>'+
   '</button>';
   return '<details class="textToolbarMenu">'+
     '<summary class="textToolbarMenuBtn" title="Tekstvlak" data-text-bg-btn="1">'+textBgButtonIcon(hex||'none')+'<span class="textToolbarCaret">▾</span></summary>'+
     '<div class="textToolbarMenuPop brandPopPop">'+
-      brandPaletteHtml('settb',hex||'',tbRows,{prefixHtml:noSw})+
+      brandTextColorPaletteHtml('settb',hex||'',BRAND_FAM_BG,{prefixHtml:noSw})+
     '</div>'+
   '</details>';
 }
@@ -4782,10 +6870,7 @@ var SHAPE_SEL_KEY=null;
 function startShapeSelTimer(key){
   SHAPE_SEL_KEY=key||activeStyleEditKey();
   if(SHAPE_SEL_TIMER){clearTimeout(SHAPE_SEL_TIMER);SHAPE_SEL_TIMER=null;}
-  SHAPE_SEL_TIMER=setTimeout(function(){
-    SHAPE_SEL_TIMER=null;
-    clearActiveShapeSelection(SHAPE_SEL_KEY);
-  },6500);
+  // No auto-deselect timer — selection persists until explicitly changed
 }
 function resetShapeSelTimer(){
   SHAPE_SEL_KEY=SHAPE_SEL_KEY||activeStyleEditKey();
@@ -5379,7 +7464,27 @@ function applyCanvasZoom(){
   document.querySelectorAll('.stijlCanvasCardWrap .cardFaceOuter, .stijlCanvasCardWrap .adminInfoSlide').forEach(function(el){
     el.style.zoom=scale;
   });
+  document.querySelectorAll('.spaceLiveFrameScale').forEach(function(el){
+    el.style.setProperty('--preview-scale',scale);
+    el.style.height=Math.round(SPACE_PREVIEW_H*scale)+'px';
+  });
   document.querySelectorAll('.cvZoomPct').forEach(function(el){el.textContent=CANVAS_ZOOM_PCT+'%';});
+}
+var SPACE_PREVIEW_REFRESH_TM=0;
+function refreshSpaceSitePreviewFrame(){
+  if(SPACE_PREVIEW_CARDS_MODE)return;
+  var frame=document.querySelector('.spaceLiveFrame');
+  if(!frame)return;
+  var doc=spaceSitePreviewDocumentHtml();
+  if(frame.getAttribute('srcdoc')!==doc)frame.setAttribute('srcdoc',doc);
+}
+function scheduleSpaceSitePreviewRefresh(){
+  if(S.activeKind!=='space')return;
+  clearTimeout(SPACE_PREVIEW_REFRESH_TM);
+  SPACE_PREVIEW_REFRESH_TM=setTimeout(function(){
+    SPACE_PREVIEW_REFRESH_TM=0;
+    refreshSpaceSitePreviewFrame();
+  },40);
 }
 function setCanvasZoom(pct){
   CANVAS_ZOOM_PCT=Math.max(40,Math.min(300,Math.round(pct/25)*25));
@@ -5538,7 +7643,7 @@ function startShapeDrag(ev,key,idx){
     ev.stopPropagation();
     return;
   }
-  if(key==='cover')COVER_TEXT_SELECTED_MULTI=[];
+  if(key==='cover'){COVER_TEXT_SELECTED_MULTI=[];COVER_TEXT_ACTIVE=-1;COVER_TEXT_DESELECTED=true;COVER_ELEM_SEL=null;}
   setShapeSelection(key,[Number(idx)],Number(idx));
   refreshShapeEditors(key);
   setTimeout(function(){focusShapeEditor(key);},20);
@@ -5874,7 +7979,7 @@ function shapeColorPaletteHtml(key,idx,field,current){
   var applyInline='updateShapeField(\''+esc(key)+'\','+idx+',\''+field+'\',this.value)';
   var shapeQuick=SHAPE_PAL_ROWS[0].slice();
   (function(){var ext=BRAND_FAMILIES;for(var _qi=0;_qi<ext.length&&shapeQuick.length<24;_qi+=2){var _fc=ext[_qi];if(_fc&&!shapeQuick.some(function(q){return q.a===_fc.base;}))shapeQuick.push({n:_fc.n,a:_fc.base});}})();
-  var html='<div class="brandCompact">'+
+  var html='<div class="brandCompact brandCompact-shared">'+
     '<div class="brandQSection">'+
       '<div class="brandQuickRow">'+
         '<div class="brandSwsGroup">'+
@@ -5952,16 +8057,17 @@ function colorToneAdjust(baseHex,tone){
     else if(mx===g)h=((b-r)/d+2)/6;
     else h=((r-g)/d+4)/6;
   }
-  var amt=Math.abs(n)/100;
+  var t=n/100;// -1..+1, linear
   var newL,newS;
-  if(n>0){
-    // Lighten: stays within family range — max L=0.93 (light pastel, not white)
-    newL=l+(0.93-l)*Math.sqrt(amt);
-    newS=s*Math.pow(1-amt,0.7);
+  if(t>0){
+    // Lighten linearly: l → 0.84 (less extreme, more midtones)
+    newL=l+(0.84-l)*t;
+    newS=s*(1-t*0.60);
   }else{
-    // Darken: stays within family range — min L=0.25 (dark but recognisable hue, not near-black)
-    newL=l*(1-amt)+0.25*amt;
-    newS=Math.min(1,s+s*(amt*0.4));
+    // Darken linearly: l → 0.26 (less extreme, more midtones)
+    var dt=-t;
+    newL=l-(l-0.26)*dt;
+    newS=Math.min(1,s+(0.45-s)*dt*0.35);
   }
   // HSL → RGB
   function hue2rgb(p,q,t){t=t<0?t+1:t>1?t-1:t;if(t<1/6)return p+(q-p)*6*t;if(t<0.5)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p;}
@@ -5998,7 +8104,9 @@ function setCardBgTone(val){
   var base=cardBgBaseForKey(meta,key);
   maps.base[key]=base;
   maps.tone[key]=tone;
-  setCardBuildMode(key,'self');
+  // Set build mode to 'self' directly without re-rendering the panel (which would destroy the slider during drag)
+  var store=cardBuildStore(meta);
+  store[key]='self';
   markDirty();
   updateStijlPreview();
 }
@@ -6009,9 +8117,22 @@ function shapeChipIconHtml(layer){
   }
   return shapeIconSvg((layer&&layer.type)||'circle');
 }
+function buildInfoCoverElementChips(key){
+  if(key!=='cover'||S.activeKind!=='space')return '';
+  var chips=[];
+  var logoHidden=!!(S.d&&S.d.meta&&S.d.meta.infoCoverLogoRemoved);
+  var title=String(infoCoverTitleText()||'').trim()||'Titel';
+  var sub=String(infoCoverSubText()||'').trim()||'Ondertitel';
+  if(!logoHidden){
+    chips.push('<button class="shapeChip shapeChipCoverElem'+(COVER_ELEM_SEL==='logo'?' sel active':'')+'" type="button" title="Logo" aria-label="Logo" onclick="selectCoverElem(\'logo\')"><img src="/assets/logo-icons/masters/master-transparent.svg" alt="" class="shapeChipCoverLogo" aria-hidden="true"></button>');
+  }
+  chips.push('<button class="shapeChip shapeChipCoverElem'+(COVER_ELEM_SEL==='title'?' sel active':'')+'" type="button" title="T1: '+esc(title)+'" aria-label="T1: '+esc(title)+'" onclick="selectCoverElem(\'title\')"><span class="shapeChipCoverLabel">T1</span></button>');
+  chips.push('<button class="shapeChip shapeChipCoverElem'+(COVER_ELEM_SEL==='sub'?' sel active':'')+'" type="button" title="T2: '+esc(sub)+'" aria-label="T2: '+esc(sub)+'" onclick="selectCoverElem(\'sub\')"><span class="shapeChipCoverLabel">T2</span></button>');
+  return chips.join('');
+}
 function buildCoverTextShapeChips(key){
   if(key!=='cover')return '';
-  return coverTextStore().map(function(item,idx){
+  return buildInfoCoverElementChips(key)+coverTextStore().map(function(item,idx){
     var label=String(item.text||'').trim()||('Tekstvak '+(idx+1));
     var isSel=isCoverTextSelected(idx);
     var isAct=currentCoverTextIdx()===idx;
@@ -6027,20 +8148,26 @@ function buildShapeEditorHtml(key){
   var shapeToggleBtn='<button type="button" aria-label="'+(shapesCollapsed?'Vormen tonen':'Vormen inklappen')+'" title="'+(shapesCollapsed?'Tonen':'Inklappen')+'" onclick="toggleShapesSection(\''+esc(key)+'\')" style="border:none;background:transparent;color:#5c8f9f;font:inherit;font-size:21px;font-weight:300;line-height:1;cursor:pointer;padding:0 1px;box-shadow:none;opacity:.88">'+(shapesCollapsed?'+':'−')+'</button>';
   var sectionHead='<div class="stijlSectionLabel" style="display:flex;align-items:center;justify-content:space-between">Vormen'+shapeToggleBtn+'</div>';
   if(!layers.length||!layer){
+    var _textChips=buildCoverTextShapeChips(key);
+    var _shapeChips=layers.map(function(item,i){var shape=shapeLayerLabel(item);return '<button class="shapeChip'+(i===active?' sel':'')+'" type="button" title="'+esc(shape+' '+(i+1))+'" aria-label="'+esc(shape+' '+(i+1))+'" onclick="setShapeLayerActive(\''+esc(key)+'\','+i+')">'+shapeChipIconHtml(item)+'</button>';}).join('');
+    var _hasChips=!!(layers.length||_textChips);
+    var _shapeTypeBar='<div class="shapeGrid"><div class="shapeField"><div class="shapeTypeBar">'+
+      SHAPE_TYPES.map(function(opt){return '<button class="shapeTypeBtn" type="button" title="'+esc(opt.label)+'" aria-label="'+esc(opt.label)+'" onclick="addShapeLayer(\''+esc(key)+'\',\''+opt.id+'\')">'+shapeIconSvg(opt.id)+'</button>';}).join('')+
+      '<label class="shapeTypeImportBtn" title="SVG vorm toevoegen" aria-label="SVG vorm toevoegen"><span>+</span><input type="file" accept=".svg,image/svg+xml" onchange="importShapeSvgFile(\''+esc(key)+'\',this)"></label>'+
+    '</div></div></div>';
+    var _selTextIdx=(key==='cover'?getCoverTextSelectedIndices():[]);
+    var _coverElemSel=(key==='cover'&&COVER_ELEM_SEL);
+    var _emptyDeleteBtn=(_coverElemSel
+      ?'<button class="shapeLayerDelete" type="button" title="Verwijderen" onclick="removeSelectedCoverElem()"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'
+      :_selTextIdx.length?'<button class="shapeLayerDelete" type="button" title="'+((_selTextIdx.length>1)?'Geselecteerde tekstvakken verwijderen':'Tekstvak verwijderen')+'" onclick="removeSelectedShapeLayers(\''+esc(key)+'\')"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>':'');
     var emptyContent=
-      ((layers.length||buildCoverTextShapeChips(key))
-        ? '<div class="shapeLayerBar">'+
-            layers.map(function(item,i){var shape=shapeLayerLabel(item);return '<button class="shapeChip'+(i===active?' sel':'')+'" type="button" title="'+esc(shape+' '+(i+1))+'" aria-label="'+esc(shape+' '+(i+1))+'" onclick="setShapeLayerActive(\''+esc(key)+'\','+i+')">'+shapeChipIconHtml(item)+'</button>';}).join('')+
-            buildCoverTextShapeChips(key)+
-          '</div>'+
-          '<div class="shapeGhost">'+(layers.length?'Klik een vormlaag of tekstlaag om verder te werken.':'Klik een tekstlaag om verder te werken.')+'</div>'
+      (_hasChips
+        ? '<div class="shapeActiveWrap">'+
+            '<div class="shapeActiveLabel">Actieve vormen</div>'+
+            '<div class="shapeLayerBar">'+_shapeChips+_textChips+_emptyDeleteBtn+'</div>'+
+          '</div>'
         : '<div class="shapeGhost">Kies een vorm of tekst om te beginnen.</div>')+
-      '<div class="shapeGrid">'+
-        '<div class="shapeField"><div class="shapeTypeBar">'+
-          SHAPE_TYPES.map(function(opt){return '<button class="shapeTypeBtn" type="button" title="'+esc(opt.label)+'" aria-label="'+esc(opt.label)+'" onclick="addShapeLayer(\''+esc(key)+'\',\''+opt.id+'\')">'+shapeIconSvg(opt.id)+'</button>';}).join('')+
-          '<label class="shapeTypeImportBtn" title="SVG vorm toevoegen" aria-label="SVG vorm toevoegen"><span>+</span><input type="file" accept=".svg,image/svg+xml" onchange="importShapeSvgFile(\''+esc(key)+'\',this)"></label>'+
-        '</div></div>'+
-      '</div>'+
+      _shapeTypeBar+
       buildIconLibraryHtml(key)+
       '<div class="shapeEmptyState"></div>';
     return '<div class="stijlShapes">'+sectionHead+(shapesCollapsed?'':emptyContent)+'</div>';
@@ -6180,6 +8307,7 @@ function setShapeLayerActive(key,idx,ev){
     if(key==='cover'){
       COVER_TEXT_SELECTED_MULTI=[];
       COVER_TEXT_ACTIVE=-1;
+      COVER_TEXT_DESELECTED=true;
     }
     setShapeSelection(key,[Number(idx)],Number(idx));
   }
@@ -6508,10 +8636,11 @@ function buildSharedCardEditor(opts){
   opts=opts||{};
   var m=S.d.meta||{};
   var previewKey=opts.previewKey||'algemeen';
+  var designKey=opts.designKey||previewKey;
   var layoutMode=opts.layoutMode||'stack';
   // Use a local copy so the while-loop fill never mutates the real store
   var coverBlocks=coverTextStore().slice();
-  if(previewKey==='cover'){
+  if(designKey==='cover'){
     while(coverBlocks.length<2){
       var block=makeCoverTextBlock(coverBlocks.length);
       if(coverBlocks.length===0)block.text=String(m.title||'');
@@ -6519,23 +8648,29 @@ function buildSharedCardEditor(opts){
       coverBlocks.push(block);
     }
   }
-  var activeCoverBlock=previewKey==='cover'?(coverBlocks[currentCoverTextIdx()]||coverBlocks[0]||null):null;
-  var curFont=previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.font||'IBM Plex Sans'):((m.cssVars||{})['--pk-font']||'IBM Plex Sans');
-  var curFontSize=previewKey==='cover'&&activeCoverBlock?String(activeCoverBlock.size||12):normFontSize((m.cssVars||{})['--pk-font-size']||'12');
-  var textColor=previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.color||'#1a1a2e'):((m.cssVars||{})['--pk-set-text']||'#1a1a2e');
-  var cardBg=cardBgForKey(m,previewKey);
-  var align=previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.align||'left'):((m.cssVars||{})['--pk-text-align']||(opts.infoRichCe?'left':'center'));
-  var valign=previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.valign||'center'):((m.cssVars||{})['--pk-text-valign']||'center');
-  var textWeight=opts.forceBold?'bold':(previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.weight||'regular'):(((m.cssVars||{})['--pk-font-weight'])||'regular'));
-  var textItalic=previewKey==='cover'&&activeCoverBlock?!!activeCoverBlock.italic:(((m.cssVars||{})['--pk-font-italic'])==='1');
-  var textUnderline=previewKey==='cover'&&activeCoverBlock?!!activeCoverBlock.underline:(((m.cssVars||{})['--pk-font-underline'])==='1');
-  var textBgMode=previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.bg||''):(((m.cssVars||{})['--pk-text-bg-color'])||'');
-  var letterSpacing=String((m.cssVars||{})['--pk-letter-spacing']||'0');
-  var lineHeight=String((m.cssVars||{})['--pk-line-height']||'1.4');
-  var accentColor=((m.cssVars||{})['--pk-set-accent']||'#CFE6DF');
+  var editorCv=styleCssVarsForKey(m,designKey);
+  var activeCoverBlock=designKey==='cover'?(coverBlocks[currentCoverTextIdx()]||coverBlocks[0]||null):null;
+  var curFont=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.font||'IBM Plex Sans'):((editorCv||{})['--pk-font']||'IBM Plex Sans');
+  var curFontSize=designKey==='cover'&&activeCoverBlock?String(activeCoverBlock.size||12):normFontSize((editorCv||{})['--pk-font-size']||'12');
+  var textColor=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.color||'#1a1a2e'):((editorCv||{})['--pk-set-text']||'#1a1a2e');
+  var editorCardBg=cardBgForKey(m,designKey);
+  var previewCardBg=cardBgForKey(m,previewKey);
+  var align=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.align||'left'):((editorCv||{})['--pk-text-align']||(opts.infoRichCe?'left':'center'));
+  var valign=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.valign||'center'):((editorCv||{})['--pk-text-valign']||'center');
+  var textWeight=opts.forceBold?'bold':(designKey==='cover'&&activeCoverBlock?(activeCoverBlock.weight||'regular'):(((editorCv||{})['--pk-font-weight'])||'regular'));
+  var textItalic=designKey==='cover'&&activeCoverBlock?!!activeCoverBlock.italic:(((editorCv||{})['--pk-font-italic'])==='1');
+  var textUnderline=designKey==='cover'&&activeCoverBlock?!!activeCoverBlock.underline:(((editorCv||{})['--pk-font-underline'])==='1');
+  var textBgMode=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.bg||''):(((editorCv||{})['--pk-text-bg-color'])||'');
+  var letterSpacing=String((editorCv||{})['--pk-letter-spacing']||'0');
+  var lineHeight=String((editorCv||{})['--pk-line-height']||'1.4');
+  var accentColor=((editorCv||{})['--pk-set-accent']||'#CFE6DF');
   var doubleSided=(m.doubleSided!==false);
   var backMode=(m.backMode||'mirror');
-  var mode=cardBuildModeForKey(m,previewKey);
+  var backScope=backStyleScope(m);
+  var editingBackSurface=(backMode==='blank'&&STYLE_BACK_EDIT_SURFACE==='back');
+  var activeBackDesignKey=currentBackDesignKey(previewKey);
+  var canUseCardBackScope=previewKey!=='cover'&&((((S.d||{}).questions||{})[previewKey])||[]).length>0;
+  var mode=cardBuildModeForKey(m,designKey);
   var alignIcons={
     left:'<svg viewBox="0 0 16 16"><line x1="2.5" y1="4" x2="13.5" y2="4"/><line x1="2.5" y1="8" x2="10" y2="8"/><line x1="2.5" y1="12" x2="12" y2="12"/></svg>',
     center:'<svg viewBox="0 0 16 16"><line x1="2.5" y1="4" x2="13.5" y2="4"/><line x1="4" y1="8" x2="12" y2="8"/><line x1="3" y1="12" x2="13" y2="12"/></svg>',
@@ -6546,7 +8681,11 @@ function buildSharedCardEditor(opts){
     center:'<svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="1.5" fill="none" opacity=".35"/><line x1="4.5" y1="7" x2="11.5" y2="7"/><line x1="4.5" y1="9.5" x2="9.5" y2="9.5" opacity=".45"/></svg>',
     bottom:'<svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="1.5" fill="none" opacity=".35"/><line x1="4.5" y1="9.5" x2="11.5" y2="9.5"/><line x1="4.5" y1="12" x2="9.5" y2="12" opacity=".45"/></svg>'
   };
-  var previewCore=sharedCardPreviewHtml({
+  var isSpacePreview=S.activeKind==='space';
+  var isSpaceSitePreview=isSpacePreview&&!opts.infoRichCe;
+  var previewCore=isSpaceSitePreview
+    ?spaceSitePreviewHtml()
+    :sharedCardPreviewHtml({
         wrapId:opts.wrapId||'stijlCardPrevWrap',
         wrapClass:opts.wrapClass||'stijlCardPrevWrap',
         faceId:opts.faceId||'stijlCardFace',
@@ -6558,9 +8697,10 @@ function buildSharedCardEditor(opts){
         frontTxt:(opts.frontTxt!=null?opts.frontTxt:(opts.sampleTxt||'')),
         backTxt:opts.backTxt||'',
         flipped:!!opts.flipped,
-        cardBg:cardBg,
-        emptyBg:(opts.emptyBg||cardBg),
-        forceNoImage:mode==='self',
+        cardBg:previewCardBg,
+        emptyBg:(opts.emptyBg||previewCardBg),
+        forceNoImage:!!opts.forceNoImage||(String(designKey||'').indexOf('__back')!==0&&mode==='self'),
+        backDesignKey:activeBackDesignKey,
         showCoverTexts:previewKey==='cover',
         suppressEmptyFrontHint:!!opts.suppressEmptyFrontHint,
         infoRichCe:!!opts.infoRichCe,
@@ -6570,7 +8710,7 @@ function buildSharedCardEditor(opts){
         infoMidTitleText:opts.infoMidTitleText!=null?opts.infoMidTitleText:'',
         wrapStyle:opts.wrapStyle||''
       });
-  var previewHintHtml=(opts.previewHint===false?'':'<div class="stijlPreviewHint">'+esc(stylePreviewDisplayFile(opts.previewHint||opts.previewFile||'kaart.svg'))+'</div>');
+  var previewHintHtml=(opts.previewHint===false||isSpaceSitePreview?'':'<div class="stijlPreviewHint">'+esc(stylePreviewDisplayFile(opts.previewHint||opts.previewFile||'kaart.svg'))+'</div>');
   var nightMode=previewNightMode()||adminNightMode();
   var gridMode=previewGridMode();
   var nightIcon=nightMode
@@ -6583,25 +8723,56 @@ function buildSharedCardEditor(opts){
     '<button class="cvZoomPct" type="button" onclick="resetCanvasZoom()" title="Telefoon-formaat (100%)">'+CANVAS_ZOOM_PCT+'%</button>'+
     '<button class="cvZoomBtn" type="button" onclick="stepCanvasZoom(25)" title="Inzoomen">+</button>'+
   '</div>';
+  var backArrow='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>';
+  var fwdArrow='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>';
+  var homeIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>';
+  // Shared nav pill: ← ⌂ →  no separators, clean pill
+  var hasInfoNav=!!(opts.infoRichCe&&infoPreviewNavKeys().length>1);
+  var navBackFn=isSpaceSitePreview?'previewNavBack()':(opts.infoRichCe?'infoPreviewNavBack()':'cardPreviewNavBack()');
+  var navHomeFn=isSpaceSitePreview?'previewNavHome()':(opts.infoRichCe?'infoPreviewNavHome()':'cardPreviewNavHome()');
+  var navFwdFn=isSpaceSitePreview?'previewNavForward()':(opts.infoRichCe?'infoPreviewNavForward()':'cardPreviewNavForward()');
+  var navHomeTitle=isSpaceSitePreview?'Overzicht':(opts.infoRichCe?'Cover':'Eerste kaart');
+  var previewNavPillHtml=((!opts.infoRichCe||hasInfoNav)
+    ?('<div class="previewTopPill previewNavPill">'+
+        '<button class="stijlCanvasNightBtn" type="button" title="Vorige" onclick="'+navBackFn+'">'+backArrow+'</button>'+
+        '<button class="stijlCanvasNightBtn" type="button" title="'+navHomeTitle+'" onclick="'+navHomeFn+'">'+homeIcon+'</button>'+
+        '<button class="stijlCanvasNightBtn" type="button" title="Volgende" onclick="'+navFwdFn+'">'+fwdArrow+'</button>'+
+      '</div>')
+    :'<div></div>');
+  var previewActionPillHtml='<div class="previewTopPill">'+
+    (isSpaceSitePreview
+      ?('<button class="stijlCanvasNightBtn'+(nightMode?' sel':'')+'" type="button" aria-label="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" title="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" onclick="togglePreviewNight()">'+nightIcon+'</button>')
+      :(((backMode==='blank')?'':('<button class="stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" type="button" aria-label="Kaart omdraaien" title="Kaart omdraaien" onclick="toggleCanvasFlip()">'+flipIcon+'</button>'+
+        '<div class="previewTopPillSep"></div>'))+
+        '<button class="stijlCanvasGridBtn'+(gridMode?' sel':'')+'" type="button" aria-label="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" title="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" onclick="togglePreviewGrid()">'+gridIcon+'</button>'+
+        '<button class="stijlCanvasNightBtn'+(nightMode?' sel':'')+'" type="button" aria-label="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" title="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" onclick="togglePreviewNight()">'+nightIcon+'</button>'))+
+    '</div>';
   var nightToggleHtml='<div class="stijlCanvasTopbar">'+
     zoomCtrl+
-    '<div class="stijlCanvasTopbarRight">'+
-      '<button class="stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" type="button" aria-label="Kaart omdraaien" title="Kaart omdraaien" onclick="toggleCanvasFlip()">'+flipIcon+'</button>'+
-      '<button class="stijlCanvasGridBtn'+(gridMode?' sel':'')+'" type="button" aria-label="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" title="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" onclick="togglePreviewGrid()">'+gridIcon+'</button>'+
-      '<button class="stijlCanvasNightBtn'+(nightMode?' sel':'')+'" type="button" aria-label="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" title="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" onclick="togglePreviewNight()">'+nightIcon+'</button>'+
-    '</div>'+
+    previewNavPillHtml+
+    '<div class="stijlCanvasTopbarRight">'+previewActionPillHtml+'</div>'+
   '</div>';
-  var previewBackToolbarHtml=(!opts.infoRichCe&&doubleSided)
+  var previewBackToolbarHtml=(!isSpaceSitePreview&&!opts.infoRichCe&&doubleSided)
     ?'<div class="stijlCanvasBackbar">'+
         '<div class="stijlCanvasBackbarLabel">Achterkant</div>'+
         '<div class="stijlCanvasBackbarGroup">'+
           '<button class="stijlBackModeBtn'+(backMode==='mirror'?' sel':'')+'" type="button" onclick="setBackMode(\'mirror\')" title="Zelfde ontwerp">Zelfde</button>'+
           '<button class="stijlBackModeBtn'+(backMode==='reflect'?' sel':'')+'" type="button" onclick="setBackMode(\'reflect\')" title="Zelfde ontwerp gespiegeld">Gespiegeld</button>'+
-          '<button class="stijlBackModeBtn'+(backMode==='blank'?' sel':'')+'" type="button" onclick="setBackMode(\'blank\')" title="Aparte achterkant">Apart</button>'+
+          '<button class="stijlBackModeBtn'+(backMode==='blank'?' sel':'')+'" type="button" onclick="setBackMode(\'blank\')" title="Eigen achterkant">Eigen</button>'+
         '</div>'+
+        (backMode==='blank'
+          ?('<div class="previewEditSurfacePill previewEditSurfacePill-surface">'+
+              '<button class="previewEditSurfaceBtn'+(!editingBackSurface?' sel':'')+'" type="button" title="Voorkant ontwerpen" onclick="setBackEditSurface(\'front\')">Voor</button>'+
+              '<button class="previewEditSurfaceBtn'+(editingBackSurface?' sel':'')+'" type="button" title="Achterkant ontwerpen" onclick="setBackEditSurface(\'back\')">Achter</button>'+
+            '</div>'+
+            '<div class="previewEditSurfacePill previewEditSurfacePill-scope">'+
+              '<button class="previewEditSurfaceBtn'+(backScope!=='card'?' sel':'')+'" type="button" title="Pas het achterkantontwerp toe op de hele set" onclick="setBackDesignScope(\'set\')">Hele set</button>'+
+              '<button class="previewEditSurfaceBtn'+(backScope==='card'?' sel':'')+(canUseCardBackScope?'':' is-disabled')+'" type="button" title="'+(canUseCardBackScope?'Pas het achterkantontwerp alleen toe op deze kaart':'Beschikbaar zodra je een vraag selecteert')+'" onclick="'+(canUseCardBackScope?'setBackDesignScope(\'card\')':'return false')+'"'+(canUseCardBackScope?'':' aria-disabled="true" tabindex="-1"')+'>Deze kaart</button>'+
+            '</div>')
+          :'')+
       '</div>'
     :'';
-  var varianceHint=(!opts.infoRichCe)?previewVarianceHint(previewKey):'';
+  var varianceHint=(!isSpaceSitePreview&&!opts.infoRichCe)?previewVarianceHint(previewKey):'';
   var previewVarianceHtml=varianceHint
     ?'<div class="stijlCanvasVarianceHint" title="'+esc(varianceHint)+'">'+esc(varianceHint)+'</div>'
     :'';
@@ -6609,7 +8780,7 @@ function buildSharedCardEditor(opts){
       ?'<div class="stijlPreviewCol stijlCanvasCenter"><div class="stijlCanvasStage'+(opts.infoRichCe?' info-preview-stage':'')+'">'+
         '<div class="stijlCanvasCardWrap">'+
           (opts.selectorHtml?'<div class="stijlPreviewPick" style="width:100%">'+opts.selectorHtml+'</div>':'')+
-          '<div class="stijlCanvasWindow'+(nightMode?' night':'')+(gridMode?' grid-on':'')+(opts.infoRichCe?' info-preview':'')+'" data-style-drop-preview="1" data-style-preview-key="'+esc(previewKey)+'">'+nightToggleHtml+previewBackToolbarHtml+previewVarianceHtml+'<div class="bgCanvas" id="bgWrap"><canvas id="bgCanvas"></canvas></div><div class="stijlCanvasWindowInner">'+previewCore+'</div></div>'+
+          '<div class="stijlCanvasWindow'+(nightMode?' night':'')+(gridMode?' grid-on':'')+(opts.infoRichCe?' info-preview':'')+(isSpaceSitePreview?' site-preview-window':'')+'" data-style-drop-preview="1" data-style-preview-key="'+esc(designKey)+'">'+nightToggleHtml+previewBackToolbarHtml+previewVarianceHtml+'<div class="bgCanvas" id="bgWrap"><canvas id="bgCanvas"></canvas></div><div class="stijlCanvasWindowInner'+(isSpaceSitePreview?' site-preview-inner':'')+'">'+previewCore+'</div></div>'+
         '</div>'+
       '</div></div>'
       :'<div class="stijlPreviewCol">'+
@@ -6617,9 +8788,11 @@ function buildSharedCardEditor(opts){
         previewCore+
         previewHintHtml+
       '</div>');
-  var addTextBtn=(previewKey==='cover'
+  var addTextBtn=(designKey==='cover'
     ?'<details class="textToolbarMenu" id="coverTextToolbarMenu"><summary class="textToolbarMenuBtn" title="Tekstvakken beheren" data-cover-text-menu="1"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;display:block"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg><span class="textToolbarCaret">▾</span></summary><div class="textToolbarMenuPop coverTextDropdown" style="min-width:210px;right:0;left:auto">'+buildCoverTextDropdownContent()+'</div></details>'
-    :'');
+    :(opts.showDisabledTextBtn
+      ?'<button class="textToolbarMenuBtn is-disabled" type="button" disabled title="Tekstvak is alleen beschikbaar op de cover" aria-label="Tekstvak niet beschikbaar"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;display:block"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg><span class="textToolbarCaret">▾</span></button>'
+      :''));
   var typoCard='<div class="stijlMiniCard span2">'+
             '<div class="stijlEditorSection">'+
               '<div class="stijlSectionLabel">Typografie</div>'+
@@ -6672,17 +8845,17 @@ function buildSharedCardEditor(opts){
               '</div>'+
             '</div>'+
           '</div>';
-  var textCard=(previewKey==='cover'?'<div class="stijlMiniCard tight" id="coverTextEditorCard">'+buildCoverTextEditorHtml()+'</div>':'');
-  var shapeCard='<div class="stijlMiniCard tight">'+
-            '<div class="shapeEditor" data-shape-key="'+esc(previewKey)+'">'+buildShapeEditorHtml(previewKey)+'</div>'+
+  var textCard=(designKey==='cover'?'<div class="stijlMiniCard tight" id="coverTextEditorCard">'+buildCoverTextEditorHtml()+'</div>':'');
+  var shapeCard='<div class="stijlMiniCard tight" data-tip="vormen">'+
+            '<div class="shapeEditor" data-shape-key="'+esc(designKey)+'">'+buildShapeEditorHtml(designKey)+'</div>'+
           '</div>';
-  var colorCard='<div class="stijlMiniCard">'+
+  var colorCard='<div class="stijlMiniCard" data-tip="kleur">'+
             '<div class="stijlMiniHead"><div><div class="stijlSectionLabel">Kaartkleur</div></div></div>'+
             '<div class="stijlEditorSection">'+
               '<div class="stijlColorStack">'+
                 '<div class="stijlColorLine">'+
                   (layoutMode==='canvas'?'':'<div class="sLbl">Achtergrond</div>')+
-                  brandPaletteHtml('setcbg',cardBg,BRAND_FAM_BG)+
+                  brandColorPaletteHtml('setcbg',editorCardBg,BRAND_FAM_BG)+
                 '</div>'+
                 '<div class="shapeSliderRow" style="margin-top:10px">'+
                   '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Kleurtoon</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(cardBgToneValue(),-100,100)+'%" type="range" min="-100" max="100" step="1" value="'+cardBgToneValue()+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml((this.value>0?\'+\':\'\')+this.value,\'\');setCardBgTone(this.value)"><span class="shapeSliderValPill">'+sliderValueHtml((cardBgToneValue()>0?'+':'')+cardBgToneValue(),'')+'</span></div>'+
@@ -6690,22 +8863,41 @@ function buildSharedCardEditor(opts){
               '</div>'+
             '</div>'+
           '</div>';
-  var bgCard='<div class="stijlMiniCard tight">'+
+  var bgCard='<div class="stijlMiniCard tight" data-tip="achtergrond">'+
             '<div class="stijlMiniHead"><div><div class="stijlSectionLabel">Achtergrond</div></div></div>'+
             buildBgCtrls(bgCfg(),accentColor,'',true)+
           '</div>';
-  var toolbarRow='<div class="stijlCanvasToolbar">'+
+  var toolbarRow='<div class="stijlCanvasToolbar'+(opts.disableToolbar?' is-disabled':'')+'">'+
     typoCard.replace(' span2','')+
   '</div>';
-  var toolbarExtra=opts.toolbarExtra?'<div class="stijlCanvasToolbarExtra">'+opts.toolbarExtra+'</div>':'';
+  var toolbarExtra=opts.toolbarExtra?'<div class="stijlCanvasTopToolsSide"><div class="stijlCanvasToolbarExtra">'+opts.toolbarExtra+'</div></div>':'';
+  if(opts.disableShapeCard&&!opts.hideShapeCard){
+    shapeCard=shapeCard.replace('class="stijlMiniCard tight"','class="stijlMiniCard tight is-disabled"');
+  }
+  if(opts.disableColorCard&&!opts.hideColorCard){
+    colorCard=colorCard.replace('class="stijlMiniCard"','class="stijlMiniCard is-disabled"');
+  }
+  var leftCards={
+    shape:(opts.hideShapeCard?'':shapeCard),
+    color:(opts.hideColorCard?'':colorCard),
+    bg:(opts.hideBgCard?'':bgCard)
+  };
+  var leftOrder=(opts.leftCardOrder&&opts.leftCardOrder.length?opts.leftCardOrder:['shape','color','bg']);
+  var leftStack=leftOrder.map(function(key){return leftCards[key]||'';}).join('');
   if(layoutMode==='canvas'){
-    return '<div class="stijlCanvasTopTools">'+toolbarRow+toolbarExtra+'</div>'+
+    var staticHomeClass=opts.disableSticky?' home-static-toolbar':'';
+    var staticPreviewClass=opts.disableSticky?' home-static-preview':'';
+    var staticSideClass=opts.disableSticky?' home-static-side':'';
+    return (opts.hideToolbar&&!toolbarExtra?'':'<div class="stijlCanvasTopTools'+staticHomeClass+'" data-tip="tekst">'+
+        (opts.hideToolbar?'':'<div class="stijlCanvasTopToolsMain">'+toolbarRow+'</div>')+
+        toolbarExtra+
+      '</div>')+
       '<div class="stijlCardLayout canvas">'+
-        '<div class="stijlCanvasSide left">'+shapeCard+colorCard+bgCard+'</div>'+
-        '<div class="stijlCanvasSide preview">'+
+        '<div class="stijlCanvasSide left">'+leftStack+'</div>'+
+        '<div class="stijlCanvasSide preview'+staticPreviewClass+'">'+
           previewCol+
         '</div>'+
-        '<div class="stijlCanvasSide right">'+(opts.sidePanelHtml||'')+'</div>'+
+        '<div class="stijlCanvasSide right'+staticSideClass+'">'+(opts.sidePanelHtml||'')+'</div>'+
       '</div>';
   }
   return '<div class="stijlCardLayout">'+
@@ -6739,7 +8931,50 @@ function setStylePreviewKey(key){
   buildStijlPreserveBg(g('pw'));
   updateEditorHeaderTheme();
 }
+function cardPreviewThemeKeys(){
+  var meta=(S.d&&S.d.meta)||{};
+  var themes=Array.isArray(meta.themes)?meta.themes:[];
+  var keys=['cover'];
+  if(themes.length){keys=keys.concat(themes.map(function(t){return t.key||'cover';}));}
+  else{keys.push('algemeen');}
+  return keys;
+}
+function infoPreviewNavKeys(){
+  var meta=(S.d&&S.d.meta)||{};
+  var opts=infoSlideOptions(meta).filter(function(opt){return !opt.excluded;});
+  var keys=opts.map(function(opt){return opt.key||'cover';}).filter(Boolean);
+  return keys.length?keys:['cover'];
+}
+function cardPreviewNavHome(){setStylePreviewKey('cover');}
+function cardPreviewNavBack(){
+  var keys=cardPreviewThemeKeys();
+  var cur=activeStyleEditKey();
+  var idx=keys.indexOf(cur);
+  if(idx>0)setStylePreviewKey(keys[idx-1]);
+  else setStylePreviewKey(keys[0]);
+}
+function cardPreviewNavForward(){
+  var keys=cardPreviewThemeKeys();
+  var cur=activeStyleEditKey();
+  var idx=keys.indexOf(cur);
+  if(idx>=0&&idx<keys.length-1)setStylePreviewKey(keys[idx+1]);
+}
+function infoPreviewNavHome(){setInfoPreviewKey('cover');}
+function infoPreviewNavBack(){
+  var keys=infoPreviewNavKeys();
+  var cur=INFO_SLIDE_KEY||'cover';
+  var idx=keys.indexOf(cur);
+  if(idx>0)setInfoPreviewKey(keys[idx-1]);
+  else setInfoPreviewKey(keys[0]);
+}
+function infoPreviewNavForward(){
+  var keys=infoPreviewNavKeys();
+  var cur=INFO_SLIDE_KEY||'cover';
+  var idx=keys.indexOf(cur);
+  if(idx>=0&&idx<keys.length-1)setInfoPreviewKey(keys[idx+1]);
+}
 function activeStyleEditKey(){
+  if(isEditingBackDesign())return currentBackDesignKey(STYLE_PREVIEW_KEY||'algemeen');
   if(S.clTab==='opmaken'&&S.opmPane==='info')return INFO_SLIDE_KEY||'cover';
   return STYLE_PREVIEW_KEY||'cover';
 }
@@ -6765,6 +9000,19 @@ function updateActiveHeaderThemeName(val){
   updateStyleThemeNameByKey(STYLE_PREVIEW_KEY,val);
 }
 function updateEditorHeaderTheme(){
+  if(S.activeKind==='space'){
+    var spaceThemeEl=g('editorThemeTitle');
+    var spaceSep=g('editorThemeSep');
+    if(spaceSep)spaceSep.style.display='';
+    if(spaceThemeEl&&spaceThemeEl.tagName==='INPUT'){
+      spaceThemeEl.value=(S.space&&S.space.name)||S.spaceSlug||'Home';
+      spaceThemeEl.style.display='';
+      spaceThemeEl.readOnly=true;
+      spaceThemeEl.classList.add('is-static');
+    }
+    syncEditorHeaderWidths();
+    return;
+  }
   var key=(S.clTab==='opmaken'&&S.opmPane==='info')
     ?(INFO_SLIDE_KEY||'cover')
     :(STYLE_PREVIEW_KEY||'cover');
@@ -6835,8 +9083,8 @@ function syncEditorHeaderWidths(){
     probe.remove();
     el.style.width=Math.max(minW,Math.min(maxW,width))+'px';
   }
-  fitHeaderInput(titleEl,84,320);
-  fitHeaderInput(thEl,56,260);
+  fitHeaderInput(titleEl,(titleEl&&titleEl.readOnly)?0:84,320);
+  fitHeaderInput(thEl,(thEl&&thEl.readOnly)?0:56,260);
 }
 function activeStyleDeletePath(){
   var key=activeStyleEditKey();
@@ -7005,12 +9253,13 @@ function stylePaletteMeta(action){
       families:[
         {n:'Houtskool',base:'#3C4650',deep:'#1A1A2E'},
         {n:'Navy',     base:'#2C3E63',deep:'#141E38'},
+        {n:'Indigo',   base:'#4F5FB2',deep:'#363F80'},
         {n:'Teal',     base:'#2F5F63',deep:'#1A3E40'},
+        {n:'Sage',     base:'#6FAE9A',deep:'#3D8070'},
         {n:'Woud',     base:'#365C45',deep:'#1E3D2A'},
         {n:'Violet',   base:'#6A63C2',deep:'#4A45A0'},
-        {n:'Indigo',   base:'#4F5FB2',deep:'#363F80'},
+        {n:'Berry',    base:'#B45B82',deep:'#8C4365'},
         {n:'Goud',     base:'#C99A2E',deep:'#8C6A10'},
-        {n:'Sage',     base:'#6FAE9A',deep:'#3D8070'}
       ]
     };
   }
@@ -7025,7 +9274,7 @@ function stylePaletteMeta(action){
         {n:'Perzik',     a:'#F8E4D2'},
         {n:'Teal',       a:'#A8D8D6'},
         {n:'Botergeel',  a:'#F4E2A5'},
-        {n:'Muntgroen',  a:'#7FC5A6'}
+        {n:'Roze',       a:'#F2C8D2'}
       ],
       families:[
         {n:'Sage',    base:'#F7F4EF',deep:'#CFE6DF'},
@@ -7056,39 +9305,114 @@ function stylePaletteRows(action){
   for(var i=0;i<pts.length;i+=15)rows.push(pts.slice(i,i+15));
   return rows;
 }
+function stylePaletteTextSections(action){
+  if(action!=='settc')return [];
+  var fams=stylePaletteMeta(action).families||[];
+  var byName={};
+  fams.forEach(function(f){byName[f.n]=f;});
+  return [
+    {label:'Neutraal & donker', names:['Houtskool','Navy','Indigo']},
+    {label:'Koel & natuurlijk', names:['Teal','Sage','Woud']},
+    {label:'Accent & warm', names:['Violet','Berry','Goud']}
+  ].map(function(section){
+    return {
+      label:section.label,
+      families:section.names.map(function(name){return byName[name];}).filter(Boolean)
+    };
+  }).filter(function(section){return section.families.length;});
+}
+function stylePaletteTextExpandedHtml(action,cur){
+  var sections=stylePaletteTextSections(action);
+  if(!sections.length)return '';
+  var html='<div class="brandTextSections">';
+  sections.forEach(function(section){
+    html+='<div class="brandTextSection">'+
+      '<div class="brandWordLabel">'+esc(section.label)+'</div>'+
+      '<div class="brandTextFamilyRows">';
+    section.families.forEach(function(fam){
+      html+='<div class="brandTextFamilyRow">'+
+        '<div class="brandTextFamilyName">'+esc(fam.n)+'</div>'+
+        '<div class="brandTextShadeRow">';
+      famShades(fam.deep||fam.base,fam.n).forEach(function(p){
+        html+=brandSwBtn(action,p,cur);
+      });
+      html+='</div></div>';
+    });
+    html+='</div></div>';
+  });
+  html+='</div>';
+  return html;
+}
 var _stylePalState=null;
 var _stylePalRecent=[];
 var _stylePalDrag=null;
 var _stylePalAnchor=null;
+function brandTextColorRowOpts(opts){
+  var base={compact:true,kind:'shared',rowClass:'brandQuickRow-textcolor'};
+  return Object.assign(base,opts||{});
+}
+function brandColorRowOpts(opts){
+  var base={compact:true,kind:'shared',rowClass:'brandQuickRow-color'};
+  return Object.assign(base,opts||{});
+}
+function brandTextColorPaletteHtml(action,currentColor,rows,opts){
+  return brandPaletteHtml(action,currentColor,rows,brandTextColorRowOpts(opts));
+}
+function brandColorPaletteHtml(action,currentColor,rows,opts){
+  return brandPaletteHtml(action,currentColor,rows,brandColorRowOpts(opts));
+}
+function brandColorQuickRowHtml(action,currentColor,rows,opts){
+  return brandQuickRowHtml(action,currentColor,rows,brandColorRowOpts(opts));
+}
+function brandQuickRowHtml(action,currentColor,rows,opts){
+  var cur=String(currentColor||'').toLowerCase();
+  var hexNorm=normalizeHexInput(currentColor)||'#ffffff';
+  var kind=((opts&&opts.kind)||((action==='settc')?'text':'shared'));
+  var rowClass=(opts&&opts.rowClass)?(' '+opts.rowClass):'';
+  var firstRow=rows[0]||[];
+  var quickLimit=(opts&&opts.quickLimit!=null)?opts.quickLimit:8;
+  var quickItems=firstRow.slice(0,quickLimit);
+  var prefixHtml=(opts&&opts.prefixHtml)||'';
+  var swatchAction=(opts&&opts.swatchAction)||action;
+  var expandTarget=(opts&&opts.expandTarget)||action;
+  var currentTarget=(opts&&opts.currentTarget)===false?'':((opts&&opts.currentTarget)||action);
+  var currentTargetAttr=currentTarget?' data-cur-target="'+esc(currentTarget)+'"':'';
+  var currentTitle=(opts&&opts.currentTitle)||'Eigen kleur kiezen';
+  var colorInputHandler=(opts&&opts.colorInputHandler)||("applyStyleColor('"+action+"',this.value);this.parentElement.style.background=this.value");
+  var gridIcon='<svg viewBox="0 0 14 14" width="11" height="11" fill="currentColor" opacity=".75"><rect x="1.5" y="1.5" width="3" height="3" rx=".8"/><rect x="5.5" y="1.5" width="3" height="3" rx=".8"/><rect x="9.5" y="1.5" width="3" height="3" rx=".8"/><rect x="1.5" y="5.5" width="3" height="3" rx=".8"/><rect x="5.5" y="5.5" width="3" height="3" rx=".8"/><rect x="9.5" y="5.5" width="3" height="3" rx=".8"/><rect x="1.5" y="9.5" width="3" height="3" rx=".8"/><rect x="5.5" y="9.5" width="3" height="3" rx=".8"/><rect x="9.5" y="9.5" width="3" height="3" rx=".8"/></svg>';
+  var isExpanded=!!STYLE_PAL_EXPANDED[expandTarget];
+  var isCompact=!!(opts&&opts.compact);
+  return '<div class="brandQuickRow'+rowClass+'">'+
+    '<div class="brandSwsGroup">'+
+      prefixHtml+
+      quickItems.map(function(p){return brandSwBtn(swatchAction,p,cur);}).join('')+
+    '</div>'+
+    '<div class="brandQuickActions'+(isCompact?' compact':'')+'">'+
+      '<button class="brandExpandBtn'+(isExpanded?' on':'')+'" type="button" data-action="expandpicker" data-target="'+expandTarget+'" title="'+(isExpanded?'Minder':'Meer kleuren')+'">'+gridIcon+'</button>'+
+      '<span class="brandQSep"></span>'+
+      '<label class="brandCurrentSw"'+currentTargetAttr+' style="background:'+esc(hexNorm)+'" title="'+esc(currentTitle)+'">'+
+        '<input type="color" value="'+esc(hexNorm)+'" oninput="'+esc(colorInputHandler)+'">'+
+      '</label>'+
+    '</div>'+
+  '</div>';
+}
 function brandPaletteHtml(action,currentColor,rows,opts){
   var cur=String(currentColor||'').toLowerCase();
   var hexNorm=normalizeHexInput(currentColor)||'#ffffff';
   var isExpanded=!!STYLE_PAL_EXPANDED[action];
-  var gridIcon='<svg viewBox="0 0 14 14" width="11" height="11" fill="currentColor" opacity=".75"><rect x="1.5" y="1.5" width="3" height="3" rx=".8"/><rect x="5.5" y="1.5" width="3" height="3" rx=".8"/><rect x="9.5" y="1.5" width="3" height="3" rx=".8"/><rect x="1.5" y="5.5" width="3" height="3" rx=".8"/><rect x="5.5" y="5.5" width="3" height="3" rx=".8"/><rect x="9.5" y="5.5" width="3" height="3" rx=".8"/><rect x="1.5" y="9.5" width="3" height="3" rx=".8"/><rect x="5.5" y="9.5" width="3" height="3" rx=".8"/><rect x="9.5" y="9.5" width="3" height="3" rx=".8"/></svg>';
+  var kind=((opts&&opts.kind)||((action==='settc')?'text':'shared'));
   var firstRow=rows[0]||[];
-  var quickItems=firstRow.slice(0,8);
-  (function(){var ext=BRAND_FAMILIES;for(var _qi=0;_qi<ext.length&&quickItems.length<24;_qi+=2){var _fc=ext[_qi];if(_fc&&!quickItems.some(function(q){return q.a===_fc.base;}))quickItems.push({n:_fc.n,a:_fc.base});}})();
+  var quickLimit=(opts&&opts.quickLimit!=null)?opts.quickLimit:8;
   var extraRows=(firstRow.length>8?[firstRow.slice(8)]:[]).concat(rows.slice(1));
-  var prefixHtml=(opts&&opts.prefixHtml)||'';
-  var html='<div class="brandCompact">'+
+  var html='<div class="brandCompact brandCompact-'+kind+'">'+
     '<div class="brandQSection">'+
-      '<div class="brandQuickRow">'+
-        '<div class="brandSwsGroup">'+
-          prefixHtml+
-          quickItems.map(function(p){return brandSwBtn(action,p,cur);}).join('')+
-        '</div>'+
-        '<div class="brandQuickActions">'+
-          '<button class="brandExpandBtn'+(isExpanded?' on':'')+'" type="button" data-action="expandpicker" data-target="'+action+'" title="'+(isExpanded?'Minder':'Meer kleuren')+'">'+gridIcon+'</button>'+
-          '<span class="brandQSep"></span>'+
-          '<label class="brandCurrentSw" data-cur-target="'+action+'" style="background:'+esc(hexNorm)+'" title="Eigen kleur kiezen">'+
-            '<input type="color" value="'+esc(hexNorm)+'" oninput="applyStyleColor(\''+esc(action)+'\',this.value);this.parentElement.style.background=this.value">'+
-          '</label>'+
-        '</div>'+
-      '</div>'+
+      brandQuickRowHtml(action,currentColor,rows,opts)+
     '</div>';
   if(isExpanded){
     html+='<div class="brandExpandedWrap">';
-    if(extraRows.length>=3){
+    if(action==='settc'&&!(opts&&opts.universal)){
+      html+=stylePaletteTextExpandedHtml(action,cur);
+    }else if(extraRows.length>=3){
       var wFams=[];
       for(var ci=0;ci<Math.floor(extraRows.length/3);ci++){
         var cr0=extraRows[ci*3]||[];
@@ -7284,6 +9608,7 @@ function openStylePalette(action,anchorEl){
 }
 
 function buildStijl(target){
+  var spaceMode=S.activeKind==='space';
   var m=S.d.meta||{};
   var accent=(m.cssVars||{})['--pk-set-accent']||'#CFE6DF';
   var bg=((m.ui||{}).index||{}).background||{};
@@ -7291,7 +9616,7 @@ function buildStijl(target){
   if(!Array.isArray(bg.palette)||!bg.palette.length){var bc=bgCfg();bc.palette=[accent];}
   var curFont=(m.cssVars||{})['--pk-font']||'IBM Plex Sans';
 
-  var pane=S.opmPane||'vragen';
+  var pane=spaceMode?((S.opmPane==='info')?'info':'space'):(S.opmPane||'vragen');
   var isInfoMode=pane==='info';
   var infoKey=INFO_SLIDE_KEY||'cover';
   if(!isInfoMode){
@@ -7314,6 +9639,7 @@ function buildStijl(target){
   var themeIdx=!isInfoMode?styleThemeIndexByKey(previewState.selected.key):-1;
   var themeLabel=!isInfoMode&&themeIdx>=0?((m.themes||[])[themeIdx].label||''):'';
   var previewFile=isInfoMode?(((activeInfoOpt)||{}).file||'voorkant.svg'):previewState.file;
+  var infoCoverEnabled=isInfoMode?isInfoSlideEnabled(m,'cover'):true;
   var sampleTxt=!isInfoMode?(previewState.selected.key==='cover'?previewState.sampleTxt:questionPreviewFrontText(previewState.selected.key)):'';
   var sliderHtml='';
   if(isInfoMode){
@@ -7348,8 +9674,11 @@ function buildStijl(target){
   }else{
     sliderHtml=previewState.options.map(function(opt){return styleSlideCardHtml(opt,previewState.selected.key);}).join('');
   }
-  if(!isInfoMode){
-    sliderHtml+=
+  if(spaceMode&&!isInfoMode){
+    sliderHtml=spaceLayoutStripHtml(currentSpaceLayoutMode());
+  }
+  if(!isInfoMode&&!spaceMode){
+    sliderHtml='<div class="stijlSlideRail">'+sliderHtml+
       '<button class="stijlSlideCard stijlSlideAdd" type="button" onclick="addThemeFromStyle()">'+
         '<div class="stijlSlideThumb"><div class="stijlSlidePlusWrap"><div class="stijlSlidePlusChip"><div class="stijlSlidePlus">+</div></div></div></div>'+
         '<div class="stijlSlideBody"><div class="stijlSlideName">Nieuw thema</div></div>'+
@@ -7357,16 +9686,27 @@ function buildStijl(target){
       '<button class="stijlSlideCard stijlSlideAdd stijlSlideDup" type="button" onclick="dupSet()" title="Set dupliceren">'+
         '<div class="stijlSlideThumb"><div class="stijlSlidePlusWrap"><div class="stijlSlidePlusChip"><svg viewBox="0 0 24 24" style="width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></div></div></div>'+
         '<div class="stijlSlideBody"><div class="stijlSlideName">Set dupliceren</div></div>'+
-      '</button>';
+      '</button></div>';
   }
-  var html='<div class="panel"><div class="stijlShell">'+
+  if(spaceMode){
+    var infoPages=spaceInfoPages();
+    if(!INFO_SLIDE_KEY||!infoPages.some(function(page){return page.key===INFO_SLIDE_KEY;})){
+      INFO_SLIDE_KEY=(infoPages[0]||{}).key||'cover';
+    }
+  }
+  var panelModeClass=(spaceMode?' space-editor-mode':' set-editor-mode');
+  var stickyCanvasClass=(layoutMode==='canvas'&&!(spaceMode&&!isInfoMode)?' canvas-sticky-mode':'');
+  var html='<div class="panel'+panelModeClass+stickyCanvasClass+'"><div class="stijlShell">'+
     '<div id="stijl-kaart" class="stijlCardSection">'+
-      '<div class="stijlHeaderBar'+(isInfoMode?' info-mode':'')+'">'+
-        '<div class="stijlSlideRail">'+
-          sliderHtml+
-        '</div>'+
+      ((spaceMode&&!isInfoMode)
+        ?'<div class="stijlSectionTitle stijlSectionTitleTop">Lay-out</div>'
+        :(isInfoMode?'<div class="stijlSectionTitle stijlSectionTitleTop">Pagina&apos;s</div>':'<div class="stijlSectionTitle stijlSectionTitleTop">Kaarten</div>'))+
+      '<div class="stijlHeaderBar'+(isInfoMode?' info-mode':'')+(spaceMode&&!isInfoMode?' space-layout-header':'')+'">'+
+        (spaceMode&&!isInfoMode
+          ? sliderHtml
+          : (isInfoMode?'<div class="stijlSlideRail">'+sliderHtml+'</div>':sliderHtml))+
       '</div>'+
-      '<div class="stijlSectionTitle">'+(isInfoMode?'Kaart infosheet':'Kaart opmaken')+'</div>'+
+      '<div class="stijlSectionTitle">'+(spaceMode?'Pagina opmaken':(isInfoMode?'Kaart infosheet':'Kaart opmaken'))+'</div>'+
       buildSharedCardEditor({
         selectorHtml:'',
         wrapId:'stijlCardPrevWrap',
@@ -7377,22 +9717,33 @@ function buildStijl(target){
         backId:'stijlCardBack',
         previewFile:isInfoMode?(((activeInfoOpt)||{}).file||previewFile):previewFile,
         previewKey:isInfoMode?infoKey:previewState.selected.key,
+        designKey:(!isInfoMode&&isEditingBackDesign()?currentBackDesignKey(previewState.selected.key):(isInfoMode?infoKey:previewState.selected.key)),
         forceNoImage:isInfoMode&&cardBuildModeForKey(m,infoKey)==='self',
-        sampleTxt:isInfoMode?mdToHtml(((S.d.uitleg)||{})[infoKey]||''):sampleTxt,
-        frontTxt:isInfoMode?mdToHtml(((S.d.uitleg)||{})[infoKey]||''):sampleTxt,
+        sampleTxt:isInfoMode?((infoKey==='cover'&&!infoCoverEnabled)?'':mdToHtml(((S.d.uitleg)||{})[infoKey]||'')):sampleTxt,
+        frontTxt:isInfoMode?((infoKey==='cover'&&!infoCoverEnabled)?'':mdToHtml(((S.d.uitleg)||{})[infoKey]||'')):sampleTxt,
         forceBold:false,
         previewHint:previewFile,
         suppressEmptyFrontHint:true,
+        flipped:!isInfoMode&&isEditingBackDesign(),
         infoRichCe:isInfoMode,
         infoRichCeKey:isInfoMode?infoKey:null,
         showInfoMidTitle:isInfoMode&&infoKey!=='cover'&&!!(((m.themes||[]).find(function(t){return t.key===infoKey;}))||((m.infoPages||[]).find(function(p){return p.key===infoKey;}))),
         infoMidTitleKey:isInfoMode?infoKey:null,
         infoMidTitleText:isInfoMode?infoMidTitleText(infoKey):'',
         layoutMode:layoutMode,
-        sidePanelHtml:'<div class="stijlQuestionPane'+(isInfoMode?' info-mode':'')+'">'+opmakenPaneTabsHtml(pane)+'<div id="stijlSidePaneBody"></div></div>'
+        hideToolbar:false,
+        hideShapeCard:false,
+        hideColorCard:false,
+        disableToolbar:spaceMode&&!isInfoMode,
+        disableShapeCard:spaceMode&&!isInfoMode,
+        disableColorCard:spaceMode&&!isInfoMode,
+        disableSticky:spaceMode&&!isInfoMode,
+        showDisabledTextBtn:!spaceMode&&!isInfoMode&&(previewState.selected.key!=='cover'),
+        leftCardOrder:(spaceMode&&!isInfoMode?['bg','shape','color']:['shape','color','bg']),
+        sidePanelHtml:'<div class="stijlQuestionPaneOuter"><div class="stijlQuestionPane'+(isInfoMode?' info-mode':'')+'">'+opmakenPaneTabsHtml(pane)+'<div id="stijlSidePaneBody"></div></div></div><div id="globalTipBlock" class="globalTipBlock"></div>'
       })+
     '</div>'+
-    (layoutMode==='canvas'?'':('<div id="stijl-bg" class="stijlCardSection">'+
+    (layoutMode==='canvas'?'':('<div id="stijl-bg" class="stijlCardSection" data-tip="achtergrond">'+
       '<div class="stijlSectionTitle">Achtergrond</div>'+
       '<div class="bgWrap">'+buildBgCtrls(bg,accent)+
       '<div class="bgPrev"><div class="bgCanvas" id="bgWrap"><canvas id="bgCanvas"></canvas></div><div class="bgHint">Live preview</div></div></div>'+
@@ -7416,11 +9767,15 @@ function buildStijl(target){
 
   var sidePane=g('stijlSidePaneBody');
   if(sidePane){
-    if(pane==='vragen'){
+    if(spaceMode&&pane==='space'){
+      buildSpacePane(sidePane);
+    }else if(pane==='vragen'){
       buildVragen(sidePane,{filterKey:STYLE_PREVIEW_KEY||'cover'});
     }else{
       buildInfoPane(sidePane);
     }
+    renderGlobalTip(pane);
+    initTipHovers();
     setTimeout(focusOpmakenSideContent,30);
   }
   setTimeout(updateStijlPreview,50);
@@ -7540,8 +9895,8 @@ function setFontSizeLive(val){
 }
 function updateStijlPreview(){
   var m=S.d.meta||{};
-  var cv=m.cssVars||{};
-  var previewKey=activeStyleEditKey();
+  var previewKey=(S.opmPane==='info')?(INFO_SLIDE_KEY||'cover'):(STYLE_PREVIEW_KEY||'cover');
+  var cv=styleCssVarsForKey(m,previewKey);
   var font=cv['--pk-font']||'IBM Plex Sans';
   var fs=fontSizeCss(cv['--pk-font-size']||'12');
   var color=cv['--pk-set-text']||'rgba(48,96,136,0.95)';
@@ -7554,6 +9909,19 @@ function updateStijlPreview(){
   var globalTextBg=normalizeHexInput(cv['--pk-text-bg-color'])||'';
   var letterSpacing=cv['--pk-letter-spacing']||'0';
   var lineHeight=cv['--pk-line-height']||'1.4';
+  var backCfg=backPreviewConfig(previewKey);
+  var backCv=backCfg.cssVars||cv;
+  var backFont=backCv['--pk-font']||font;
+  var backFs=fontSizeCss(backCv['--pk-font-size']||cv['--pk-font-size']||'12');
+  var backColor=backCv['--pk-set-text']||color;
+  var backAlign=backCv['--pk-text-align']||(S.opmPane==='info'?'left':'center');
+  var backValign=backCv['--pk-text-valign']||'center';
+  var backWeight=backCv['--pk-font-weight']||'regular';
+  var backItalic=backCv['--pk-font-italic']==='1';
+  var backUnderline=backCv['--pk-font-underline']==='1';
+  var backTextBg=normalizeHexInput(backCv['--pk-text-bg-color'])||'';
+  var backLetterSpacing=backCv['--pk-letter-spacing']||'0';
+  var backLineHeight=backCv['--pk-line-height']||'1.4';
   ['stijlCardTxt','qedCardTxt'].forEach(function(id){
     var txt=g(id);if(!txt)return;
     var inner=txt.querySelector('.cpFrontInner')||txt;
@@ -7582,6 +9950,31 @@ function updateStijlPreview(){
       overlay.style.justifyContent=align==='left'?'flex-start':align==='right'?'flex-end':'center';
     }
   });
+  ['stijlCardBack','qedCardBack'].forEach(function(id){
+    var back=g(id);if(!back)return;
+    var inner=back.querySelector('.cpOverlay')||back;
+    back.style.background=backCfg.custom?backCfg.bg:'transparent';
+    back.style.fontFamily="'"+backFont+"', sans-serif";
+    back.style.fontSize=backFs;
+    back.style.color=backColor;
+    back.style.letterSpacing=backLetterSpacing==='0'?'':backLetterSpacing+'px';
+    back.style.lineHeight=backLineHeight;
+    back.style.fontWeight='';
+    back.style.fontStyle='';
+    back.style.textDecoration='';
+    if(inner){
+      inner.style.alignItems=backValign==='top'?'flex-start':backValign==='bottom'?'flex-end':'center';
+      inner.style.justifyContent=backAlign==='left'?'flex-start':backAlign==='right'?'flex-end':'center';
+      inner.style.textAlign=backAlign;
+      inner.style.fontWeight=backWeight==='bold'?'700':backWeight==='semibold'?'600':backWeight==='medium'?'500':'400';
+      inner.style.fontStyle=backItalic?'italic':'normal';
+      inner.style.textDecoration=backUnderline?'underline':'none';
+      inner.style.background=backTextBg||'transparent';
+      inner.style.padding=backTextBg?'4px 8px':'10px';
+    }
+    var backEmpty=back.querySelector('.cpBgEmpty');
+    if(backEmpty&&backCfg.custom)backEmpty.style.background=cardBgValue(backCfg.bg);
+  });
   ['stijlCardPrevWrap','qedCardPrevWrap'].forEach(function(id){
     var prev=g(id);if(!prev)return;
     var outer=prev.querySelector('.cardFaceOuter');
@@ -7591,6 +9984,7 @@ function updateStijlPreview(){
   });
   renderCardShapeTargets();
   renderCoverTextTargets();
+  patchCoverElemTargets();
   var coverBlocks=coverTextStore();
   coverEditorQueryAll('.cpTextLayer[data-cover-texts="1"] .cpTextBlockText').forEach(function(node){
     var wrap=node.parentElement;
@@ -7686,8 +10080,18 @@ function selectedBgShapes(bg){
   if(!list.length)list=['organic'];
   return list;
 }
+function buildBgAutoPalettePreview(pal){
+  var list=(Array.isArray(pal)?pal:[]).filter(Boolean);
+  if(!list.length)return '';
+  return '<div class="bgAutoPaletteRow">'+list.map(function(c,i){
+    var isLight=String(c||'').toLowerCase()==='#ffffff'||String(c||'').toLowerCase()==='ffffff';
+    return '<span class="brandSw bgAutoSw'+(isLight?' brandSwLight':'')+(i===0?' sel':'')+'" style="background:'+esc(c)+'"></span>';
+  }).join('')+'</div>';
+}
 function buildBgCtrls(bg,accent,title,canvas){
   var count=typeof bg.blobCount==='number'?bg.blobCount:6,alpha=typeof bg.alphaBoost==='number'?bg.alphaBoost:1.0,size=typeof bg.sizeScale==='number'?bg.sizeScale:1.0,irr=typeof bg.blobIrregularity==='number'?bg.blobIrregularity:0.35,pal=Array.isArray(bg.palette)&&bg.palette.length?bg.palette:[accent],autoMode=bg.autoMode!==false,shapes=selectedBgShapes(bg);
+  var autoSettings=autoMode?deriveAutoBgSettings():null;
+  var autoPal=autoSettings&&Array.isArray(autoSettings.palette)&&autoSettings.palette.length?autoSettings.palette:[accent];
   var SHAPES=[{v:'organic',l:'Organisch'},{v:'circle',l:'Cirkels'},{v:'grid',l:'Raster'},{v:'triangle',l:'Driehoeken'},{v:'diamond',l:'Diamanten'}];
   if(canvas){
     // Flat canvas layout: no nested card wrappers, no accordion
@@ -7700,6 +10104,7 @@ function buildBgCtrls(bg,accent,title,canvas){
           '<div class="bgAutoHint" style="margin:0 0 9px">De witte achtergrond kleurt subtiel mee met je kaartkleur.</div>'+
           '<div class="togR2" style="margin:4px 0 13px"><label style="font-size:11.5px;color:var(--k2)">Achtergrond tint</label><label class="tog"><input type="checkbox" id="bg_at"'+(bg.autoTint!==false?' checked':'')+'><span class="togSl"></span></label></div>'+
           '<div id="bg_pal">'+buildPalEd(pal)+'</div>'+
+          '<div class="bgAutoHint" style="margin:10px 0 0">Actieve kleuren volgen nu de automatisch afgeleide palette.</div>'+
         '</div>'+
         '<div class="bgCanvasFlatSec"><div class="sLbl">Vormen</div>'+
           '<div class="bgShapeBar" style="margin:4px 0 8px">'+SHAPES.map(function(s){return'<button class="shapeTypeBtn'+(shapes.indexOf(s.v)>=0?' sel':'')+'" type="button" title="'+esc(s.l)+'" aria-label="'+esc(s.l)+'" data-action="bgshape" data-v="'+s.v+'">'+shapeIconSvg(s.v==='grid'?'diamond':s.v)+'</button>';}).join('')+'</div>'+
@@ -7742,8 +10147,6 @@ function buildBgCtrls(bg,accent,title,canvas){
   '</div>';
 }
 function buildPalEd(pal){
-  var cur=pal.map(function(c){return String(c).toLowerCase();});
-  var gridIcon='<svg viewBox="0 0 14 14" width="11" height="11" fill="currentColor" opacity=".75"><rect x="1.5" y="1.5" width="3" height="3" rx=".8"/><rect x="5.5" y="1.5" width="3" height="3" rx=".8"/><rect x="9.5" y="1.5" width="3" height="3" rx=".8"/><rect x="1.5" y="5.5" width="3" height="3" rx=".8"/><rect x="5.5" y="5.5" width="3" height="3" rx=".8"/><rect x="9.5" y="5.5" width="3" height="3" rx=".8"/><rect x="1.5" y="9.5" width="3" height="3" rx=".8"/><rect x="5.5" y="9.5" width="3" height="3" rx=".8"/><rect x="9.5" y="9.5" width="3" height="3" rx=".8"/></svg>';
   var trashIcon='<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg>';
   var swBtn=function(p){
     var hex=String(p.a||'').toLowerCase();
@@ -7751,7 +10154,6 @@ function buildPalEd(pal){
     return '<button class="brandSw'+(isLight?' brandSwLight':'')+'" type="button" data-action="addp" data-hex="'+esc(p.a)+'" title="'+esc(p.n)+'" style="background:'+esc(p.a)+'"></button>';
   };
   var isExpanded=!!STYLE_PAL_EXPANDED['bgpal'];
-  var bgQuick=BRAND_FAM_BG[0];
   var selIdx=Math.max(0,Math.min((pal.length?pal.length-1:0),parseInt(BG_ACTIVE_PAL_INDEX,10)||0));
   BG_ACTIVE_PAL_INDEX=selIdx;
   var currentHex=normalizeHexInput(pal[selIdx])||'#ffffff';
@@ -7763,20 +10165,16 @@ function buildPalEd(pal){
   });
   if(pal.length)html+='<button class="shapeLayerDelete bgPalDelete" type="button" title="Geselecteerde kleur verwijderen" aria-label="Geselecteerde kleur verwijderen" data-action="delp">'+trashIcon+'</button>';
   html+='</div></div>';
-  html+='<div class="brandCompact" style="margin-top:10px">';
+  html+='<div class="brandCompact brandCompact-shared" style="margin-top:10px">';
   html+='<div class="sLbl" style="margin:0 0 4px">Voeg toe</div>';
   html+='<div class="brandQSection">';
-  var bgExtQuick=bgQuick.slice();
-  (function(){var ext=BRAND_FAMILIES;for(var _qi=0;_qi<ext.length&&bgExtQuick.length<24;_qi+=2){var _fc=ext[_qi];if(_fc&&!bgExtQuick.some(function(q){return q.a===_fc.base;}))bgExtQuick.push({n:_fc.n,a:_fc.base});}})();
-  html+='<div class="brandQuickRow">';
-  html+='<div class="brandSwsGroup">'+bgExtQuick.map(swBtn).join('')+'</div>';
-  html+='<div class="brandQuickActions">';
-  html+='<button class="brandExpandBtn'+(isExpanded?' on':'')+'" type="button" data-action="expandpicker" data-target="bgpal" title="'+(isExpanded?'Minder':'Meer kleuren')+'">'+gridIcon+'</button>';
-  html+='<span class="brandQSep"></span>';
-  html+='<label class="brandCurrentSw" style="background:'+esc(currentHex)+'" title="Eigen kleur kiezen">'+
-    '<input type="color" value="'+esc(currentHex)+'" oninput="applyBgPaletteColor(this.value);this.parentElement.style.background=this.value">'+
-  '</label>';
-  html+='</div></div></div>';
+  html+=brandColorQuickRowHtml('bgpal',currentHex,BRAND_FAM_BG,{
+    swatchAction:'addp',
+    expandTarget:'bgpal',
+    currentTarget:false,
+    colorInputHandler:'applyBgPaletteColor(this.value);this.parentElement.style.background=this.value'
+  });
+  html+='</div>';
   if(isExpanded){
     html+='<div class="brandExpandedWrap">';
     var extraRows=BRAND_FAM_BG.slice(1);
@@ -7807,12 +10205,50 @@ function wireBgCtrls(){
   function wire(id,field,fmt){var el2=g(id);if(!el2)return;el2.oninput=function(){var v=parseFloat(this.value);if(isNaN(v))return;if(fmt==='int')v=Math.round(v);var vEl=g(id+'_v');if(vEl)vEl.innerHTML=fmt==='int'?sliderValueHtml(v,''):(fmt==='pct'?sliderValueHtml(Math.round(v*100),'%'):sliderValueHtml(v,'×'));bgCfg()[field]=v;markDirty();scheduleBg();};}
   wire('bg_n','blobCount','int');wire('bg_sz','sizeScale','x');wire('bg_al','alphaBoost','x');wire('bg_irr','blobIrregularity','pct');
   var at=g('bg_at');if(at)at.onchange=function(){bgCfg().autoTint=this.checked;markDirty();scheduleBg();};
-  var auto=g('bg_auto');if(auto)auto.onchange=function(){bgCfg().autoMode=this.checked;markDirty();buildStijlPreserveBg(g('pw'));};
+  var auto=g('bg_auto');if(auto)auto.onchange=function(){
+    var bc=bgCfg();
+    var wasAuto=bc.autoMode!==false;
+    bc.autoMode=this.checked;
+    if(wasAuto&&!bc.autoMode){
+      var derived=deriveAutoBgSettings();
+      if(derived&&Array.isArray(derived.palette)&&derived.palette.length){
+        bc.palette=derived.palette.slice();
+        BG_ACTIVE_PAL_INDEX=0;
+      }
+    }
+    markDirty();
+    buildStijlPreserveBg(g('pw'));
+  };
 }
 function scheduleBg(){clearTimeout(bgTimer);bgTimer=setTimeout(renderBgPreview,90);}
+function sharedAutoBackgroundHelper(){
+  return window.PK&&window.PK.autoBackground&&typeof window.PK.autoBackground==='object'
+    ? window.PK.autoBackground
+    : null;
+}
 function deriveAutoBgSettings(){
   var bg=bgCfg();
-  var accent=(S.d.meta.cssVars||{})['--pk-set-accent']||'#CFE6DF';
+  var helper=sharedAutoBackgroundHelper();
+  if(helper&&typeof helper.derivePaletteAndShapesFromLayers==='function'){
+    var derived=helper.derivePaletteAndShapesFromLayers({
+      meta:(S.d&&S.d.meta)||{},
+      getCardShapeLayers:getCardShapeLayers,
+      cardShapeStore:cardShapeStore,
+      fallbackPalette:DEFAULT_INDEX_BG_PALETTE.slice()
+    })||{};
+    var sharedShapes=Array.isArray(derived.shapes)&&derived.shapes.length?derived.shapes.slice():['organic'];
+    var sharedWeighted=Array.isArray(derived.weightedShapes)&&derived.weightedShapes.length?derived.weightedShapes.slice():sharedShapes.slice();
+    return {
+      palette:Array.isArray(derived.palette)&&derived.palette.length?derived.palette.slice():DEFAULT_INDEX_BG_PALETTE.slice(),
+      shapes:sharedShapes,
+      weightedShapes:sharedWeighted,
+      count:typeof bg.blobCount==='number'?Math.max(2,Math.min(22,Math.round(bg.blobCount))):7,
+      alphaBoost:typeof bg.alphaBoost==='number'?Math.max(0.4,Math.min(3.2,bg.alphaBoost)):1.05,
+      sizeScale:typeof bg.sizeScale==='number'?Math.max(0.3,Math.min(2.4,bg.sizeScale)):0.85,
+      irregularity:typeof bg.blobIrregularity==='number'?Math.max(0.05,Math.min(0.65,bg.blobIrregularity)):0.35,
+      seedKey:derived.seedKey||((derived.palette||[]).join('|')+'__'+sharedWeighted.join('|'))
+    };
+  }
   var themeKeys=((S.d.meta||{}).themes||[]).map(function(th){return th&&th.key;}).filter(Boolean);
   var shapeKeys=Object.keys(cardShapeStore()).filter(function(key){
     return getCardShapeLayers(key).length>0;
@@ -7836,18 +10272,137 @@ function deriveAutoBgSettings(){
     });
   });
   var palette=Object.keys(paletteCount).sort(function(a,b){return paletteCount[b]-paletteCount[a];}).slice(0,6);
-  var shapes=Object.keys(shapeCount).sort(function(a,b){return shapeCount[b]-shapeCount[a];}).slice(0,4);
+  var expandedShapes=adminExpandWeightedBgShapes(shapeCount);
+  var shapes=expandedShapes.ordered||['organic'];
+  var weightedShapes=expandedShapes.expanded||shapes;
   if(!palette.length)palette=DEFAULT_INDEX_BG_PALETTE.slice();
   if(!shapes.length)shapes=['organic'];
   return {
     palette:palette,
     shapes:shapes,
+    weightedShapes:weightedShapes,
     count:typeof bg.blobCount==='number'?Math.max(2,Math.min(22,Math.round(bg.blobCount))):7,
     alphaBoost:typeof bg.alphaBoost==='number'?Math.max(0.4,Math.min(3.2,bg.alphaBoost)):1.05,
     sizeScale:typeof bg.sizeScale==='number'?Math.max(0.3,Math.min(2.4,bg.sizeScale)):0.85,
     irregularity:typeof bg.blobIrregularity==='number'?Math.max(0.05,Math.min(0.65,bg.blobIrregularity)):0.35,
-    seedKey:themeKeys.join('|')+'__'+palette.join('|')+'__'+shapes.join('|')
+    seedKey:themeKeys.join('|')+'__'+palette.join('|')+'__'+weightedShapes.join('|')
   };
+}
+
+function paintSharedPreviewBackground(ctx,W,H,opts){
+  opts=opts||{};
+  var bg=bgCfg();
+  var isNight=!!opts.isNight;
+  var autoSettings=bg.autoMode!==false?deriveAutoBgSettings():null;
+  var pal=autoSettings?autoSettings.palette:(Array.isArray(bg.palette)&&bg.palette.length?bg.palette:DEFAULT_INDEX_BG_PALETTE.slice(0,1));
+  var darkPalette=(Array.isArray(bg.darkPalette)&&bg.darkPalette.length?bg.darkPalette:['#67C5BB','#74CEC4','#7FD1C8','#8AD8D0','#93DCD4']);
+  var count=Math.max(1,Math.round(autoSettings?autoSettings.count:(typeof bg.blobCount==='number'?bg.blobCount:6)));
+  var alphaBoost=autoSettings?autoSettings.alphaBoost:(typeof bg.alphaBoost==='number'?bg.alphaBoost:1);
+  var darkAlphaBoost=(typeof bg.darkAlphaBoost==='number'?bg.darkAlphaBoost:1.02);
+  var sizeScale=autoSettings?autoSettings.sizeScale:(typeof bg.sizeScale==='number'?bg.sizeScale:1);
+  var darkSizeScale=(typeof bg.darkSizeScale==='number'?bg.darkSizeScale:1.0);
+  var darkMix=(typeof bg.darkMix==='number'?bg.darkMix:0.12);
+  var irr=autoSettings?autoSettings.irregularity:(typeof bg.blobIrregularity==='number'?bg.blobIrregularity:0.35);
+  var shapeSource=autoSettings?(autoSettings.weightedShapes&&autoSettings.weightedShapes.length?autoSettings.weightedShapes:autoSettings.shapes):selectedBgShapes(bg);
+  var seedShapes=autoSettings?(autoSettings.weightedShapes&&autoSettings.weightedShapes.length?autoSettings.weightedShapes:autoSettings.shapes):shapeSource;
+  if(window.PK&&window.PK.previewBackground&&typeof window.PK.previewBackground.drawToCanvas==='function'){
+    window.PK.previewBackground.drawToCanvas(ctx,{
+      width:W,
+      height:H,
+      isNight:isNight,
+      baseFill:opts.baseFill,
+      palette:pal,
+      darkPalette:darkPalette,
+      count:count,
+      alphaBoost:alphaBoost,
+      darkAlphaBoost:darkAlphaBoost,
+      sizeScale:sizeScale,
+      darkSizeScale:darkSizeScale,
+      darkMix:darkMix,
+      irregularity:irr,
+      shapeSource:shapeSource,
+      seedShapes:seedShapes,
+      seedKey:(autoSettings&&autoSettings.seedKey)?autoSettings.seedKey:(pal.join('|')+'|'+count+'|'+seedShapes.join('|'))
+    });
+    return;
+  }
+  var useGrid=shapeSource.indexOf('grid')>=0;
+  var drawShapes=shapeSource.filter(function(s){return s!=='grid';});
+  if(!drawShapes.length)drawShapes=['organic'];
+  ctx.fillStyle=opts.baseFill||(isNight?'#1b1840':'#F8FAFA');
+  ctx.fillRect(0,0,W,H);
+  var seed=0;
+  var seedSource=(autoSettings&&autoSettings.seedKey)?autoSettings.seedKey:pal.join('|')+'|'+count+'|'+seedShapes.join('|');
+  for(var si=0;si<seedSource.length;si++)seed=((seed*31+seedSource.charCodeAt(si))|0)>>>0;
+  var rnd=prng(seed+count*997);
+  var pos=[];
+  var aspect=W/Math.max(H,1);
+  var phoneRef=780;
+  var baseDim=phoneRef*(aspect>1?0.8:1);
+  if(useGrid){
+    var cols=Math.ceil(Math.sqrt(count)),rows=Math.ceil(count/cols);
+    for(var i=0;i<count;i++){
+      var col=i%cols,row=Math.floor(i/cols);
+      pos.push({x:W*((col+.2+rnd()*.6)/cols*1.16-.08),y:H*((row+.2+rnd()*.6)/rows*1.16-.08)});
+    }
+  }else{
+    for(var j=0;j<count;j++)pos.push({x:(rnd()*1.1-.05)*W,y:(rnd()*1.1-.05)*H});
+  }
+  for(var k=0;k<count;k++){
+    var raw=(isNight?darkPalette:pal)[k%(isNight?darkPalette.length:pal.length)],rgb=h2r(raw),hsl=r2h(rgb[0],rgb[1],rgb[2]);
+    var warm=(hsl[0]>=0&&hsl[0]<=70)||(hsl[0]>=290&&hsl[0]<=360),amt=warm?.12:.1;
+    if(hsl[2]>.75)amt=warm?.18:.14;
+    var alpha=isNight?Math.min((0.22+rnd()*.10)*darkAlphaBoost,.6):Math.min(((warm?.19:.24)+rnd()*.1)*alphaBoost,.68);
+    var radius=(baseDim*(.19+rnd()*.16))*(isNight?darkSizeScale:sizeScale);
+    var shapeType=drawShapes[k%drawShapes.length]||'organic';
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle=isNight?mixHexAdmin(raw,'#1b1840',darkMix):mixW(raw,amt);
+    if(isNight){
+      ctx.shadowColor=ctx.fillStyle;
+      ctx.shadowBlur=22;
+    }else{
+      ctx.shadowColor='transparent';
+      ctx.shadowBlur=0;
+    }
+    if(shapeType==='circle'){ctx.beginPath();ctx.arc(pos[k].x,pos[k].y,radius,0,Math.PI*2);ctx.closePath();ctx.fill();}
+    else if(shapeType==='triangle'){triPath(ctx,pos[k].x,pos[k].y,radius,rnd);ctx.fill();}
+    else if(shapeType==='diamond'){diamondPath(ctx,pos[k].x,pos[k].y,radius,rnd);ctx.fill();}
+    else{blobPath(ctx,pos[k].x,pos[k].y,radius,irr,8+Math.floor(rnd()*5),rnd);ctx.fill();}
+  }
+  ctx.globalAlpha=1;
+  ctx.shadowBlur=0;
+  ctx.shadowColor='transparent';
+}
+
+var PREVIEW_BG_RENDER_REF={windowW:0,logicalH:0};
+function previewBgLogicalSize(wrap,W,H){
+  var win=wrap&&typeof wrap.closest==='function'?wrap.closest('.stijlCanvasWindow'):null;
+  if(!win)return {width:W,height:H};
+  if(Math.abs((PREVIEW_BG_RENDER_REF.windowW||0)-W)>2){
+    PREVIEW_BG_RENDER_REF.windowW=W;
+    PREVIEW_BG_RENDER_REF.logicalH=H;
+  }else{
+    PREVIEW_BG_RENDER_REF.logicalH=Math.max(PREVIEW_BG_RENDER_REF.logicalH||0,H);
+  }
+  return {width:W,height:PREVIEW_BG_RENDER_REF.logicalH||H};
+}
+function drawPreviewBackgroundIntoCanvas(ctx,actualW,actualH,logicalW,logicalH,opts){
+  if(!ctx)return;
+  if(logicalW===actualW&&logicalH===actualH){
+    paintSharedPreviewBackground(ctx,actualW,actualH,opts);
+    return;
+  }
+  var off=document.createElement('canvas');
+  off.width=logicalW;
+  off.height=logicalH;
+  var offCtx=off.getContext('2d');
+  if(!offCtx){
+    paintSharedPreviewBackground(ctx,actualW,actualH,opts);
+    return;
+  }
+  paintSharedPreviewBackground(offCtx,logicalW,logicalH,opts);
+  ctx.clearRect(0,0,actualW,actualH);
+  ctx.drawImage(off,0,0,logicalW,actualH,0,0,actualW,actualH);
 }
 
 // Canvas BG preview follows the actual preview window ratio.
@@ -7860,57 +10415,10 @@ function renderBgPreview(){
     var H2=Math.round(rect.height)||wrap.offsetHeight||Math.round(W2*(10/16));
     if(W2<20||H2<20){setTimeout(renderBgPreview,100);return;}
     canvas.width=W2*2;canvas.height=H2*2;canvas.style.width=W2+'px';canvas.style.height=H2+'px';
-    var ctx=canvas.getContext('2d');if(!ctx)return;var W=W2*2,H=H2*2;
-    var bg=bgCfg(),accent=(S.d.meta.cssVars||{})['--pk-set-accent']||'#CFE6DF';
+    var ctx=canvas.getContext('2d');if(!ctx)return;
     var isNight=previewNightMode()||adminNightMode();
-    var autoSettings=bg.autoMode!==false?deriveAutoBgSettings():null;
-    var pal=autoSettings?autoSettings.palette:(Array.isArray(bg.palette)&&bg.palette.length?bg.palette:[accent]);
-    var darkPalette=(Array.isArray(bg.darkPalette)&&bg.darkPalette.length?bg.darkPalette:['#67C5BB','#74CEC4','#7FD1C8','#8AD8D0','#93DCD4']);
-    var count=Math.max(1,Math.round(autoSettings?autoSettings.count:(typeof bg.blobCount==='number'?bg.blobCount:6)));
-    var alphaBoost=autoSettings?autoSettings.alphaBoost:(typeof bg.alphaBoost==='number'?bg.alphaBoost:1);
-    var darkAlphaBoost=(typeof bg.darkAlphaBoost==='number'?bg.darkAlphaBoost:1.02);
-    var sizeScale=autoSettings?autoSettings.sizeScale:(typeof bg.sizeScale==='number'?bg.sizeScale:1);
-    var darkSizeScale=(typeof bg.darkSizeScale==='number'?bg.darkSizeScale:1.0);
-    var darkMix=(typeof bg.darkMix==='number'?bg.darkMix:0.12);
-    var irr=autoSettings?autoSettings.irregularity:(typeof bg.blobIrregularity==='number'?bg.blobIrregularity:0.35);
-    var shapes=autoSettings?autoSettings.shapes:selectedBgShapes(bg);
-    var useGrid=shapes.indexOf('grid')>=0;
-    var drawShapes=shapes.filter(function(s){return s!=='grid';});
-    if(!drawShapes.length)drawShapes=['organic'];
-    ctx.fillStyle=isNight?'#1b1840':'#F8FAFA';ctx.fillRect(0,0,W,H);
-    var seed=0;
-    var seedSource=(autoSettings&&autoSettings.seedKey)?autoSettings.seedKey:pal.join('|')+'|'+count+'|'+shapes.join('|');
-    for(var si=0;si<seedSource.length;si++)seed=((seed*31+seedSource.charCodeAt(si))|0)>>>0;
-    var rnd=prng(seed+count*997);
-    var pos=[];
-    var posRefH=Math.round(W*1.6);
-    var aspect=W/Math.max(posRefH,1);
-    var phoneRef=780;var baseDim=phoneRef*(aspect>1?0.8:1);
-    if(useGrid){var cols=Math.ceil(Math.sqrt(count)),rows=Math.ceil(count/cols);for(var i=0;i<count;i++){var col=i%cols,row=Math.floor(i/cols);pos.push({x:W*((col+.2+rnd()*.6)/cols*1.16-.08),y:posRefH*((row+.2+rnd()*.6)/rows*1.16-.08)});}}
-    else{for(var i=0;i<count;i++)pos.push({x:(rnd()*1.1-.05)*W,y:(rnd()*1.1-.05)*posRefH});}
-    var extraH=H-posRefH;
-    if(extraH>40){var extraCount=Math.max(1,Math.round(count*extraH/posRefH));var rnd2=prng(seed+7919);for(var ei=0;ei<extraCount;ei++)pos.push({x:(rnd2()*1.1-.05)*W,y:posRefH+(rnd2()*.9+.05)*extraH});count+=extraCount;}
-    for(var i=0;i<count;i++){
-      var raw=(isNight?darkPalette:pal)[i%(isNight?darkPalette.length:pal.length)],rgb=h2r(raw),hsl=r2h(rgb[0],rgb[1],rgb[2]);
-      var warm=(hsl[0]>=0&&hsl[0]<=70)||(hsl[0]>=290&&hsl[0]<=360),amt=warm?.12:.1;if(hsl[2]>.75)amt=warm?.18:.14;
-      var alpha=isNight?Math.min((0.22+rnd()*.10)*darkAlphaBoost,.6):Math.min(((warm?.19:.24)+rnd()*.1)*alphaBoost,.68),radius=(baseDim*(.19+rnd()*.16))*(isNight?darkSizeScale:sizeScale);
-      var shapeType=drawShapes[i%drawShapes.length]||'organic';
-      ctx.globalAlpha=alpha;ctx.fillStyle=isNight?mixHexAdmin(raw,'#1b1840',darkMix):mixW(raw,amt);
-      if(isNight){
-        ctx.shadowColor=ctx.fillStyle;
-        ctx.shadowBlur=22;
-      }else{
-        ctx.shadowColor='transparent';
-        ctx.shadowBlur=0;
-      }
-      if(shapeType==='circle'){ctx.beginPath();ctx.arc(pos[i].x,pos[i].y,radius,0,Math.PI*2);ctx.closePath();ctx.fill();}
-      else if(shapeType==='triangle'){triPath(ctx,pos[i].x,pos[i].y,radius,rnd);ctx.fill();}
-      else if(shapeType==='diamond'){diamondPath(ctx,pos[i].x,pos[i].y,radius,rnd);ctx.fill();}
-      else{blobPath(ctx,pos[i].x,pos[i].y,radius,irr,8+Math.floor(rnd()*5),rnd);ctx.fill();}
-    }
-    ctx.globalAlpha=1;
-    ctx.shadowBlur=0;
-    ctx.shadowColor='transparent';
+    var logical=previewBgLogicalSize(wrap,W2,H2);
+    drawPreviewBackgroundIntoCanvas(ctx,W2*2,H2*2,logical.width*2,logical.height*2,{isNight:isNight,baseFill:previewCardsBaseFill(isNight)});
   });
 }
 function prng(s){var a=s>>>0;return function(){a|=0;a=(a+0x6D2B79F5)|0;var t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
@@ -8022,6 +10530,7 @@ function revertSetChanges(){
 function saveSet(cb){
   collectCurrent();
   var saveLabel=(S.clTab==='opmaken'&&S.opmPane==='kaart')?'Kaart opslaan':'Opslaan';
+  setTopSaveStatus('saving','Opslaan…');
   var btn=g('saveBtn');if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span> '+saveLabel+'…';}
   var id=S.activeId,d=S.d,msg='Update set: '+id;
   var steps=[
@@ -8058,9 +10567,11 @@ function saveSet(cb){
       syncDirtyFromSnapshot();
       lsDel('pk_draft_'+id);
       if(btn){btn.disabled=false;btn.innerHTML=saveLabel;}
+      setTopSaveStatus('saved','Opgeslagen',2600);
       renderSidebar();refreshChecklistChrome();toast('Opgeslagen ✓','green');if(typeof cb==='function')cb();
     }).catch(function(e){
       if(btn){btn.disabled=false;btn.innerHTML=saveLabel;}
+      setTopSaveStatus('error','Opslaan mislukt',3400);
       toast('Fout: '+e.message,'red');
     });
   }
@@ -8068,6 +10579,7 @@ function saveSet(cb){
     return doSave();
   }).catch(function(e){
     if(btn){btn.disabled=false;btn.innerHTML=saveLabel;}
+    setTopSaveStatus('error','Opslaan mislukt',3400);
     toast('Fout: '+e.message,'red');
   });
 }
@@ -8268,11 +10780,12 @@ document.addEventListener('click',function(ev){
           if(tgt0==='settc'){
             var tcHex0=pk0==='cover'&&acb0?(acb0.color||'#1a1a2e'):((m0.cssVars||{})['--pk-set-text']||'#1a1a2e');
             var tcMeta0=stylePaletteMeta('settc');
-            popEl0.innerHTML=brandPaletteHtml('settc',tcHex0,[tcMeta0.quick.slice(0,8)].concat(BRAND_FAM_BG.slice(1)));
+            var tcRows0=[tcMeta0.quick.slice(0,8)].concat(BRAND_FAM_BG.slice(1));
+            popEl0.innerHTML=brandTextColorPaletteHtml('settc',tcHex0,tcRows0,{universal:true});
           } else {
             var tbHex0=pk0==='cover'&&acb0?(acb0.bg||''):((m0.cssVars||{})['--pk-text-bg-color']||'');
             var tbNoSw0='<button class="brandSw brandNoColorSw'+(tbHex0?'':' sel')+'" type="button" title="Geen vlak" onclick="setTextBgMode(\'\')"><svg viewBox="0 0 18 18" width="18" height="18"><line x1="3" y1="15" x2="15" y2="3" stroke="#d05050" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
-            popEl0.innerHTML=brandPaletteHtml('settb',tbHex0||'',BRAND_FAM_BG,{prefixHtml:tbNoSw0});
+            popEl0.innerHTML=brandTextColorPaletteHtml('settb',tbHex0||'',BRAND_FAM_BG,{prefixHtml:tbNoSw0});
           }
         } else {
           buildStijlPreserveBg(g('pw'));
@@ -8387,6 +10900,9 @@ document.addEventListener('selectionchange',function(){
   }catch(e){}
 });
 document.addEventListener('mousedown',function(e){
+  if(!(e.target&&e.target.closest&&e.target.closest('.tbRProfileMenu'))){
+    closeAllTopProfileMenus();
+  }
   var inToolbar=!!(e.target.closest&&e.target.closest('.stijlCanvasTopTools,.stijlCanvasToolbar'));
   if(!inToolbar||!RT.richCeTarget)return;
   try{var sel=window.getSelection();if(sel&&sel.rangeCount)RT.savedRange=sel.getRangeAt(0).cloneRange();}catch(e){}
@@ -8394,7 +10910,30 @@ document.addEventListener('mousedown',function(e){
     e.preventDefault();
   }
 },true);
+document.addEventListener('toggle',function(e){
+  var det=e.target;
+  if(!det||!det.classList||!det.classList.contains('tbRProfileMenu'))return;
+  if(det.open){
+    closeAllTopProfileMenus(det);
+    scheduleTopProfileMenuAutoClose(det,2800);
+  }else{
+    clearTopProfileMenuAutoClose(det);
+  }
+},true);
+document.addEventListener('mouseover',function(e){
+  var det=e.target&&e.target.closest?e.target.closest('.tbRProfileMenu'):null;
+  if(det)clearTopProfileMenuAutoClose(det);
+},true);
+document.addEventListener('mouseout',function(e){
+  var det=e.target&&e.target.closest?e.target.closest('.tbRProfileMenu'):null;
+  if(!det)return;
+  if(e.relatedTarget&&det.contains(e.relatedTarget))return;
+  if(det.open)scheduleTopProfileMenuAutoClose(det,1200);
+},true);
 document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){
+    closeAllTopProfileMenus();
+  }
   if(!e.target||!e.target.classList||!e.target.classList.contains('richCe'))return;
   if(!(e.ctrlKey||e.metaKey))return;
   if(e.key==='b'||e.key==='B'){e.preventDefault();document.execCommand('bold');}
@@ -8514,6 +11053,24 @@ document.addEventListener('mousedown',function(ev){
   if(editingText&&(editingText===ev.target||editingText.contains(ev.target)))return;
   finishCoverTextInlineEdit(editingIdx);
 },true);
+function isShapeEditorChromeTarget(target){
+  return !!(target&&target.closest&&(
+    target.closest('.shapeEditor')||
+    target.closest('.shapeLayerBar')||
+    target.closest('.shapeTypeBar')||
+    target.closest('.shapePaintRow')||
+    target.closest('.shapeSliderRow')||
+    target.closest('.iconLibrary')
+  ));
+}
+document.addEventListener('mousedown',function(ev){
+  if(S.clTab!=='opmaken'||ev.button!==0||COVER_ELEM_DRAG||COVER_ELEM_EDITING)return;
+  if(!COVER_ELEM_SEL)return;
+  var target=ev.target;
+  if(!target||!target.closest)return;
+  if(target.closest('.adminInfoCoverElem')||isShapeEditorChromeTarget(target))return;
+  setCoverElemSelection(null);
+});
 document.addEventListener('mousedown',function(ev){
   if(ev.target&&ev.target.closest&&ev.target.closest('.shapeContextMenu'))return;
   clearShapeContextMenu();
@@ -8521,15 +11078,7 @@ document.addEventListener('mousedown',function(ev){
   var key=activeStyleEditKey();
   if(getShapeActiveIndex(key,false)<0)return;
   var target=ev.target;
-  if(target&&target.closest&&(
-    target.closest('.cpShape')||
-    target.closest('.shapeEditor')||
-    target.closest('.shapeLayerBar')||
-    target.closest('.shapeTypeBar')||
-    target.closest('.shapePaintRow')||
-    target.closest('.shapeSliderRow')||
-    target.closest('.iconLibrary')
-  )) return;
+  if(target&&target.closest&&(target.closest('.cpShape')||isShapeEditorChromeTarget(target))) return;
   clearActiveShapeSelection(key);
 });
 document.addEventListener('mousedown',function(ev){
@@ -8622,6 +11171,10 @@ document.addEventListener('keydown',function(e){
   if(e.key==='Enter'&&!g('setup').classList.contains('hidden'))connect();
 });
 window.addEventListener('beforeunload',function(e){if(S.dirty){e.preventDefault();e.returnValue='';}});
+window.addEventListener('message',function(e){
+  if(!e.data||e.data.uitgesproken!==1)return;
+  if(e.data.type==='openSet'&&e.data.id)openSpacePreviewCards(e.data.id);
+});
 
 // ═══════════════════════════════════════════
 // HELPERS
@@ -8634,10 +11187,12 @@ function fR(label,type,id,value,hint,readonly){
 }
 function markDirty(){
   S.dirty=true;
+  if(S.activeKind==='set')setTopSaveStatus('dirty','Wijzigingen…');
   pushHistorySnapshot();
   refreshTopBarControls();
   renderSidebar();
   refreshChecklistChrome();
+  scheduleSpaceSitePreviewRefresh();
 }
 function safeid(s){return btoa(s).replace(/[^a-zA-Z0-9]/g,'').slice(0,20);}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
@@ -8652,6 +11207,10 @@ function timeAgo(ts){var d=Math.round((Date.now()-ts)/60000);return d<1?'zojuist
 var toastTm;
 function toast(msg,type){var t=g('toast');t.textContent=msg;t.className='toast on'+(type?' '+type:'');clearTimeout(toastTm);toastTm=setTimeout(function(){t.className='toast';},3200);}
 function livePreviewUrl(){
+  var activeSet=(S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||null;
+  if(S.spaceSlug&&activeSet&&(activeSet.slug||activeSet.id)){
+    return '/'+encodeURIComponent(S.spaceSlug)+'/'+encodeURIComponent(activeSet.slug||activeSet.id)+'/';
+  }
   return '../kaarten/?set='+encodeURIComponent(S.activeId||'');
 }
 function showLivePreview(){
@@ -8675,12 +11234,30 @@ function showLivePreview(){
     'livePreviewModal'
   );
 }
+function focusHomePreview(){
+  var target=g('spaceLiveFrameScale');
+  if(!target){toast('Live preview niet gevonden','red');return;}
+  try{
+    target.scrollIntoView({behavior:'smooth',block:'center'});
+  }catch(_e){
+    target.scrollIntoView();
+  }
+  target.classList.add('is-focused');
+  clearTimeout(focusHomePreview._tm);
+  focusHomePreview._tm=setTimeout(function(){
+    target.classList.remove('is-focused');
+  },1200);
+}
 function showModal(html,extraClass){var mb=g('mb');mb.className='modal'+(extraClass?' '+extraClass:'');mb.innerHTML=html;g('ovl').classList.remove('hidden');}
 function closeModal(){var mb=g('mb'),ovl=g('ovl');ovl.classList.add('hidden');ovl.classList.remove('palPopover');mb.className='modal';mb.style.cssText='';mb.innerHTML='';_stylePalDrag=null;_stylePalAnchor=null;_stylePalState=null;}
 g('ovl').addEventListener('click',function(e){if(e.target===this)closeModal();});
 document.addEventListener('mousemove',function(ev){
   if(SHAPE_MARQUEE){
     updateShapeMarquee(ev.clientX,ev.clientY);
+    return;
+  }
+  if(COVER_ELEM_DRAG){
+    dragCoverElemTo(ev.clientX,ev.clientY);
     return;
   }
   if(COVER_TEXT_DRAG){
@@ -8711,6 +11288,19 @@ document.addEventListener('mouseup',function(ev){
     finishShapeMarquee(ev.clientX,ev.clientY);
     return;
   }
+  if(COVER_ELEM_DRAG){
+    if(COVER_ELEM_DRAG.elemEl)COVER_ELEM_DRAG.elemEl.classList.remove('dragging');
+    if(COVER_ELEM_DRAG.moved){
+      if(S.clTab==='opmaken')buildStijlPreserveBg(g('pw'));
+      else{
+        patchCoverElemTargets();
+        refreshShapeEditors('cover');
+      }
+    }else{
+      setCoverElemSelection(COVER_ELEM_DRAG.type);
+    }
+  }
+  COVER_ELEM_DRAG=null;
   if(COVER_TEXT_DRAG){
     if(!COVER_TEXT_DRAG.moved){
       setActiveCoverText(COVER_TEXT_DRAG.idx,{silent:true});
@@ -8750,7 +11340,13 @@ document.addEventListener('scroll',function(e){
 // Show only whole swatches in .brandSwsGroup; hides any that would be clipped.
 function clampSwatchGroup(g){
   if(!g||!g.offsetParent)return; // not visible
-  var sw=18,gap=4,w=g.offsetWidth;
+  var firstSw=g.querySelector('.brandSw');
+  if(!firstSw)return;
+  var styles=window.getComputedStyle(g);
+  var sw=Math.ceil(firstSw.getBoundingClientRect().width)||18;
+  var gap=parseFloat(styles.columnGap||styles.gap||0)||0;
+  var w=g.clientWidth||g.offsetWidth||0;
+  if(!w)return;
   var n=Math.max(1,Math.floor((w+gap)/(sw+gap)));
   g.querySelectorAll('.brandSw').forEach(function(s,i){s.style.display=i<n?'':'none';});
 }
