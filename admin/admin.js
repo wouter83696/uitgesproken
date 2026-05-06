@@ -1881,9 +1881,6 @@ function homeHeroSliderStripHtml(){
       ?rest.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'hero',selectedIds:orderIds,orderIds:orderIds,draggable:true});}).join('')
       :'<div class="homeSetSliderEmpty">Alle sets zijn al uitgelicht.</div>';
     var sjablonenHtml=HOME_SJABLONEN.map(function(s,i){return sjabloonTileHtml(s,i);}).join('');
-    var cornerBtn=sets.length
-      ?'<button class="homeSliderExpandCornerBtn is-open" type="button" onclick="toggleHomeHeroExpanded()" title="Sluiten">−</button>'
-      :'';
     return '<div class="homeSliderExpandWrap homeHeroPickerOpen">'+
       '<div class="homeHeroPickerSection homeHeroUitgelichtTray">'+
         '<div class="homeHeroPickerLabel">Uitgelicht</div>'+
@@ -1897,7 +1894,6 @@ function homeHeroSliderStripHtml(){
         '<div class="homeHeroPickerLabel">Lege kaarten</div>'+
         '<div class="homeSetSlideRail homeHeroPickerRail">'+sjablonenHtml+'</div>'+
       '</div>'+
-      cornerBtn+
     '</div>';
   }
 
@@ -1931,9 +1927,6 @@ function homeGridSliderStripHtml(){
       ?rest.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'grid',draggable:true});}).join('')
       :'<div class="homeSetSliderEmpty">Alle sets staan al in de lijst.</div>';
     var sjablonenHtml=HOME_SJABLONEN.map(function(s,i){return sjabloonTileHtml(s,i);}).join('');
-    var cornerBtn=allSets.length
-      ?'<button class="homeSliderExpandCornerBtn is-open" type="button" onclick="toggleHomeGridExpanded()" title="Sluiten">−</button>'
-      :'';
     return '<div class="homeSliderExpandWrap homeGridPickerOpen">'+
       '<div class="homeGridPickerSection homeGridListTray">'+
         '<div class="homeGridPickerLabel">Lijst</div>'+
@@ -1947,7 +1940,6 @@ function homeGridSliderStripHtml(){
         '<div class="homeGridPickerLabel">Lege kaarten</div>'+
         '<div class="homeSetSlideRail homeGridPickerRail">'+sjablonenHtml+'</div>'+
       '</div>'+
-      cornerBtn+
     '</div>';
   }
 
