@@ -2988,7 +2988,7 @@ html.admin-night .fmtTile.sel{background:var(--tlp)}
 .toast.green{background:var(--gn)}.toast.red{background:var(--rd)}.toast.amber{background:rgba(199,131,18,.78);color:#fff3d7}
 .ovl{position:fixed;inset:0;background:rgba(0,0,0,.22);display:flex;align-items:center;justify-content:center;z-index:500;padding:20px}
 .ovl.palPopover{background:transparent;align-items:flex-start;justify-content:flex-start;padding:0}
-.modal{background:white;border-radius:12px;padding:22px;width:100%;max-width:365px;box-shadow:0 8px 30px rgba(0,0,0,.13)}
+.modal{background:white;border-radius:12px;padding:22px;width:100%;max-width:365px;box-shadow:0 2px 16px rgba(15,23,42,.06), 0 0 0 1px rgba(26,26,46,.05)}
 .modal h3{font-size:14.5px;font-weight:600;margin-bottom:4px}
 .modal>p{font-size:12.5px;color:var(--k2);margin-bottom:14px;line-height:1.5}
 .modal.newSetModal{max-width:400px}
