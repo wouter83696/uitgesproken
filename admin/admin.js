@@ -1741,11 +1741,10 @@ function setEditorSortDropdownHtml(){
 }
 function setEditorActionsHtml(){
   var active=S.opmPane==='info'?'info':'vragen';
-  var addBtn='<button class="stijlSliderActionBtn stijlSliderActionPrimary" type="button" onclick="addThemeFromStyle()"><span class="stijlSliderActionPlus">+</span><span>Thema</span></button>';
-  var dupBtn='<button class="stijlSliderActionBtn" type="button" onclick="dupSet()" title="Set dupliceren"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>';
+  var sortBtn=setEditorSortDropdownHtml();
   return '<div class="homeSliderHeaderControls">'+
     '<div class="homeSliderLeftControls">'+setEditorLayoutChipHtml()+setEditorPageBtnsHtml(active)+'</div>'+
-    '<div class="homeSliderRightControls"><span class="homeCardsSlideLabel">Kaarten</span>'+addBtn+dupBtn+setEditorSortDropdownHtml()+'</div>'+
+    '<div class="homeSliderRightControls"><span class="homeCardsSlideLabel">Kaarten</span>'+sortBtn+'</div>'+
   '</div>';
 }
 function homeToolbarDropdownHtml(label,current,items){
