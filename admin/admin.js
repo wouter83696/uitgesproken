@@ -1774,7 +1774,7 @@ function homeSortDropdownHtml(pane){
     '<summary class="textToolbarMenuBtn homeToolbarMenuBtn homeOrderMenuBtn" title="Kaartsets ordenen">'+
       '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h7M3 12h4"/></svg>'+
       '<span>Ordenen</span>'+
-      '<span class="textToolbarCaret">▾</span>'+
+      '<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>'+
     '</summary>'+
     '<div class="textToolbarMenuPop homeToolbarMenuPop">'+items.join('')+'</div>'+
   '</details></div>';
