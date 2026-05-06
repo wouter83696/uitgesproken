@@ -1683,9 +1683,13 @@ function homeSliderActionsHtml(){
   '</div>';
 }
 function infoModeHeaderActionsHtml(){
+  var pane=normalizeHomeSliderPane(S.homeSliderPane);
+  var showCards=pane==='hero'||pane==='grid';
+  var cardSwitch=showCards?homeCardsViewSwitchHtml():'';
+  var sortBtn=showCards?homeSortDropdownHtml(pane):'';
   return '<div class="homeSliderHeaderControls info-mode-header">'+
     '<div class="homeSliderLeftControls">'+homeLayoutChipHtml('info')+spacePageBtnsHtml('info')+'</div>'+
-    '<div class="homeSliderRightControls"></div>'+
+    '<div class="homeSliderRightControls">'+(showCards?'<span class="homeCardsSlideLabel">Kaarten</span>':'')+cardSwitch+sortBtn+'</div>'+
   '</div>';
 }
 function setEditorLayoutChipHtml(){
