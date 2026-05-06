@@ -1741,10 +1741,12 @@ function setEditorSortDropdownHtml(){
 }
 function setEditorActionsHtml(){
   var active=S.opmPane==='info'?'info':'vragen';
+  var addBtn='<button class="paneMode homeSliderPaneBtn" type="button" onclick="addThemeFromStyle()" title="Thema toevoegen"><span style="font-size:16px;font-weight:300">+</span> Thema</button>';
+  var dupBtn='<button class="paneMode homeSliderPaneBtn" type="button" onclick="dupSet()" title="Set dupliceren"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="6" width="9" height="9" rx="1"/><path d="M5 8H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v2"/></svg></button>';
   var sortBtn=setEditorSortDropdownHtml();
   return '<div class="homeSliderHeaderControls">'+
     '<div class="homeSliderLeftControls">'+setEditorLayoutChipHtml()+setEditorPageBtnsHtml(active)+'</div>'+
-    '<div class="homeSliderRightControls"><span class="homeCardsSlideLabel">Kaarten</span>'+sortBtn+'</div>'+
+    '<div class="homeSliderRightControls"><span class="homeCardsSlideLabel">Kaarten</span>'+addBtn+dupBtn+sortBtn+'</div>'+
   '</div>';
 }
 function homeToolbarDropdownHtml(label,current,items){
