@@ -1767,7 +1767,7 @@ input[type=file]{display:none}
 .stijlSlideNameInput:focus{background:#fff;border-color:rgba(26,26,46,.08);outline:2px solid var(--tl);outline-offset:1px;border-radius:4px;box-shadow:0 1px 2px rgba(15,23,42,.03)}
 .stijlSlideMeta,.stijlSlideFoot,.stijlSlideFootMeta{display:none}
 .stijlSlideActions{position:absolute;right:4px;bottom:4px;display:flex;align-items:center;justify-content:flex-end;gap:3px;opacity:0;transform:translateY(2px);transition:opacity .12s ease,transform .12s ease}
-.stijlSlideCard:hover .stijlSlideActions,.stijlSlideCard.sel .stijlSlideActions{opacity:1;transform:translateY(0)}
+.stijlSlideCard:hover .stijlSlideActions{opacity:1;transform:translateY(0)}
 html.card-fmt-narrow .stijlSlideActions{flex-wrap:wrap;width:38px;right:50%;bottom:4px;transform:translateX(50%) translateY(2px);gap:2px}
 html.card-fmt-narrow .stijlSlideCard:hover .stijlSlideActions,html.card-fmt-narrow .stijlSlideCard.sel .stijlSlideActions{transform:translateX(50%) translateY(0)}
 html.card-fmt-narrow .stijlSlideUpload,html.card-fmt-narrow .stijlSlideMiniBtn{width:17px!important;height:17px!important;flex:0 0 17px!important}
