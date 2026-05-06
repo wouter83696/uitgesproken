@@ -10461,12 +10461,12 @@ function buildStijl(target){
     sliderHtml=homeSliderStripHtml();
   }
   if(!isInfoMode&&!spaceMode){
-    sliderActionHtml=homeSliderActionsHtml();
+    sliderActionHtml=setEditorActionsHtml();
     if(SET_EDITOR_PANE==='format'){
       var _fmtId=getCardFormatIdForMeta(S.d&&S.d.meta);
       sliderHtml='<div class="stijlSlideRail homeOptionSlideRail setFmtSlideRail">'+fmtStripHtml(_fmtId,'setCardFormatFromSlider')+'</div>';
     }else{
-      sliderHtml=homeSliderStripHtml();
+      sliderHtml='<div class="stijlSlideRail">'+sliderHtml+'</div>';
     }
   }
   if(spaceMode){
