@@ -1655,6 +1655,7 @@ function homeCardsViewSwitchHtml(){
   var pane=normalizeHomeSliderPane(S.homeSliderPane);
   var active=(pane==='grid')?'grid':'hero';
   var heroOpen=active==='hero'&&!!S.homeHeroExpanded;
+  var gridOpen=active==='grid'&&!!S.homeGridExpanded;
   var icons={
     hero:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="8" rx="1.5"/><circle cx="5.5" cy="13.2" r=".55" fill="currentColor" stroke="none"/><circle cx="8" cy="13.2" r=".55" fill="currentColor" stroke="none" opacity=".35"/><circle cx="10.5" cy="13.2" r=".55" fill="currentColor" stroke="none" opacity=".35"/></svg>',
     grid:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="2.5" width="5.5" height="4" rx="1"/><rect x="9" y="2.5" width="5.5" height="4" rx="1"/><rect x="1.5" y="9.5" width="5.5" height="4" rx="1"/><rect x="9" y="9.5" width="5.5" height="4" rx="1"/></svg>'
@@ -1662,12 +1663,15 @@ function homeCardsViewSwitchHtml(){
   var heroChevron=heroOpen
     ?'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 6.5L5 3.5L8 6.5"/></svg>'
     :'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>';
+  var gridChevron=gridOpen
+    ?'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 6.5L5 3.5L8 6.5"/></svg>'
+    :'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>';
   return '<div class="paneModeSwitcher homeSliderModeWrap homeCardsSwitch" aria-label="Kaarten kiezen">'+
     '<button class="paneMode homeSliderPaneBtn'+(active==='hero'?' sel':'')+'" type="button" onclick="activateHeroSliderPane()" title="Uitgelicht kaarten kiezen">'+
       icons.hero+'Uitgelicht'+heroChevron+
     '</button>'+
-    '<button class="paneMode homeSliderPaneBtn'+(active==='grid'?' sel':'')+'" type="button" onclick="setHomeSliderPane(\'grid\')">'+
-      icons.grid+'Lijst'+
+    '<button class="paneMode homeSliderPaneBtn'+(active==='grid'?' sel':'')+'" type="button" onclick="setHomeSliderPane(\'grid\')" title="Lijst kaarten kiezen">'+
+      icons.grid+'Lijst'+gridChevron+
     '</button>'+
   '</div>';
 }
