@@ -1741,12 +1741,11 @@ function setEditorSortDropdownHtml(){
 }
 function setEditorActionsHtml(){
   var active=S.opmPane==='info'?'info':'vragen';
-  var addBtn='<button class="paneMode homeSliderPaneBtn" type="button" onclick="addThemeFromStyle()" title="Thema toevoegen"><span style="font-size:16px;font-weight:300">+</span> Thema</button>';
-  var dupBtn='<button class="paneMode homeSliderPaneBtn" type="button" onclick="dupSet()" title="Set dupliceren"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="6" width="9" height="9" rx="1"/><path d="M5 8H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v2"/></svg></button>';
-  var sortBtn=setEditorSortDropdownHtml();
+  var addBtn='<button class="stijlSliderActionBtn stijlSliderActionPrimary" type="button" onclick="addThemeFromStyle()"><span class="stijlSliderActionPlus">+</span><span>Thema</span></button>';
+  var dupBtn='<button class="stijlSliderActionBtn" type="button" onclick="dupSet()" title="Set dupliceren"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>';
   return '<div class="homeSliderHeaderControls">'+
     '<div class="homeSliderLeftControls">'+setEditorLayoutChipHtml()+setEditorPageBtnsHtml(active)+'</div>'+
-    '<div class="homeSliderRightControls"><span class="homeCardsSlideLabel">Kaarten</span>'+addBtn+dupBtn+sortBtn+'</div>'+
+    '<div class="homeSliderRightControls"><span class="homeCardsSlideLabel">Kaarten</span>'+addBtn+dupBtn+setEditorSortDropdownHtml()+'</div>'+
   '</div>';
 }
 function homeToolbarDropdownHtml(label,current,items){
