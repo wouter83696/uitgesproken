@@ -124,6 +124,28 @@ var CARD_FORMATS=[
   {id:'square-88x88',    w:88,  h:88,  label:'Vierkant (88×88mm)',  sub:'Modern, symmetrisch'},
   {id:'portrait-70x120', w:70,  h:120, label:'Tarot (70×120mm)',    sub:'Meer ruimte voor tekst'},
 ];
+// ═══════════════════════════════════════════
+// FEATURE GATES
+// ═══════════════════════════════════════════
+var PLAN_LIMITS={
+  free:{ maxSets:20, maxCollaborators:2, layouts:['grid'], makerHome:true },
+  pro: { maxSets:Infinity, maxCollaborators:10, layouts:null, makerHome:true }
+};
+function userPlan(){ return (S._plan==='pro')?'pro':'free'; }
+function isPro(){ return userPlan()==='pro'; }
+function planLimits(){ return PLAN_LIMITS[userPlan()]||PLAN_LIMITS.free; }
+function canCreateSet(){ return true; }
+function canAddCollaborator(setId){
+  var set=(S.sets||[]).find(function(s){return s.id===setId;});
+  if(!set)return false;
+  return isPro() || ((set._memberCount||0) < planLimits().maxCollaborators);
+}
+function canUseLayout(layoutId){ return true; }
+function canUseMakerHome(){ return true; }
+function proGateHtml(label){
+  return '';
+}
+
 var DEFAULT_CARD_FORMAT='landscape-85x55';
 var CARD_EDITOR_SOURCE_FOLDER='cards';
 var CARD_ASSET_FALLBACK_FOLDERS=['cards','cards_rect','cards_square'];
@@ -809,28 +831,35 @@ function renderSidebar(){
     return !q||title.indexOf(q)>=0||id.indexOf(q)>=0;
   });
   var homeIcon='<span class="sLeadIcon sLeadHome" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></span>';
-  var ruimteBtn='<button class="sItem sItem-home'+(S.activeKind==='space'?' active':'')+'" type="button" title="Home" onclick="reqLoadSpace()">'+
-    homeIcon+
-    '<span class="sNm">Home</span>'+
-  '</button>';
+  var ruimteBtn=
+    '<div class="sbLbl sbLblWs">Ruimte</div>'+
+    '<button class="sItem sItem-home'+(S.activeKind==='space'?' active':'')+'" type="button" title="Home" onclick="reqLoadSpace()">'+
+      homeIcon+
+      '<span class="sNm">Home</span>'+
+    '</button>';
   spaceNav.innerHTML=ruimteBtn;
   var setsLabel=list.length?'<div class="sbLbl sbLblSets">Sets</div>':'';
-  setList.innerHTML=setsLabel+list.map(function(s){
+  var setsHtml=list.map(function(s){
     var sid=String((s&&s.id)||'');
     var pct=calcPct(sid),isDirty=S.activeKind==='set'&&sid===S.activeId&&S.dirty;
-    var isPublic=(s&&s.isPublic)!==false;
-    var pubCls=isPublic?' public':' private';
-    var pubLabel=isPublic?'Live':'Publiceer';
-    var pubTitle=isPublic?'Zet terug naar privé':'Maak publiek zichtbaar';
+    var setStatus=(s&&s.status)||'draft';
+    var setVis=(s&&s.visibility)||'private';
+    var pubCls,pubLabel;
+    if(setStatus==='draft'){ pubCls=' private'; pubLabel='Draft'; }
+    else if(setVis==='public'){ pubCls=' public'; pubLabel='Public'; }
+    else if(setVis==='unlisted'){ pubCls=' unlisted'; pubLabel='Unlisted'; }
+    else { pubCls=' private'; pubLabel='Private'; }
+    var pubTitle='Publicatie-instellingen';
     var title=(s&&s.title)||sid;
     return '<button class="sItem'+(S.activeKind==='set'&&sid===S.activeId?' active':'')+(isDirty?' dirty':'')+'" draggable="true" data-sid="'+esc(sid)+'" onclick="reqLoad(\''+esc(sid)+'\')">'+
       '<span class="sLeadBadge" aria-hidden="true">'+esc(sidebarBadgeText(title))+'</span>'+
       sidebarMiniCardHtml()+
-      '<span class="sNm">'+esc((s&&s.title)||sid)+'</span>'+
+      '<span class="sNmWrap"><span class="sNm">'+esc((s&&s.title)||sid)+'</span><span class="sRenameBtn" role="button" tabindex="0" title="Naam wijzigen" aria-label="Naam wijzigen" onclick="event.stopPropagation();startSidebarSetRename(\''+esc(sid)+'\',this.parentNode.querySelector(\'.sNm\'))" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();startSidebarSetRename(\''+esc(sid)+'\',this.parentNode.querySelector(\'.sNm\'));}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span></span>'+
       '<span class="sMeta"><span class="sPct">'+pct+'%</span></span>'+
-      '<span class="sPub'+pubCls+'" title="'+pubTitle+'" onclick="event.stopPropagation();toggleSetPublic(\''+esc(sid)+'\');return false;">'+pubLabel+'</span>'+
+      '<span class="sPub'+pubCls+'" title="'+pubTitle+'" onclick="event.stopPropagation();openSettingsForSet(\''+esc(sid)+'\')">'+pubLabel+'</span>'+
       '<span class="sDirty" title="Niet opgeslagen"></span></button>';
   }).join('');
+  setList.innerHTML=setsLabel+setsHtml;
   if(!list.length&&Array.isArray(S.sets)&&S.sets.length&&!q){
     setList.innerHTML='<div class="empty" style="padding:10px 0;color:var(--k3)">Er ging iets mis bij het tonen van de sets.</div>';
   }
@@ -1126,13 +1155,9 @@ function adminSignOut(){
 }
 function openTopSettings(){
   closeAllTopProfileMenus();
-  if(S.activeKind==='space'){
-    setOpmakenPane('space');
-    if(S.clTab!=='opmaken')switchTab('opmaken');
-    else renderEditor();
-    return;
-  }
-  switchTab('inst');
+  setOpmakenPane('inst');
+  if(S.clTab!=='opmaken')switchTab('opmaken');
+  else renderEditor();
 }
 function topProfileName(){
   return String(S._userName||S._email||'');
@@ -1154,7 +1179,7 @@ function topProfileBadgeHtml(cls){
   var initials=esc(topProfileInitials());
   if(avatar){
     var fbStyle='display:none;width:100%;height:100%';
-    return '<img class="'+cls+'" src="'+esc(avatar)+'" alt="'+name+'" onerror="this.style.display=\'none\';var fb=this.nextElementSibling;if(fb)fb.style.display=\'inline-flex\'">'
+    return '<img class="'+cls+'" src="'+esc(avatar)+'" alt="'+name+'" referrerpolicy="no-referrer" crossorigin="anonymous" onerror="this.style.display=\'none\';var fb=this.nextElementSibling;if(fb)fb.style.display=\'inline-flex\'">'
       +'<span class="'+cls+' is-fallback" style="'+fbStyle+'" aria-hidden="true">'+initials+'</span>';
   }
   return '<span class="'+cls+' is-fallback" aria-hidden="true">'+initials+'</span>';
@@ -1177,6 +1202,7 @@ function buildTopProfileMenuHtml(){
         topProfileBadgeHtml('tbRMenuAvatar')+
         '<div class="tbRMenuMeta">'+
           '<div class="tbRMenuName">'+name+'</div>'+
+          (S._username?'<div class="tbRMenuUsername">@'+esc(S._username)+'</div>':'')+
           '<div class="tbRMenuMail">'+email+'</div>'+
         '</div>'+
       '</div>'+
@@ -1207,9 +1233,10 @@ function renderEditor(){
       '<button class="btnIcon" id="redoBtn" type="button" onclick="redoSetChanges()"'+(canRedo()?'':' disabled')+' title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
     '</div>'+
     '<button class="btnIconDanger" type="button" onclick="doDelete()" title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
+    saveStatus+
     '<button class="btn tbRSaveBtn" id="saveBtn" onclick="saveSet()"><span>Opslaan</span></button>'+
     profileMenu+
-  '</div>'+saveStatus+'</div>';
+  '</div></div>';
   renderEditorShell(headTitle,headActions);
 }
 function renderSpaceEditor(){
@@ -1219,8 +1246,6 @@ function renderSpaceEditor(){
   var saveStatus=buildTopSaveStatusHtml();
   var headTitle='<div class="clHeadTitle">'+
     '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="Home" readonly>'+
-    '<span class="clHeadThemeSep" id="editorThemeSep"></span>'+
-    '<input id="editorThemeTitle" class="clHeadThemeInput is-static" type="text" value="'+spaceName+'" readonly>'+
   '</div>';
   var headActions='<div class="tbRWrap"><div class="tbR">'+
     '<div class="tbRActions">'+
@@ -1228,9 +1253,10 @@ function renderSpaceEditor(){
       '<button class="btnIcon" id="redoBtn" type="button" onclick="redoSetChanges()"'+(canRedo()?'':' disabled')+' title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
     '</div>'+
     '<button class="btnIconDanger" type="button" onclick="toast(\'Nog niet actief in home-editor\',\'amber\')" title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
+    saveStatus+
     '<button class="btn tbRSaveBtn" id="saveSpaceBtn" type="button" onclick="saveSpaceSettings()"><span>Opslaan</span></button>'+
     profileMenu+
-  '</div>'+saveStatus+'</div>';
+  '</div></div>';
   renderEditorShell(headTitle,headActions);
 }
 function currentSpaceLayoutMode(){
@@ -1326,29 +1352,34 @@ function setHomeSliderPane(pane){
   var next=normalizeHomeSliderPane(pane);
   S.homeSliderPane=next;
   if(next==='hero'||next==='grid')S.homeCardsPane=next;
-  if(next!=='grid')S.homeGridExpanded=false;
-  if(next!=='hero')S.homeHeroExpanded=false;
+  buildStijlPreserveBg(g('pw'));
+}
+function selectHomeCardsPane(pane){
+  S.homeSliderPane=pane;
+  S.homeCardsPane=pane;
   buildStijlPreserveBg(g('pw'));
 }
 function toggleHomeGridExpanded(){
+  if(normalizeHomeSliderPane(S.homeSliderPane)!=='grid'){
+    S.homeSliderPane='grid';
+    S.homeCardsPane='grid';
+  }
   S.homeGridExpanded=!S.homeGridExpanded;
   buildStijlPreserveBg(g('pw'));
 }
 function toggleHomeHeroExpanded(){
+  if(normalizeHomeSliderPane(S.homeSliderPane)!=='hero'){
+    S.homeSliderPane='hero';
+    S.homeCardsPane='hero';
+  }
   S.homeHeroExpanded=!S.homeHeroExpanded;
   buildStijlPreserveBg(g('pw'));
 }
 function activateHeroSliderPane(){
-  var pane=normalizeHomeSliderPane(S.homeSliderPane);
-  if(pane==='hero'){
-    S.homeHeroExpanded=!S.homeHeroExpanded;
-  } else {
-    S.homeSliderPane='hero';
-    S.homeCardsPane='hero';
-    S.homeGridExpanded=false;
-    S.homeHeroExpanded=true;
-  }
-  buildStijlPreserveBg(g('pw'));
+  selectHomeCardsPane('hero');
+}
+function activateGridSliderPane(){
+  selectHomeCardsPane('grid');
 }
 function sliderExpandCornerBtnHtml(pane,expanded){
   var onclick=pane==='hero'?'toggleHomeHeroExpanded()':'toggleHomeGridExpanded()';
@@ -1641,9 +1672,35 @@ function spacePageBtnsHtml(active){
     {id:'space',label:'Home'},
     {id:'info',label:'Infopagina'}
   ];
+  var currentActive=active;
   return '<div class="paneModeSwitcher homeSliderModeWrap spacePageSwitch" aria-label="Pagina kiezen">'+items.map(function(item){
-    return '<button class="paneMode homeSliderPaneBtn'+(active===item.id?' sel':'')+'" type="button" onclick="setOpmakenPane(\''+item.id+'\')">'+esc(item.label)+'</button>';
+    var onclick='setOpmakenPane(\''+item.id+'\')';
+    return '<button class="paneMode homeSliderPaneBtn'+(currentActive===item.id?' sel':'')+'" type="button" onclick="'+onclick+'">'+esc(item.label)+'</button>';
   }).join('')+'</div>';
+}
+function editorSettingsToggleBtnHtml(){
+  var active=S.opmPane==='inst';
+  return '<div class="paneModeSwitcher homeSliderModeWrap editorSettingsSwitch" aria-label="Instellingen">'+
+    '<button class="paneMode homeSliderPaneBtn has-icon'+(active?' sel':'')+'" type="button" onclick="toggleInlineSettingsPane()" title="Instellingen" aria-label="Instellingen">'+
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'+
+    '</button>'+
+  '</div>';
+}
+function openSettingsForSet(id){
+  if(id&&id!==S.activeId){ reqLoad(id); }
+  setTimeout(function(){
+    if(S.opmPane!=='inst') toggleInlineSettingsPane();
+  },id&&id!==S.activeId?200:0);
+}
+function toggleInlineSettingsPane(){
+  var isSpace=S.activeKind==='space';
+  var fallback=isSpace?'space':'vragen';
+  if(S.opmPane==='inst'){
+    setOpmakenPane(S._instBasePane||fallback);
+    return;
+  }
+  S._instBasePane=S.opmPane||fallback;
+  setOpmakenPane('inst');
 }
 function homeSliderPageGroupHtml(active,pane){
   var layoutBtn=active==='space'?homeLayoutChipHtml(pane):'';
@@ -1654,25 +1711,21 @@ function homeSliderPageGroupHtml(active,pane){
 function homeCardsViewSwitchHtml(){
   var pane=normalizeHomeSliderPane(S.homeSliderPane);
   var active=(pane==='grid')?'grid':'hero';
-  var heroOpen=active==='hero'&&!!S.homeHeroExpanded;
-  var gridOpen=active==='grid'&&!!S.homeGridExpanded;
-  var icons={
-    hero:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="8" rx="1.5"/><circle cx="5.5" cy="13.2" r=".55" fill="currentColor" stroke="none"/><circle cx="8" cy="13.2" r=".55" fill="currentColor" stroke="none" opacity=".35"/><circle cx="10.5" cy="13.2" r=".55" fill="currentColor" stroke="none" opacity=".35"/></svg>',
-    grid:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="2.5" width="5.5" height="4" rx="1"/><rect x="9" y="2.5" width="5.5" height="4" rx="1"/><rect x="1.5" y="9.5" width="5.5" height="4" rx="1"/><rect x="9" y="9.5" width="5.5" height="4" rx="1"/></svg>'
-  };
-  var heroChevron=heroOpen
-    ?'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 6.5L5 3.5L8 6.5"/></svg>'
-    :'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>';
-  var gridChevron=gridOpen
-    ?'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 6.5L5 3.5L8 6.5"/></svg>'
-    :'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>';
-  return '<div class="paneModeSwitcher homeSliderModeWrap homeCardsSwitch" aria-label="Kaarten kiezen">'+
-    '<button class="paneMode homeSliderPaneBtn'+(active==='hero'?' sel':'')+'" type="button" onclick="activateHeroSliderPane()" title="Uitgelicht kaarten kiezen">'+
-      icons.hero+'Uitgelicht'+heroChevron+
-    '</button>'+
-    '<button class="paneMode homeSliderPaneBtn'+(active==='grid'?' sel':'')+'" type="button" onclick="setHomeSliderPane(\'grid\')" title="Lijst kaarten kiezen">'+
-      icons.grid+'Lijst'+gridChevron+
-    '</button>'+
+  var heroOpen=!!S.homeHeroExpanded;
+  var gridOpen=!!S.homeGridExpanded;
+  var chevUp='<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 6.5L5 3.5L8 6.5"/></svg>';
+  var chevDown='<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>';
+  var iconHero='<svg class="homeCardsPaneIcon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="8" rx="1.5"/><circle cx="5.5" cy="13.2" r=".55" fill="currentColor" stroke="none"/><circle cx="8" cy="13.2" r=".55" fill="currentColor" stroke="none" opacity=".35"/><circle cx="10.5" cy="13.2" r=".55" fill="currentColor" stroke="none" opacity=".35"/></svg>';
+  var iconGrid='<svg class="homeCardsPaneIcon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="2.5" width="5.5" height="4" rx="1"/><rect x="9" y="2.5" width="5.5" height="4" rx="1"/><rect x="1.5" y="9.5" width="5.5" height="4" rx="1"/><rect x="9" y="9.5" width="5.5" height="4" rx="1"/></svg>';
+  return '<div class="homeCardsSwitch">'+
+    '<div class="homeCardsPaneSplit'+(active==='hero'?' sel':'')+'" >'+
+      '<button class="homeCardsPaneMain" type="button" onclick="selectHomeCardsPane(\'hero\')" title="Uitgelicht">'+iconHero+'Uitgelicht</button>'+
+      '<button class="homeCardsPaneChevron" type="button" onclick="toggleHomeHeroExpanded()" title="'+(heroOpen?'Inklappen':'Uitklappen')+'">'+  (heroOpen?chevUp:chevDown)+'</button>'+
+    '</div>'+
+    '<div class="homeCardsPaneSplit'+(active==='grid'?' sel':'')+'" >'+
+      '<button class="homeCardsPaneMain" type="button" onclick="selectHomeCardsPane(\'grid\')" title="Lijst">'+iconGrid+'Lijst</button>'+
+      '<button class="homeCardsPaneChevron" type="button" onclick="toggleHomeGridExpanded()" title="'+(gridOpen?'Inklappen':'Uitklappen')+'">'+  (gridOpen?chevUp:chevDown)+'</button>'+
+    '</div>'+
   '</div>';
 }
 
@@ -1681,19 +1734,22 @@ function homeSliderActionsHtml(){
   var showCards=pane==='hero'||pane==='grid';
   var cardSwitch=showCards?homeCardsViewSwitchHtml():'';
   var sortBtn=showCards?homeSortDropdownHtml(pane):'';
+  var settingsMode=S.opmPane==='inst';
   return '<div class="homeSliderHeaderControls">'+
-    '<div class="homeSliderLeftControls">'+homeLayoutChipHtml(pane)+spacePageBtnsHtml('space')+'</div>'+
-    '<div class="homeSliderRightControls">'+(showCards?'<span class="homeCardsSlideLabel">Kaarten</span>':'')+cardSwitch+sortBtn+'</div>'+
+    '<div class="homeSliderLeftControls">'+homeLayoutChipHtml(pane)+editorSettingsToggleBtnHtml()+spacePageBtnsHtml('space')+'</div>'+
+    '<div class="homeSliderRightControls'+(settingsMode?' slider-controls-dimmed':'')+'">'+((showCards?'<span class="homeCardsSlideLabel">Kaarten</span>':'')+cardSwitch+sortBtn)+'</div>'+
   '</div>';
 }
 function infoModeHeaderActionsHtml(){
-  var pane=normalizeHomeSliderPane(S.homeSliderPane);
-  var showCards=pane==='hero'||pane==='grid';
-  var cardSwitch=showCards?homeCardsViewSwitchHtml():'';
-  var sortBtn=showCards?homeSortDropdownHtml(pane):'';
+  var addPageBtn='<button class="stijlSliderActionBtn stijlSliderActionPrimary" type="button" onclick="addInfoCustomPage()"><span class="stijlSliderActionPlus">+</span><span>Pagina</span></button>';
+  var orderMenu=setEditorInfoOrderMenuHtml();
   return '<div class="homeSliderHeaderControls info-mode-header">'+
-    '<div class="homeSliderLeftControls">'+homeLayoutChipHtml('info')+spacePageBtnsHtml('info')+'</div>'+
-    '<div class="homeSliderRightControls">'+(showCards?'<span class="homeCardsSlideLabel">Kaarten</span>':'')+cardSwitch+sortBtn+'</div>'+
+    '<div class="homeSliderLeftControls">'+homeLayoutChipHtml('info')+editorSettingsToggleBtnHtml()+spacePageBtnsHtml('info')+'</div>'+
+    '<div class="homeSliderRightControls">'+
+      '<span class="homeCardsSlideLabel">Pagina&apos;s</span>'+
+      addPageBtn+
+      orderMenu+
+    '</div>'+
   '</div>';
 }
 function setEditorLayoutChipHtml(){
@@ -1715,22 +1771,25 @@ function setCardFormatFromSlider(id){
 }
 function setEditorPageBtnsHtml(active){
   var items=[{id:'vragen',label:'Set'},{id:'info',label:'Infopagina'}];
+  var currentActive=active;
   return '<div class="paneModeSwitcher homeSliderModeWrap spacePageSwitch" aria-label="Weergave kiezen">'+
     items.map(function(item){
-      return '<button class="paneMode homeSliderPaneBtn'+(active===item.id?' sel':'')+'" type="button" onclick="setOpmakenPane(\''+item.id+'\')">'+esc(item.label)+'</button>';
+      var onclick='setOpmakenPane(\''+item.id+'\')';
+      return '<button class="paneMode homeSliderPaneBtn'+(currentActive===item.id?' sel':'')+'" type="button" onclick="'+onclick+'">'+esc(item.label)+'</button>';
     }).join('')+
   '</div>';
 }
 function setEditorSortDropdownHtml(){
   var items=[
-    {v:'manual',l:'Eigen volgorde'},
-    {v:'az',    l:'A–Z'}
+    {v:'manual',      l:'Eigen volgorde'},
+    {v:'alpha-asc',   l:'A-Z'},
+    {v:'alpha-desc',  l:'Z-A'}
   ];
   return '<div class="stijlSliderActionsWrap homeOrderWrap"><details class="textToolbarMenu homeToolbarMenu homeOrderMenu">'+
     '<summary class="textToolbarMenuBtn homeToolbarMenuBtn homeOrderMenuBtn" title="Thema\'s ordenen">'+
       '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h7M3 12h4"/></svg>'+
       '<span>Ordenen</span>'+
-      '<span class="textToolbarCaret">▾</span>'+
+      '<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>'+
     '</summary>'+
     '<div class="textToolbarMenuPop homeToolbarMenuPop">'+
       items.map(function(opt){
@@ -1739,14 +1798,78 @@ function setEditorSortDropdownHtml(){
     '</div>'+
   '</details></div>';
 }
+function toggleSetThemeExpanded(){
+  S.setThemeExpanded=!S.setThemeExpanded;
+  buildStijlPreserveBg(g('pw'));
+}
+function focusSetThemeSliderRail(showOrderHint){
+  SET_EDITOR_PANE='themes';
+  S.setThemeExpanded=true;
+  buildStijlPreserveBg(g('pw'));
+  setTimeout(function(){
+    var rail=document.querySelector('#stijl-kaart .stijlSlideRail');
+    if(rail){
+      rail.classList.add('is-focused');
+      setTimeout(function(){rail.classList.remove('is-focused');},1200);
+      rail.scrollIntoView({block:'nearest',behavior:'smooth'});
+    }
+    if(showOrderHint)toast('Sleep thema\'s in de balk om de volgorde te wijzigen','green');
+  },60);
+}
+function setEditorThemeActionHtml(){
+  var expanded=!!S.setThemeExpanded;
+  var chevron=expanded
+    ?'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 6.5L5 3.5L8 6.5"/></svg>'
+    :'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>';
+  return '<div class="setThemeSplitGroup">'+
+    '<button class="setThemeSplitMain'+(expanded?' sel':'')+'" type="button" onclick="addThemeFromStyle()" title="Thema toevoegen">+ Thema</button>'+
+    '<button class="setThemeSplitChevron'+(expanded?' sel':'')+'" type="button" onclick="toggleSetThemeExpanded()" title="Thema-overzicht in/uitklappen">'+chevron+'</button>'+
+  '</div>';
+}
 function setEditorActionsHtml(){
-  var active=S.opmPane==='info'?'info':'vragen';
-  var addBtn='<button class="stijlSliderActionBtn stijlSliderActionPrimary" type="button" onclick="addThemeFromStyle()"><span class="stijlSliderActionPlus">+</span><span>Thema</span></button>';
+  var active=S.opmPane==='info'?'info':(S.opmPane==='inst'?'inst':'vragen');
+  var sortItems=[{v:'manual',l:'Eigen volgorde'},{v:'alpha-asc',l:'A-Z'},{v:'alpha-desc',l:'Z-A'}];
+  var addBtn=setEditorThemeActionHtml();
   var dupBtn='<button class="stijlSliderActionBtn" type="button" onclick="dupSet()" title="Set dupliceren"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>';
-  var btnGroup='<div class="stijlSliderActionsWrap">'+addBtn+dupBtn+'</div>';
+  var sortMenu='<div class="stijlSliderActionsWrap homeOrderWrap"><details class="textToolbarMenu homeToolbarMenu homeOrderMenu">'+
+    '<summary class="textToolbarMenuBtn homeToolbarMenuBtn homeOrderMenuBtn" title="Thema\'s ordenen">'+
+      '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h7M3 12h4"/></svg>'+
+      '<span>Ordenen</span>'+
+      '<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>'+
+    '</summary>'+
+    '<div class="textToolbarMenuPop homeToolbarMenuPop">'+
+      sortItems.map(function(opt){return '<button class="textToolbarMenuItem" type="button" onclick="this.closest(\'details\').removeAttribute(\'open\')">'+esc(opt.l)+'</button>';}).join('')+
+    '</div>'+
+  '</details></div>';
+  var settingsMode=S.opmPane==='inst';
   return '<div class="homeSliderHeaderControls">'+
-    '<div class="homeSliderLeftControls">'+setEditorLayoutChipHtml()+setEditorPageBtnsHtml(active)+'</div>'+
-    '<div class="homeSliderRightControls"><span class="homeCardsSlideLabel">Kaarten</span>'+btnGroup+setEditorSortDropdownHtml()+'</div>'+
+    '<div class="homeSliderLeftControls">'+setEditorLayoutChipHtml()+editorSettingsToggleBtnHtml()+setEditorPageBtnsHtml(active)+'</div>'+
+    '<div class="homeSliderRightControls'+(settingsMode?' slider-controls-dimmed':'')+'"><span class="homeCardsSlideLabel">Kaarten</span>'+addBtn+dupBtn+sortMenu+'</div>'+
+  '</div>';
+}
+function setEditorInfoOrderMenuHtml(){
+  return '<div class="stijlSliderActionsWrap homeOrderWrap"><details class="textToolbarMenu homeToolbarMenu homeOrderMenu">'+
+    '<summary class="textToolbarMenuBtn homeToolbarMenuBtn homeOrderMenuBtn" title="Pagina\'s ordenen">'+
+      '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h7M3 12h4"/></svg>'+
+      '<span>Ordenen</span>'+
+      '<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>'+
+    '</summary>'+
+    '<div class="textToolbarMenuPop homeToolbarMenuPop">'+
+      '<button class="textToolbarMenuItem sel" type="button" onclick="this.closest(\'details\').removeAttribute(\'open\')">Eigen volgorde</button>'+
+      '<button class="textToolbarMenuItem" type="button" onclick="includeAllInfoThemes();this.closest(\'details\').removeAttribute(\'open\')">Alles tonen</button>'+
+    '</div>'+
+  '</details></div>';
+}
+function setEditorInfoActionsHtml(){
+  var addPageBtn='<button class="stijlSliderActionBtn stijlSliderActionPrimary" type="button" onclick="addInfoCustomPage()"><span class="stijlSliderActionPlus">+</span><span>Pagina</span></button>';
+  var orderMenu=setEditorInfoOrderMenuHtml();
+  return '<div class="homeSliderHeaderControls">'+
+    '<div class="homeSliderLeftControls">'+setEditorLayoutChipHtml()+editorSettingsToggleBtnHtml()+setEditorPageBtnsHtml('info')+'</div>'+
+    '<div class="homeSliderRightControls">'+
+      '<span class="homeCardsSlideLabel">Pagina&apos;s</span>'+
+      addPageBtn+
+      orderMenu+
+    '</div>'+
   '</div>';
 }
 function homeToolbarDropdownHtml(label,current,items){
@@ -1804,7 +1927,7 @@ function homeSetSlideCardHtml(set,idx,opts){
     :'';
   return '<div class="stijlSlideCard homeSetSlideCard homeSetSlideCard-'+pane+(isSelected?' sel is-picked':'')+(idx===0&&pane==='sets'?' sel':'')+'" draggable="'+(draggable?'true':'false')+'" data-home-pane="'+esc(pane)+'" data-home-set-id="'+esc(set.id)+'" title="'+title+'">'+
     '<div class="stijlSlideThumb">'+thumb+heroToggleBtn+'</div>'+
-    '<div class="stijlSlideBody"><div class="stijlSlideName">'+esc(set.title||set.id||'Naamloos')+'</div></div>'+
+    '<div class="stijlSlideBody"><div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Klik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();startHomeSetRename(\''+esc(set.id)+'\',this)">'+esc(set.title||set.id||'Naamloos')+'</div></div></div>'+
   '</div>';
 }
 function homeSetSliderStripHtml(){
@@ -1815,9 +1938,34 @@ function homeSetSliderStripHtml(){
   '</div>';
 }
 function homeLayoutSliderStripHtml(){
-  return '<div class="stijlSlideRail homeOptionSlideRail">'+spaceLayoutOptions().map(function(opt){
-    return spaceLayoutCardHtml(opt,currentSpaceLayoutMode());
-  }).join('')+'</div>';
+  var strip = '<div class="stijlSlideRail homeOptionSlideRail">'+
+    spaceLayoutOptions().map(function(opt){
+      return spaceLayoutCardHtml(opt, currentSpaceLayoutMode());
+    }).join('')+
+  '</div>';
+  return strip;
+}
+function setMakerBgVariant(id){
+  if(S._profile) S._profile.bg_variant=id;
+  var swatches=document.querySelectorAll('.makerBgSwatch');
+  swatches.forEach(function(btn){
+    var sel=btn.dataset.bgId===id;
+    btn.classList.toggle('sel',sel);
+    btn.innerHTML=sel?'<svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg>':'';
+  });
+  if(typeof window.saveMakerBgVariant==='function') window.saveMakerBgVariant(id);
+}
+var MAKER_BG_VARIANTS=[
+  {id:'licht', label:'Licht',  color:'#f4f6f7'},
+  {id:'wit',   label:'Wit',    color:'#ffffff'},
+  {id:'warm',  label:'Warm',   color:'#fdf8f0'},
+  {id:'koel',  label:'Koel',   color:'#f0f4f8'},
+  {id:'groen', label:'Groen',  color:'#f0f6f1'},
+  {id:'paars', label:'Paars',  color:'#f4f0f8'}
+];
+function makerBgColor(variant){
+  var v=(MAKER_BG_VARIANTS.find(function(b){return b.id===variant;})||MAKER_BG_VARIANTS[0]);
+  return v.color;
 }
 var HOME_SJABLONEN=[
   {id:'s-1',bg:'#d4eaf0'},{id:'s-2',bg:'#e6dff5'},{id:'s-3',bg:'#fdf0d5'},{id:'s-4',bg:'#dff5e8'},
@@ -1901,29 +2049,25 @@ function homeHeroSliderStripHtml(){
 
   var railClass='stijlSlideRail homeSetSlideRail homeHeroSlideRail';
   var empty=!sets.length?'<div class="homeSetSliderEmpty">Nog geen sets.</div>':'';
-  var cornerBtn=sets.length
-    ?'<button class="homeSliderExpandCornerBtn'+(expanded?' is-open':'')+'" type="button" onclick="toggleHomeHeroExpanded()" title="'+(expanded?'Sluiten':'Kaarten kiezen')+'">'+(expanded?'−':'+')+'</button>'
-    :'';
   return '<div class="homeSliderExpandWrap">'+
     '<div class="'+railClass+'">'+
       (sets.length?sets.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'hero',selectedIds:selectedIds,orderIds:orderIds});}).join(''):empty)+
     '</div>'+
-    cornerBtn+
   '</div>';
 }
 function homeGridSliderStripHtml(){
-  var listOrderIds=currentHomeGridSetIds();
+  var resolvedIds=resolvedHomeGridSetIds();
   var allSets=sortedHomeSets();
   var byId={};
   allSets.forEach(function(set){byId[set.id]=set;});
-  var inList=listOrderIds.map(function(id){return byId[id];}).filter(Boolean);
-  var rest=allSets.filter(function(set){return listOrderIds.indexOf(set.id)<0;});
+  var inList=resolvedIds.map(function(id){return byId[id];}).filter(Boolean);
+  var rest=allSets.filter(function(set){return resolvedIds.indexOf(set.id)<0;});
   var expanded=!!S.homeGridExpanded;
 
   if(expanded){
-    var lijstItems=listOrderIds.map(function(id){return byId[id];}).filter(Boolean);
+    var lijstItems=resolvedIds.map(function(id){return byId[id];}).filter(Boolean);
     var lijstHtml=lijstItems.length
-      ?lijstItems.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'grid'});}).join('')
+      ?lijstItems.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'grid',draggable:true});}).join('')
       :'<div class="homeGridTrayEmpty">Sleep kaarten hier naartoe of gebruik + om toe te voegen</div>';
     var eigenHtml=rest.length
       ?rest.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'grid',draggable:true});}).join('')
@@ -1948,15 +2092,55 @@ function homeGridSliderStripHtml(){
   var sets=inList.concat(rest);
   var railClass='stijlSlideRail homeSetSlideRail homeGridSlideRail';
   var empty=!sets.length?'<div class="homeSetSliderEmpty">Nog geen sets.</div>':'';
-  var cornerBtn=sets.length
-    ?'<button class="homeSliderExpandCornerBtn'+(expanded?' is-open':'')+'" type="button" onclick="toggleHomeGridExpanded()" title="'+(expanded?'Sluiten':'Kaarten kiezen')+'">'+(expanded?'−':'+')+'</button>'
-    :'';
   return '<div class="homeSliderExpandWrap">'+
     '<div class="'+railClass+'">'+
       (sets.length?sets.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'grid'});}).join(''):empty)+
     '</div>'+
-    cornerBtn+
   '</div>';
+}
+function persistSetTitle(setId,val){
+  var idx=S.sets.findIndex(function(s){return s.id===setId;});
+  if(idx>=0)S.sets[idx].title=val;
+  renderSidebar();
+  saveIndex('Rename: '+setId).catch(function(){});
+  getFile('sets/'+setId+'/meta.json').then(function(r){
+    r.data.title=val;
+    return saveFile('sets/'+setId+'/meta.json',r.data,r.sha,'Rename set: '+val);
+  }).catch(function(){});
+}
+function startInlineSetRename(setId,el,inputClass){
+  if(el.querySelector('input'))return;
+  var current=el.textContent;
+  var card=el.closest('.stijlSlideCard');
+  if(card)card.classList.add('editing-name');
+  el.classList.add('is-editing');
+  el.innerHTML='';
+  var inp=document.createElement('input');
+  inp.type='text';
+  inp.value=current;
+  inp.className=inputClass||'homeSetRenameInput';
+  inp.onclick=function(e){e.stopPropagation();};
+  inp.onkeydown=function(e){
+    if(e.key==='Enter'){e.preventDefault();inp.blur();}
+    if(e.key==='Escape'){inp.value=current;inp.blur();}
+  };
+  inp.onblur=function(){
+    var val=inp.value.trim()||current;
+    el.textContent=val;
+    el.classList.remove('is-editing');
+    if(card)card.classList.remove('editing-name');
+    if(val===current)return;
+    persistSetTitle(setId,val);
+  };
+  el.appendChild(inp);
+  inp.focus();
+  inp.select();
+}
+function startHomeSetRename(setId,el){
+  startInlineSetRename(setId,el,'homeSetRenameInput');
+}
+function startSidebarSetRename(setId,el){
+  startInlineSetRename(setId,el,'sidebarSetRenameInput');
 }
 function updateGridExpandBtnVisibility(){
   if(S.homeGridExpanded)return;
@@ -2931,7 +3115,12 @@ function setOpmakenPane(pane){
   var keepScrollTop=contentEl?contentEl.scrollTop:0;
   var keepScrollLeft=contentEl?contentEl.scrollLeft:0;
   var isSpace=S.activeKind==='space';
-  S.opmPane=(pane==='info')?'info':(isSpace?'space':'vragen');
+  if(pane==='inst'){
+    if(S.opmPane&&S.opmPane!=='inst')S._instBasePane=S.opmPane;
+  }else{
+    S._instBasePane=pane;
+  }
+  S.opmPane=(pane==='info')?'info':(pane==='inst'?'inst':(isSpace?'space':'vragen'));
   if(S.homeSliderPane==='layout'){
     var _lsL=null;try{_lsL=localStorage.getItem('pk_layout_chosen');}catch(e){}
     if(currentSpacePublicPage().layoutChosen||S.spaceLayoutMode||_lsL){
@@ -2946,7 +3135,7 @@ function setOpmakenPane(pane){
       var firstTheme=qOpts.find(function(opt){return opt.key!=='cover'&&opt.key!=='algemeen';});
       STYLE_PREVIEW_KEY=(firstTheme||qOpts[0]||{}).key||'cover';
     }
-  }else{
+  }else if(S.opmPane==='info'){
     var iOpts=infoSlideOptions(meta).filter(function(opt){return !opt.excluded;});
     var iKeys=iOpts.map(function(opt){return opt.key;});
     if(iKeys.indexOf(INFO_SLIDE_KEY)<0)INFO_SLIDE_KEY=(iOpts[0]||{}).key||'cover';
@@ -2975,6 +3164,232 @@ function setOpmakenPane(pane){
       doRender();
     }
   }
+}
+function inlineSettingsToggleHtml(id,label,checked,sub){
+  return '<div class="togRow inlineSettingsToggle">'+
+    '<div><label for="'+id+'">'+esc(label)+'</label>'+(sub?'<span class="togRowSub">'+esc(sub)+'</span>':'')+'</div>'+
+    '<label class="tog"><input type="checkbox" id="'+id+'"'+(checked?' checked':'')+'><span class="togSl"></span></label>'+
+  '</div>';
+}
+function buildInlineSettingsSliderHtml(spaceMode){
+  if(spaceMode){
+    var publicPage=currentSpacePublicPage();
+    var infoFirst=!!publicPage.infoFirstVisit;
+    var placeholders=currentHomePlaceholderCount();
+    var menu=spacePreviewMenuSettings();
+    return '<div class="homeSliderExpandWrap inlineSettingsExpand">'+
+      '<div class="inlineSettingsGrid inlineSettingsGrid-space">'+
+        '<section class="inlineSettingsCard">'+
+          '<div class="inlineSettingsLabel">Infopagina</div>'+
+          inlineSettingsToggleHtml('inline_sp_info_first','Info bij eerste bezoek',infoFirst,'Toon de infopagina automatisch aan nieuwe bezoekers')+
+        '</section>'+
+        '<section class="inlineSettingsCard">'+
+          '<div class="inlineSettingsLabel">Home</div>'+
+          '<div class="inlineSettingsRangeRow">'+
+            '<div class="inlineSettingsRangeLabel">Lege kaartslots <span id="inline_sp_ph_val">— '+placeholders+'</span></div>'+
+            '<input type="range" class="spRange inlineSettingsRange" id="inline_sp_placeholders" min="0" max="8" step="1" value="'+placeholders+'">'+
+            '<div class="spRangeLabels"><span>0</span><span>8</span></div>'+
+          '</div>'+
+        '</section>'+
+        '<section class="inlineSettingsCard inlineSettingsCardWide">'+
+          '<div class="inlineSettingsLabel">Menu</div>'+
+          '<div class="togGroup inlineSettingsToggleGroup">'+
+            inlineSettingsToggleHtml('inline_sp_info','Informatieknop',menu.showInfo!==false,'Toon de infosheetknop in de viewer')+
+            inlineSettingsToggleHtml('inline_sp_shuf','Shuffelknop',menu.showShuffle!==false,'Kaarten in willekeurige volgorde')+
+            inlineSettingsToggleHtml('inline_sp_sets','Knop "Alle sets"',menu.showAllSets!==false,'Navigeer terug naar het overzicht')+
+          '</div>'+
+        '</section>'+
+        '<section class="inlineSettingsCard inlineSettingsCardWide">'+
+          '<div class="inlineSettingsLabel">Uitgesproken</div>'+
+          inlineSettingsToggleHtml('inline_sp_collections','Uitgesproken mag mijn sets gebruiken',!!(S._profile&&S._profile.allow_platform_collections!==false),'Bijvoorbeeld in collecties die Uitgesproken samenstelt')+
+        '</section>'+
+      '</div>'+
+    '</div>';
+  }
+  var m=S.d.meta||{};
+  var menuSet=m.ui&&m.ui.menu||{};
+  var sheet=m.ui&&m.ui.sheet||{};
+  var setMeta=(S.sets||[]).find(function(s){return s.id===S.activeId;})||{};
+  var pubStatus=setMeta.status||'draft';
+  var pubVis=setMeta.visibility||'private';
+  var pubAllow=!!setMeta.allowCollections;
+  var visOpts=[
+    {val:'private',  label:'Private'},
+    {val:'unlisted', label:'Unlisted'},
+    {val:'public',   label:'Public'}
+  ];
+  return '<div class="homeSliderExpandWrap inlineSettingsExpand">'+
+    '<div class="inlineSettingsGrid">'+
+      '<section class="inlineSettingsCard inlineSettingsCardWide pubSection">'+
+        '<div class="inlineSettingsLabel">Publicatie</div>'+
+        '<div class="pubStatusRow">'+
+          '<span class="pubStatusLabel">Status</span>'+
+          '<div class="pubStatusToggle">'+
+            '<button class="pubStatusBtn'+(pubStatus==='draft'?' sel':'')+'" type="button" data-val="draft" onclick="setPubStatus(\'draft\')">Draft</button>'+
+            '<button class="pubStatusBtn'+(pubStatus==='live'?' sel':'')+'" type="button" data-val="live" onclick="setPubStatus(\'live\')">Live</button>'+
+          '</div>'+
+        '</div>'+
+        '<div class="pubVisRow">'+
+          '<span class="pubVisLabel">Zichtbaarheid</span>'+
+          '<div class="pubVisGroup" id="pubVisGroup">'+
+            visOpts.map(function(o){
+              return '<button class="pubVisBtn'+(pubVis===o.val?' sel':'')+
+                (pubStatus==='draft'?' disabled':'')+'" type="button" data-val="'+o.val+
+                '" onclick="setPubVis(\''+o.val+'\')"'+
+                (pubStatus==='draft'?' disabled':'')+'>'+o.label+'</button>';
+            }).join('')+
+          '</div>'+
+        '</div>'+
+      '</section>'+
+      '<section class="inlineSettingsCard inlineSettingsCardWide collabSection">'+
+        '<div class="inlineSettingsLabel">Samenwerking</div>'+
+        '<div class="collabList" id="collabList"><span class="collabLoading">Laden…</span></div>'+
+        '<div class="collabInviteRow">'+
+          '<span class="collabAtSign">@</span>'+
+          '<input class="collabInviteInput" id="collabInviteInput" type="text" placeholder="gebruikersnaam" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="30">'+
+          '<button class="collabInviteBtn" id="collabInviteBtn" type="button" onclick="collabInvite()">Uitnodigen</button>'+
+        '</div>'+
+        '<div class="collabNote">Maximaal '+planLimits().maxCollaborators+' medewerkers per set.</div>'+
+      '</section>'+
+      '<section class="inlineSettingsCard">'+
+        '<div class="inlineSettingsLabel">Infosheet</div>'+
+        inlineSettingsToggleHtml('inline_i_sfirst','Tonen bij eerste bezoek',sheet.showOnFirst!==false,'Infosheet opent automatisch bij het eerste bezoek')+
+      '</section>'+
+      '<section class="inlineSettingsCard">'+
+        '<div class="inlineSettingsLabel">Viewer</div>'+
+        '<div class="togGroup inlineSettingsToggleGroup">'+
+          inlineSettingsToggleHtml('inline_i_anim','Flip-animatie',m.flipAnim!==false,'Kaart draait om bij klikken')+
+          inlineSettingsToggleHtml('inline_i_flip','Achterkant actief',m.doubleSided!==false,'Kaart heeft een achterkant')+
+        '</div>'+
+      '</section>'+
+      '<section class="inlineSettingsCard inlineSettingsCardWide">'+
+        '<div class="inlineSettingsLabel">Menu</div>'+
+        '<div class="togGroup inlineSettingsToggleGroup">'+
+          inlineSettingsToggleHtml('inline_i_info','Informatieknop',menuSet.showInfo!==false,'Opent de infosheet')+
+          inlineSettingsToggleHtml('inline_i_shuf','Shuffelknop',menuSet.showShuffle!==false,'Kaarten in willekeurige volgorde')+
+          inlineSettingsToggleHtml('inline_i_sets','Knop "Alle sets"',menuSet.showAllSets!==false,'Navigeer terug naar het overzicht')+
+        '</div>'+
+      '</section>'+
+    '</div>'+
+  '</div>';
+}
+function wireInlineSettingsSlider(spaceMode){
+  if(spaceMode){
+    var infoEl=g('inline_sp_info_first');
+    if(infoEl)infoEl.onchange=function(){setSpacePublicPageField('infoFirstVisit',!!this.checked);};
+    var collEl=g('inline_sp_collections');
+    if(collEl)collEl.onchange=function(){window.saveCollectionsOptOut&&window.saveCollectionsOptOut(!!this.checked);};
+    var phEl=g('inline_sp_placeholders');
+    var phVal=g('inline_sp_ph_val');
+    if(phEl){
+      phEl.oninput=function(){
+        if(phVal)phVal.textContent='— '+this.value;
+        setHomePlaceholderCount(parseInt(this.value,10));
+      };
+    }
+    [['inline_sp_info','showInfo'],['inline_sp_shuf','showShuffle'],['inline_sp_sets','showAllSets']].forEach(function(pair){
+      var el=g(pair[0]);if(!el)return;
+      el.onchange=function(){
+        var meta=S.d.meta=S.d.meta||{};
+        meta.ui=meta.ui&&typeof meta.ui==='object'?meta.ui:{};
+        meta.ui.menu=meta.ui.menu&&typeof meta.ui.menu==='object'?meta.ui.menu:{};
+        meta.ui.menu[pair[1]]=this.checked;
+        markDirty();
+        updateStijlPreview();
+      };
+    });
+    return;
+  }
+  [['inline_i_info','ui.menu.showInfo'],['inline_i_shuf','ui.menu.showShuffle'],['inline_i_sets','ui.menu.showAllSets'],['inline_i_sfirst','ui.sheet.showOnFirst'],['inline_i_anim','flipAnim'],['inline_i_flip','doubleSided']].forEach(function(pair){
+    var el=g(pair[0]);if(!el)return;
+    el.onchange=function(){
+      var parts=pair[1].split('.');
+      var obj=S.d.meta=S.d.meta||{};
+      for(var i=0;i<parts.length-1;i++){obj[parts[i]]=obj[parts[i]]||{};obj=obj[parts[i]];}
+      obj[parts[parts.length-1]]=this.checked;
+      markDirty();
+      updateStijlPreview();
+    };
+  });
+  // Laad medewerkers async
+  collabLoadMembers();
+  var invInp=g('collabInviteInput');
+  if(invInp)invInp.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();collabInvite();}};
+}
+function collabRenderList(members){
+  var list=g('collabList');
+  if(!list)return;
+  if(!members.length){
+    list.innerHTML='<span class="collabEmpty">Nog geen medewerkers.</span>';
+    return;
+  }
+  list.innerHTML=members.map(function(m){
+    var uname=(m.profiles&&m.profiles.username)||m.user_id;
+    return '<div class="collabItem">'+
+      '<span class="collabItemName">@'+esc(uname)+'</span>'+
+      '<button class="collabRemoveBtn" type="button" onclick="collabRemove(\''+esc(m.id)+'\')">×</button>'+
+    '</div>';
+  }).join('');
+}
+async function collabLoadMembers(){
+  if(!S.activeId||!window.loadSetMembers)return;
+  var members=await window.loadSetMembers(S.activeId);
+  collabRenderList(members);
+}
+async function collabInvite(){
+  var inp=g('collabInviteInput');
+  if(!inp)return;
+  var username=inp.value.replace(/^@/,'').toLowerCase().trim();
+  if(!username)return;
+  var btn=g('collabInviteBtn');
+  if(btn)btn.disabled=true;
+  var ok=await window.inviteCollaborator(S.activeId,username);
+  if(ok){ inp.value=''; collabLoadMembers(); }
+  if(btn)btn.disabled=false;
+}
+async function collabRemove(memberId){
+  var ok=await window.removeCollaborator(memberId);
+  if(ok)collabLoadMembers();
+}
+function _pubSaveActive(){
+  var set=(S.sets||[]).find(function(s){return s.id===S.activeId;});
+  if(!set)return;
+  window.savePublicationSettings&&window.savePublicationSettings(
+    set.id, set.status, set.visibility
+  );
+}
+function _pubUpdateDisabled(isLive){
+  document.querySelectorAll('.pubVisBtn').forEach(function(b){
+    b.disabled=!isLive;
+    b.classList.toggle('disabled',!isLive);
+  });
+  var cb=g('inline_pub_collect');
+  if(cb)cb.disabled=!isLive;
+}
+function setPubStatus(val){
+  var set=(S.sets||[]).find(function(s){return s.id===S.activeId;});
+  if(!set)return;
+  set.status=val;
+  document.querySelectorAll('.pubStatusBtn').forEach(function(b){
+    b.classList.toggle('sel',b.getAttribute('data-val')===val);
+  });
+  _pubUpdateDisabled(val==='live');
+  _pubSaveActive();
+}
+function setPubVis(val){
+  var set=(S.sets||[]).find(function(s){return s.id===S.activeId;});
+  if(!set||set.status!=='live')return;
+  set.visibility=val;
+  document.querySelectorAll('.pubVisBtn').forEach(function(b){
+    b.classList.toggle('sel',b.getAttribute('data-val')===val);
+  });
+  _pubSaveActive();
+}
+function setPubCollect(checked){
+  var set=(S.sets||[]).find(function(s){return s.id===S.activeId;});
+  if(!set||set.status!=='live')return;
+  set.allowCollections=!!checked;
+  _pubSaveActive();
 }
 function opmakenPaneTabsHtml(active){
   var panes=S.activeKind==='space'
@@ -3282,11 +3697,10 @@ function buildInfoPane(target){
       fR('Titel op kaart','text','info_mid_title',infoMidTitleText((th||cp).key),'Leeg laten om de titel te verbergen');
   }
   target.innerHTML=buildSidePanelShell({
-    beforeShellHtml:toggleHtml,
     shellClass:'infoPanelShell',
     metaHtml:(label?'<div class="questionsTheme">'+label+'</div>':''),
     bodyClass:'infoPanelBody',
-    contentHtml:'<div class="infoContent">'+fieldHtml+'</div>'
+    contentHtml:(toggleHtml?'<div class="infoToggleArea">'+toggleHtml+'</div>':'')+'<div class="infoContent">'+fieldHtml+'</div>'
   });
   function wireRichCe(el,storeKey){
     if(!el)return;
@@ -3397,9 +3811,9 @@ function updThLabel(i,v){
 }
 function addTh(){
   S.d.meta.themes=S.d.meta.themes||[];
-  var idx=S.d.meta.themes.length+1;
+  var idx=nextThemeOrdinal(S.d.meta||{});
   var key='thema-'+idx;
-  S.d.meta.themes.push({key:key,label:'',card:key+'.svg'});
+  S.d.meta.themes.push({key:key,label:themeOrdinalLabel(idx),card:key+'.svg'});
   markDirty();
   rebuildThemas();
 }
@@ -4753,9 +5167,8 @@ function buildVragen(target,opts){
   var iconBacks='<span style="font-size:14px;line-height:1;display:block;transform:scaleX(-1)" aria-hidden="true">↺</span>';
   var iconAdd='<svg viewBox="0 0 16 16"><path d="M8 2.5v11M2.5 8h11"/></svg>';
   var themeIdxQ=(S.d.meta.themes||[]).map(function(t){return t.key;}).indexOf(theme.key);
-  var themeNameHtml=(themeIdxQ>=0&&theme.key!=='algemeen')
-    ?'<input class="questionsTheme questionsThemeInput" type="text" value="'+esc(theme.label||theme.key)+'" placeholder="Naam van het thema" oninput="updateStyleThemeName('+themeIdxQ+',this.value)">'
-    :'<div class="questionsTheme">'+esc(theme.label||theme.key)+'</div>';
+  var themeNameValue=themeIdxQ>=0?themeLabelForIndex(themeIdxQ,theme.label):(theme.key==='algemeen'?nextThemeLabel(S.d.meta||{}):(theme.label||theme.key));
+  var themeNameHtml='<div class="questionsTheme">'+esc(themeNameValue)+'</div>';
   var questionsHeaderActions=
     '<div class="questionsHeadActions">'+
       '<button class="qHeadBtn qHeadBtnSecondary'+(showBacks?' sel':'')+'" type="button" onclick="toggleBacksEditor(\''+esc(key)+'\')" title="'+(showBacks?'Verberg achterkanttekst':'Toon achterkanttekst')+'" aria-label="'+(showBacks?'Verberg achterkanttekst':'Toon achterkanttekst')+'">'+iconBacks+'</button>'+
@@ -5143,6 +5556,83 @@ function questionPreviewFrontText(key){
   var q=selectedQuestionCard(key);
   return q?(q.voorkant||q.q||''):'';
 }
+function applyPreviewTextStyles(previewKey){
+  var m=S.d.meta||{};
+  var cv=styleCssVarsForKey(m,previewKey);
+  var font=cv['--pk-font']||'IBM Plex Sans';
+  var fs=fontSizeCss(cv['--pk-font-size']||'12');
+  var color=cv['--pk-set-text']||'rgba(48,96,136,0.95)';
+  var align=cv['--pk-text-align']||'center';
+  var valign=cv['--pk-text-valign']||'center';
+  var globalWeight=cv['--pk-font-weight']||'regular';
+  var globalItalic=cv['--pk-font-italic']==='1';
+  var globalUnderline=cv['--pk-font-underline']==='1';
+  var globalTextBg=normalizeHexInput(cv['--pk-text-bg-color'])||'';
+  var letterSpacing=cv['--pk-letter-spacing']||'0';
+  var lineHeight=cv['--pk-line-height']||'1.4';
+  var backCfg=backPreviewConfig(previewKey);
+  var backCv=backCfg.cssVars||cv;
+  var backFont=backCv['--pk-font']||font;
+  var backFs=fontSizeCss(backCv['--pk-font-size']||cv['--pk-font-size']||'12');
+  var backColor=backCv['--pk-set-text']||color;
+  var backAlign=backCv['--pk-text-align']||'center';
+  var backValign=backCv['--pk-text-valign']||'center';
+  var backWeight=backCv['--pk-font-weight']||'regular';
+  var backItalic=backCv['--pk-font-italic']==='1';
+  var backUnderline=backCv['--pk-font-underline']==='1';
+  var backTextBg=normalizeHexInput(backCv['--pk-text-bg-color'])||'';
+  var backLetterSpacing=backCv['--pk-letter-spacing']||'0';
+  var backLineHeight=backCv['--pk-line-height']||'1.4';
+  ['stijlCardTxt','qedCardTxt'].forEach(function(id){
+    var txt=g(id);if(!txt)return;
+    var inner=txt.querySelector('.cpFrontInner')||txt;
+    txt.style.fontFamily="'"+font+"', sans-serif";
+    txt.style.fontSize=fs;
+    txt.style.color=color;
+    txt.style.textAlign=align;
+    txt.style.letterSpacing=letterSpacing==='0'?'':letterSpacing+'px';
+    txt.style.lineHeight=lineHeight;
+    var infoMode=(S.opmPane==='info');
+    if(infoMode){
+      txt.style.fontWeight='';txt.style.fontStyle='';txt.style.textDecoration='';
+    }else{
+      txt.style.fontWeight=globalWeight==='bold'?'700':'400';
+      txt.style.fontStyle='normal';txt.style.textDecoration='none';
+      inner.style.fontWeight=globalWeight==='bold'?'700':globalWeight==='semibold'?'600':globalWeight==='medium'?'500':'400';
+      inner.style.fontStyle=globalItalic?'italic':'normal';
+      inner.style.textDecoration=globalUnderline?'underline':'none';
+      inner.style.background=globalTextBg||'transparent';
+      inner.style.padding=globalTextBg?'4px 8px':'0';
+    }
+    var overlay=txt.parentElement;
+    if(overlay){
+      overlay.style.alignItems=valign==='top'?'flex-start':valign==='bottom'?'flex-end':'center';
+      overlay.style.justifyContent=align==='left'?'flex-start':align==='right'?'flex-end':'center';
+    }
+  });
+  ['stijlCardBack','qedCardBack'].forEach(function(id){
+    var back=g(id);if(!back)return;
+    var inner=back.querySelector('.cpOverlay')||back;
+    back.style.fontFamily="'"+backFont+"', sans-serif";
+    back.style.fontSize=backFs;
+    back.style.color=backColor;
+    back.style.letterSpacing=backLetterSpacing==='0'?'':backLetterSpacing+'px';
+    back.style.lineHeight=backLineHeight;
+    back.style.fontWeight='';
+    back.style.fontStyle='';
+    back.style.textDecoration='';
+    if(inner){
+      inner.style.alignItems=backValign==='top'?'flex-start':backValign==='bottom'?'flex-end':'center';
+      inner.style.justifyContent=backAlign==='left'?'flex-start':backAlign==='right'?'flex-end':'center';
+      inner.style.textAlign=backAlign;
+      inner.style.fontWeight=backWeight==='bold'?'700':backWeight==='semibold'?'600':backWeight==='medium'?'500':'400';
+      inner.style.fontStyle=backItalic?'italic':'normal';
+      inner.style.textDecoration=backUnderline?'underline':'none';
+      inner.style.background=backTextBg||'transparent';
+      inner.style.padding=backTextBg?'4px 8px':'10px';
+    }
+  });
+}
 function syncSelectedQuestionPreview(key){
   var q=selectedQuestionCard(key)||{voorkant:'',achterkant:''};
   var front=g('stijlCardTxt');
@@ -5152,7 +5642,7 @@ function syncSelectedQuestionPreview(key){
     var ov=back.querySelector('.cpOverlay');
     if(ov)ov.innerHTML=q.achterkant?mdToHtml(q.achterkant):'';
   }
-  updateStijlPreview();
+  applyPreviewTextStyles((S.opmPane==='info')?(INFO_SLIDE_KEY||'cover'):(STYLE_PREVIEW_KEY||'cover'));
 }
 function showQEditor(key,qi){
   Q_EDITOR_SIDE='front';
@@ -5290,7 +5780,15 @@ function delQ(key,qi){
   markDirty();
   rebuildVragen();
 }
-function updQ(key,qi,field,val){var c=S.d.questions[key]&&S.d.questions[key][qi];if(c){c[field]=val;if(field==='voorkant')c.q=val;if(field==='achterkant')c.back=val;}markDirty();}
+function updQ(key,qi,field,val,opts){
+  var c=S.d.questions[key]&&S.d.questions[key][qi];
+  if(c){
+    c[field]=val;
+    if(field==='voorkant')c.q=val;
+    if(field==='achterkant')c.back=val;
+  }
+  markDirty(opts&&opts.soft?'soft':undefined);
+}
 function richCeInfoInput(el){
   var key=el.dataset.richKey||'';if(!key)return;
   S.d.uitleg=S.d.uitleg||{};
@@ -5304,8 +5802,18 @@ function richCeInfoInput(el){
 function richCeQuestionInput(el){
   var qkey=el.dataset.richQkey,qi=parseInt(el.dataset.richQi,10),field=el.dataset.richField||'voorkant';
   if(!qkey||isNaN(qi))return;
+  // Instant preview update — directly patch the DOM before any async work
+  var rawTxt=el.textContent||'';
+  if(field==='voorkant'){
+    var frontLive=g('stijlCardTxt');
+    if(frontLive)frontLive.innerHTML=rawTxt?('<span class="cpFrontInner">'+esc(rawTxt)+'</span>'):'';
+  } else {
+    var backLive=g('stijlCardBack');
+    if(backLive){var ovL=backLive.querySelector('.cpOverlay');if(ovL)ovL.textContent=rawTxt;}
+  }
+  // Save state + thumbnail update
   var md=htmlToMd(el.innerHTML);
-  updQ(qkey,qi,field,md);
+  updQ(qkey,qi,field,md,{soft:true});
   var q2=S.d.questions[qkey]&&S.d.questions[qkey][qi];
   if(q2){
     var front=field==='voorkant'?md:(q2.voorkant||q2.q||'');
@@ -5314,7 +5822,7 @@ function richCeQuestionInput(el){
     if((STYLE_PREVIEW_KEY||'cover')===qkey)syncSelectedQuestionPreview(qkey);
   }
   var cc=g('cc-'+(field==='voorkant'?'f':'b')+'-'+qkey+'-'+qi);
-  if(cc)cc.textContent=(el.textContent||'').length+'/90';
+  if(cc)cc.textContent=rawTxt.length+'/90';
 }
 function liveQ(key,qi,isFront,val){
   QUESTION_SELECTION[key]=qi;
@@ -5933,15 +6441,30 @@ function stylePreviewAsset(meta){
 function stylePreviewDisplayFile(file){
   return file==='voorkant.svg'?'cover.svg':(file||'kaart.svg');
 }
+function themeOrdinalLabel(n){
+  var idx=parseInt(n,10);
+  if(!isFinite(idx)||idx<1)idx=1;
+  return 'Thema-'+idx;
+}
+function nextThemeOrdinal(meta){
+  var themes=(meta&&meta.themes)||[];
+  return themes.length+1;
+}
+function nextThemeLabel(meta){
+  return themeOrdinalLabel(nextThemeOrdinal(meta));
+}
+function themeLabelForIndex(index,label){
+  return label||themeOrdinalLabel(index+1);
+}
 function stylePreviewOptions(meta){
   var themes=(meta&&meta.themes)||[];
   var opts=[{key:'cover',label:'Cover',file:'voorkant.svg'}];
   if(!themes.length){
-    opts.push({key:'algemeen',label:'Kaart',file:'kaart.svg'});
+    opts.push({key:'algemeen',label:nextThemeLabel(meta),file:'kaart.svg'});
     return opts;
   }
   themes.forEach(function(t,i){
-    opts.push({key:t.key,label:t.label||('Thema '+(i+1)),file:t.card||(t.key+'.svg')});
+    opts.push({key:t.key,label:themeLabelForIndex(i,t.label),file:t.card||(t.key+'.svg')});
   });
   return opts;
 }
@@ -5952,7 +6475,7 @@ function infoSlideOptions(meta){
   var excluded=(meta&&meta.infoExcluded)||[];
   var all=[{key:'cover',label:'Cover',file:infoCoverFile(),isCustom:false}];
   themes.forEach(function(t,i){
-    all.push({key:t.key,label:t.label||('Thema '+(i+1)),file:t.card||(t.key+'.svg'),isCustom:false});
+    all.push({key:t.key,label:themeLabelForIndex(i,t.label),file:t.card||(t.key+'.svg'),isCustom:false});
   });
   infoPages.forEach(function(p){
     all.push({key:p.key,label:p.label||'Pagina',file:'info_'+p.key+'.svg',isCustom:true});
@@ -6032,9 +6555,9 @@ function infoSlideCardHtml(opt,selectedKey){
   var actionsHtml='<div class="stijlSlideActions">'+uploadLbl+cropBtn+deleteBtn+toggleBtn+'</div>';
   // Tile body: editable name for themes and custom pages
   var nameHtml=isTheme
-    ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Naam wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
+    ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Klik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
     :opt.isCustom
-      ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Naam wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(customInputValue)+'" placeholder="Naam" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateInfoCustomPageLabel(\''+esc(opt.key)+'\',this.value)"></div>'
+      ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Klik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(customInputValue)+'" placeholder="Naam" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateInfoCustomPageLabel(\''+esc(opt.key)+'\',this.value)"></div>'
       :'<div class="stijlSlideName">'+esc(cardLabel)+'</div>';
   return '<div class="stijlSlideCard infoSlideCard'+(isSelected?' sel':'')+(opt.excluded?' info-excluded':'')+(hasText?' has-info':'')+'" data-info-key="'+esc(opt.key)+'"'
     +(isDraggable?' draggable="true"':'')
@@ -6298,7 +6821,7 @@ function updateStyleThemeName(idx,val){
     if(card.dataset.stylePreviewKey!==key)return;
     card.dataset.stylePreviewKey=key;
     card.setAttribute('onclick','setStylePreviewKey(\''+esc(key)+'\')');
-    var newLabel=val||('Thema '+(idx+1));
+    var newLabel=themeLabelForIndex(idx,val);
     var labelEl=card.querySelector('.stijlSlideNameLabel');
     if(labelEl)labelEl.textContent=newLabel;
     Array.prototype.slice.call(card.querySelectorAll('.stijlSlideNameInput')).forEach(function(nameEl){
@@ -6310,10 +6833,8 @@ function updateStyleThemeName(idx,val){
   });
   var stijlInput=g('stijlThemeInput');
   if(stijlInput&&document.activeElement!==stijlInput)stijlInput.value=val;
-  var qInput=document.querySelector('.questionsThemeInput');
-  if(qInput&&document.activeElement!==qInput)qInput.value=val;
   var thEl=g('editorThemeTitle');
-  if(thEl){if(thEl.tagName==='INPUT'){if(document.activeElement!==thEl)thEl.value=val||('Thema '+(idx+1));}else if(thEl.textContent)thEl.textContent=val||('Thema '+(idx+1));}
+  if(thEl){if(thEl.tagName==='INPUT'){if(document.activeElement!==thEl)thEl.value=themeLabelForIndex(idx,val);}else if(thEl.textContent)thEl.textContent=themeLabelForIndex(idx,val);}
   var titles=((meta.ui||{}).infoMidTitles)||{};
   if(!Object.prototype.hasOwnProperty.call(titles,key))syncInfoMidTitleEls(key);
   if(STYLE_PREVIEW_KEY===key||INFO_SLIDE_KEY===key)updateEditorHeaderTheme();
@@ -6331,6 +6852,7 @@ function beginStyleSlideNameEdit(key,isInfo){
   if(!card.classList.contains('sel')){
     if(isInfo)setInfoPreviewKey(key);
     else setStylePreviewKey(key);
+    setTimeout(function(){beginStyleSlideNameEdit(key,isInfo);},40);
     return;
   }
   card.classList.add('editing-name');
@@ -6491,7 +7013,8 @@ function styleSlideCardHtml(opt,selectedKey){
   var cropIcon='<svg viewBox="0 0 24 24"><path d="M6 3v12a3 3 0 0 0 3 3h12"/><path d="M8 16L16 8"/><path d="M9 8h8v8"/></svg>';
   var deleteIcon='<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg>';
   var pictureIcon='<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.3"/><path d="M5 16l4.5-4.5 3 3 2.8-2.8L19 16"/></svg>';
-  var cardLabel=opt.key==='cover'?'Cover':(opt.key==='algemeen'?'Kaart':(opt.label||'Thema'));
+  var themeIdx=styleThemeIndexByKey(opt.key);
+  var cardLabel=opt.key==='cover'?'Cover':(opt.key==='algemeen'?nextThemeLabel(S.d.meta||{}):themeLabelForIndex(themeIdx,opt.label));
   var uploadLbl='<label class="stijlSlideUpload" title="Afbeelding uploaden" onclick="event.stopPropagation()">'+uploadIcon+'<input type="file" accept=".svg,.png,.jpg,.jpeg,image/*" onclick="event.stopPropagation()" onchange="if(this.files&&this.files[0])uploadFile(this.files[0],\''+esc(path)+'\',\''+sid+'\');this.value=\'\'"></label>';
   var cropBtn=hit&&hit.dataUrl?'<button class="stijlSlideMiniBtn" type="button" title="Bijsnijden" onclick="event.stopPropagation();recropStyleSlide(\''+esc(path)+'\',\''+sid+'\')">'+cropIcon+'</button>':'';
   var dupBtn=isTheme?'<button class="stijlSlideMiniBtn" type="button" title="Thema dupliceren" onclick="event.stopPropagation();duplicateThemeFromStyle(\''+esc(opt.key)+'\')">'+duplicateIcon+'</button>':'';
@@ -6501,15 +7024,15 @@ function styleSlideCardHtml(opt,selectedKey){
   return '<div class="stijlSlideCard'+(opt.key===selectedKey?' sel':'')+(isTheme?' is-theme':'')+(isAlgemeen?' is-algemeen':'')+(infoMode?' info-mode':'')+(hasInfo?' has-info':'')+'" data-style-preview-key="'+esc(opt.key)+'" data-path="'+esc(path)+'" data-sid="'+sid+'"'+(isTheme?' draggable="true" data-theme-key="'+esc(opt.key)+'"':'')+(isAlgemeen?' data-theme-key="algemeen"':'')+' onclick="setStylePreviewKey(\''+esc(opt.key)+'\')">'+
     '<div class="stijlSlideThumb'+thumbModeClass+'">'+
       (hit&&hit.dataUrl
-        ?'<img src="'+hit.dataUrl+'" alt="'+esc(opt.label)+'">'
+        ?'<img src="'+hit.dataUrl+'" alt="'+esc(cardLabel)+'">'
         :'<div class="stijlSlidePlaceholder">'+pictureIcon+'<span>Achtergrond toevoegen</span></div>')+
       actionsHtml+
     '</div>'+
     '<div class="stijlSlideBody">'+
       (isTheme
-        ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Naam wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
+        ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Klik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.value=\''+esc(cardLabel)+'\';this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
         :isAlgemeen
-          ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Naam geven → maakt thema aan" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\'algemeen\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="" placeholder="Naam geven…" title="Naam geven → maakt thema aan" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="var _v=(this.value||\'\').trim();endStyleSlideNameEdit(this);if(_v){this.value=\'\';promoteAlgemeenToTheme(_v);}" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.value=\'\';this.blur();}" oninput="event.stopPropagation()"></div>'
+          ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Klik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\'algemeen\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="'+esc(cardLabel)+'" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="var _v=(this.value||\'\').trim();endStyleSlideNameEdit(this);if(_v){promoteAlgemeenToTheme(_v);}else{this.value=\''+esc(cardLabel)+'\';}" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.value=\''+esc(cardLabel)+'\';this.blur();}" oninput="event.stopPropagation()"></div>'
           :'<div class="stijlSlideName">'+esc(cardLabel)+'</div>')+
       (infoMode?'<div class="stijlSlideInfoDot" title="'+(hasInfo?'Heeft infotekst':'Nog geen infotekst')+'"></div>':'')+
     '</div>'+
@@ -6758,7 +7281,7 @@ function makeCoverTextBlock(seed){
     {x:12,y:76,size:12,valign:'bottom'}
   ];
   var preset=presets[Math.min(seed||0,presets.length-1)]||presets[1];
-  return {text:'',x:preset.x,y:preset.y,valign:preset.valign,size:preset.size,align:'left',weight:'regular',italic:false,underline:false,font:baseFont,color:baseColor,bg:''};
+  return {text:'',x:preset.x,y:preset.y,valign:'center',size:preset.size,align:'center',weight:'regular',italic:false,underline:false,font:baseFont,color:baseColor,bg:''};
 }
 function coverTextStore(){
   var meta=S.d.meta||{};
@@ -6766,7 +7289,7 @@ function coverTextStore(){
   meta.ui.coverTexts=Array.isArray(meta.ui.coverTexts)?meta.ui.coverTexts:[];
   meta.ui.coverTexts=meta.ui.coverTexts.slice(0,6).map(function(item,idx){
     item.size=Math.max(8,Math.min(48,parseInt(item.size,10)|| (idx===0?18:12)));
-    item.align=(item.align==='center'||item.align==='right')?item.align:'left';
+    item.align=(item.align==='left'||item.align==='right')?item.align:'center';
     item.valign=(item.valign==='top'||item.valign==='bottom')?item.valign:'center';
     item.weight=(item.weight==='medium'||item.weight==='semibold'||item.weight==='bold')?item.weight:'regular';
     item.italic=!!item.italic;
@@ -6887,7 +7410,7 @@ function coverTextItemFromBlock(block){
     x:Number(block.x)||50,
     y:Number(block.y)||50,
     size:Math.max(8,Math.min(48,parseInt(block.size,10)||12)),
-    align:block.align||'left',
+    align:block.align||'center',
     valign:block.valign||'center',
     weight:block.weight||'regular',
     italic:!!block.italic,
@@ -6964,7 +7487,7 @@ function syncActiveCoverTextControls(){
     btn.classList.toggle('sel',String(btn.dataset.fontSizeOption||'')===String(block.size||12));
   });
   coverEditorQueryAll('[data-align]').forEach(function(btn){
-    btn.classList.toggle('sel',btn.dataset.align===String(block.align||'left'));
+    btn.classList.toggle('sel',btn.dataset.align===String(block.align||'center'));
   });
   coverEditorQueryAll('[data-valign]').forEach(function(btn){
     btn.classList.toggle('sel',btn.dataset.valign===String(block.valign||'center'));
@@ -9427,7 +9950,7 @@ function buildSharedCardEditor(opts){
   var textColor=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.color||'#1a1a2e'):((editorCv||{})['--pk-set-text']||'#1a1a2e');
   var editorCardBg=cardBgForKey(m,designKey);
   var previewCardBg=cardBgForKey(m,previewKey);
-  var align=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.align||'left'):((editorCv||{})['--pk-text-align']||(opts.infoRichCe?'left':'center'));
+  var align=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.align||'center'):((editorCv||{})['--pk-text-align']||'center');
   var valign=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.valign||'center'):((editorCv||{})['--pk-text-valign']||'center');
   var textWeight=opts.forceBold?'bold':(designKey==='cover'&&activeCoverBlock?(activeCoverBlock.weight||'regular'):(((editorCv||{})['--pk-font-weight'])||'regular'));
   var textItalic=designKey==='cover'&&activeCoverBlock?!!activeCoverBlock.italic:(((editorCv||{})['--pk-font-italic'])==='1');
@@ -10388,10 +10911,13 @@ function buildStijl(target){
   if(!Array.isArray(bg.palette)||!bg.palette.length){var bc=bgCfg();bc.palette=[accent];}
   var curFont=(m.cssVars||{})['--pk-font']||'IBM Plex Sans';
 
-  var pane=spaceMode?((S.opmPane==='info')?'info':'space'):(S.opmPane||'vragen');
+  var pane=spaceMode?((S.opmPane==='info')?'info':((S.opmPane==='inst')?'inst':'space')):(S.opmPane||'vragen');
   var isInfoMode=pane==='info';
+  var isInstMode=pane==='inst';
+  var contentPane=isInstMode?(S._instBasePane||(spaceMode?'space':'vragen')):pane;
+  var contentIsInfoMode=contentPane==='info';
   var infoKey=INFO_SLIDE_KEY||'cover';
-  if(!isInfoMode){
+  if(!contentIsInfoMode){
     var vraagOpts=stylePreviewOptions(m);
     var vraagKeys=vraagOpts.map(function(opt){return opt.key;});
     if(vraagKeys.indexOf(STYLE_PREVIEW_KEY)<0){
@@ -10400,36 +10926,26 @@ function buildStijl(target){
     }
   }
   // In info mode: use infoSlideOptions so custom pages and excluded slides are handled
-  var infoOpts=isInfoMode?infoSlideOptions(m):null;
-  if(isInfoMode){
+  var infoOpts=contentIsInfoMode?infoSlideOptions(m):null;
+  if(contentIsInfoMode){
     var infoActive=infoOpts.find(function(o){return o.key===infoKey&&!o.excluded;});
     if(!infoActive){var firstActive=infoOpts.find(function(o){return !o.excluded;});infoKey=(firstActive||infoOpts[0]||{}).key||'cover';}
     INFO_SLIDE_KEY=infoKey;
   }
-  var activeInfoOpt=isInfoMode?((infoOpts.find(function(o){return o.key===infoKey;})||null)):null;
-  var previewState=isInfoMode?null:stylePreviewState(m);
-  var themeIdx=!isInfoMode?styleThemeIndexByKey(previewState.selected.key):-1;
-  var themeLabel=!isInfoMode&&themeIdx>=0?((m.themes||[])[themeIdx].label||''):'';
-  var previewFile=isInfoMode?(((activeInfoOpt)||{}).file||'voorkant.svg'):previewState.file;
-  var infoCoverEnabled=isInfoMode?isInfoSlideEnabled(m,'cover'):true;
-  var sampleTxt=!isInfoMode?(previewState.selected.key==='cover'?previewState.sampleTxt:questionPreviewFrontText(previewState.selected.key)):'';
+  var activeInfoOpt=contentIsInfoMode?((infoOpts.find(function(o){return o.key===infoKey;})||null)):null;
+  var previewState=!contentIsInfoMode?stylePreviewState(m):null;
+  var themeIdx=!contentIsInfoMode?styleThemeIndexByKey(previewState.selected.key):-1;
+  var themeLabel=!contentIsInfoMode&&themeIdx>=0?((m.themes||[])[themeIdx].label||''):'';
+  var previewFile=contentIsInfoMode?(((activeInfoOpt)||{}).file||'voorkant.svg'):(previewState?previewState.file:'');
+  var infoCoverEnabled=contentIsInfoMode?isInfoSlideEnabled(m,'cover'):true;
+  var sampleTxt=!contentIsInfoMode?(previewState.selected.key==='cover'?previewState.sampleTxt:questionPreviewFrontText(previewState.selected.key)):'';
   var sliderHtml='',sliderActionHtml='';
+  if(isInstMode){
+    sliderHtml=buildInlineSettingsSliderHtml(spaceMode);
+    sliderActionHtml=spaceMode?homeSliderActionsHtml():setEditorActionsHtml();
+  }
   if(isInfoMode){
     sliderHtml=infoOpts.map(function(opt){return infoSlideCardHtml(opt,infoKey);}).join('');
-    // Select-all / deselect-all tile (only when there are themes or custom pages to toggle)
-    var toggleableOpts=infoOpts.filter(function(o){return o.key!=='cover';});
-    if(toggleableOpts.length>0){
-      var allIncluded=toggleableOpts.every(function(o){return !o.excluded;});
-      var toggleAllTitle=allIncluded?'Alles verbergen':'Alles tonen';
-      var toggleAllAction=allIncluded?'excludeAllInfoThemes()':'includeAllInfoThemes()';
-      var toggleAllIcon=allIncluded
-        ?'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 8h10"/></svg>'
-        :'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>';
-      sliderHtml+='<button class="stijlSlideCard stijlSlideAdd infoToggleAll" type="button" onclick="'+toggleAllAction+'" title="'+toggleAllTitle+'">'+
-        '<div class="stijlSlideThumb"><div class="stijlSlidePlusWrap"><div class="stijlSlidePlusChip">'+toggleAllIcon+'</div></div></div>'+
-        '<div class="stijlSlideBody"><div class="stijlSlideName">'+esc(toggleAllTitle)+'</div></div>'+
-      '</button>';
-    }
     // "Vul alle thema's" tile – only when some themes have no info text yet
     var themsWithMissingInfo=(m.themes||[]).filter(function(th){return !String(((S.d.uitleg)||{})[th.key]||'').trim();});
     if(themsWithMissingInfo.length>0){
@@ -10439,25 +10955,59 @@ function buildStijl(target){
         '<div class="stijlSlideBody"><div class="stijlSlideName">Gebruik alle thema\'s</div></div>'+
       '</button>';
     }
-    sliderHtml+='<button class="stijlSlideCard stijlSlideAdd" type="button" onclick="addInfoCustomPage()" title="Eigen pagina toevoegen">'+
-      '<div class="stijlSlideThumb"><div class="stijlSlidePlusWrap"><div class="stijlSlidePlusChip"><div class="stijlSlidePlus">+</div></div></div></div>'+
-      '<div class="stijlSlideBody"><div class="stijlSlideName">Pagina</div></div>'+
-    '</button>';
-  }else{
+  }else if(!isInstMode){
     sliderHtml=previewState.options.map(function(opt){return styleSlideCardHtml(opt,previewState.selected.key);}).join('');
   }
-  if(spaceMode&&!isInfoMode){
+  if(spaceMode&&!isInfoMode&&!isInstMode){
     var _lsLayout=null;try{_lsLayout=localStorage.getItem('pk_layout_chosen');}catch(e){}
     if(!currentSpacePublicPage().layoutChosen&&!S.spaceLayoutMode&&!_lsLayout){S.homeSliderPane='layout';}
     else if(!S.homeSliderPane){S.homeSliderPane=S.homeCardsPane||'grid';}
     sliderActionHtml=homeSliderActionsHtml();
     sliderHtml=homeSliderStripHtml();
   }
-  if(!isInfoMode&&!spaceMode){
+  if(isInfoMode&&!spaceMode){
+    sliderActionHtml=setEditorInfoActionsHtml();
+  }
+  if(!isInfoMode&&!spaceMode&&!isInstMode){
     sliderActionHtml=setEditorActionsHtml();
     if(SET_EDITOR_PANE==='format'){
       var _fmtId=getCardFormatIdForMeta(S.d&&S.d.meta);
       sliderHtml='<div class="stijlSlideRail homeOptionSlideRail setFmtSlideRail">'+fmtStripHtml(_fmtId,'setCardFormatFromSlider')+'</div>';
+    }else if(S.setThemeExpanded){
+      var _selectedKey=previewState.selected.key;
+      var _themeOpts=previewState.options.filter(function(o){return o.key!=='cover';});
+      var _coverOpt=previewState.options.find(function(o){return o.key==='cover';});
+      // Helper: mini question cards for a theme
+      var _themeQCards=function(themeKey){
+        var qs=(S.d.questions&&S.d.questions[themeKey])||[];
+        if(!qs.length)return '<div class="setThemeQEmpty">Nog geen kaarten</div>';
+        return qs.map(function(q,qi){
+          var front=q.voorkant||q.q||'';
+          var back=q.achterkant||q.back||'';
+          return '<div class="stijlSlideCard setThemeQCard" onclick="setStylePreviewKey(\''+esc(themeKey)+'\')">'+
+            '<div class="stijlSlideThumb setThemeQThumb">'+
+              '<div class="setThemeQFront">'+esc(front||'—')+'</div>'+
+              (back?'<div class="setThemeQBack">'+esc(back)+'</div>':'')+
+            '</div>'+
+          '</div>';
+        }).join('');
+      };
+      var _coverSection=_coverOpt?'<div class="homeHeroPickerSection"><div class="homeHeroPickerLabel">Cover</div><div class="homeHeroPickerRail setThemePickerRail">'+styleSlideCardHtml(_coverOpt,_selectedKey)+'</div></div>':'';
+      var _themesSections=_themeOpts.length
+        ?_themeOpts.map(function(opt){
+            var label=opt.label||opt.key;
+            return '<div class="homeHeroPickerSection setThemeSection">'+
+              '<div class="homeHeroPickerLabel setThemeSectionLabel"><span>'+esc(label)+'</span></div>'+
+              '<div class="homeHeroPickerRail setThemePickerRail">'+
+                _themeQCards(opt.key)+
+              '</div>'+
+            '</div>';
+          }).join('')
+        :'<div class="homeSetSliderEmpty">Nog geen thema\'s.</div>';
+      sliderHtml='<div class="homeSliderExpandWrap homeHeroPickerOpen setThemePickerOpen">'+
+        _coverSection+
+        _themesSections+
+      '</div>';
     }else{
       sliderHtml='<div class="stijlSlideRail">'+sliderHtml+'</div>';
     }
@@ -10469,52 +11019,52 @@ function buildStijl(target){
     }
   }
   var panelModeClass=(spaceMode?' space-editor-mode':' set-editor-mode');
-  var stickyCanvasClass=(layoutMode==='canvas'&&!(spaceMode&&!isInfoMode)?' canvas-sticky-mode':'');
+  var stickyCanvasClass=(layoutMode==='canvas'&&!(spaceMode&&!contentIsInfoMode)?' canvas-sticky-mode':'');
   var html='<div class="panel'+panelModeClass+stickyCanvasClass+'"><div class="stijlShell">'+
     '<div id="stijl-kaart" class="stijlCardSection">'+
       ((spaceMode&&!isInfoMode)
         ?'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+sliderActionHtml+'</div>'
-        :(isInfoMode&&spaceMode?'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+infoModeHeaderActionsHtml()+'</div>':(isInfoMode?'<div class="stijlSectionTitle stijlSectionTitleTop">Pagina&apos;s</div>':'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+sliderActionHtml+'</div>')))+
-      '<div class="stijlHeaderBar'+(isInfoMode?' info-mode':'')+(spaceMode&&!isInfoMode?' space-layout-header home-set-header':'')+'">'+
+        :(isInfoMode&&spaceMode?'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+infoModeHeaderActionsHtml()+'</div>':(isInfoMode?'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+sliderActionHtml+'</div>':'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+sliderActionHtml+'</div>')))+
+      '<div class="stijlHeaderBar'+(isInfoMode?' info-mode':'')+(isInstMode?' inlineSettingsHeader':'')+(spaceMode&&!isInfoMode?' space-layout-header home-set-header':'')+'">'+
         (spaceMode&&!isInfoMode
           ? sliderHtml
           : (isInfoMode?'<div class="stijlSlideRail">'+sliderHtml+'</div>':sliderHtml))+
       '</div>'+
-      '<div class="stijlSectionTitle'+(spaceMode&&!isInfoMode?' homeOpmakenTitle':'')+'">'+(spaceMode?'Pagina opmaken':(isInfoMode?'Kaart infosheet':'Kaart opmaken'))+'</div>'+
+      '<div class="stijlSectionTitle'+(spaceMode&&!contentIsInfoMode?' homeOpmakenTitle':'')+'">'+(spaceMode?'Pagina opmaken':(contentIsInfoMode?'Pagina opmaken':'Kaart opmaken'))+'</div>'+
       buildSharedCardEditor({
         selectorHtml:'',
         wrapId:'stijlCardPrevWrap',
         wrapClass:'stijlCardPrevWrap',
-        label:isInfoMode?((activeInfoOpt&&activeInfoOpt.label)||''):themeLabel,
+        label:contentIsInfoMode?((activeInfoOpt&&activeInfoOpt.label)||''):themeLabel,
         faceId:'stijlCardFace',
         frontId:'stijlCardTxt',
         backId:'stijlCardBack',
-        previewFile:isInfoMode?(((activeInfoOpt)||{}).file||previewFile):previewFile,
-        previewKey:isInfoMode?infoKey:previewState.selected.key,
-        designKey:(!isInfoMode&&isEditingBackDesign()?currentBackDesignKey(previewState.selected.key):(isInfoMode?infoKey:previewState.selected.key)),
-        forceNoImage:isInfoMode&&cardBuildModeForKey(m,infoKey)==='self',
-        sampleTxt:isInfoMode?((infoKey==='cover'&&!infoCoverEnabled)?'':mdToHtml(((S.d.uitleg)||{})[infoKey]||'')):sampleTxt,
-        frontTxt:isInfoMode?((infoKey==='cover'&&!infoCoverEnabled)?'':mdToHtml(((S.d.uitleg)||{})[infoKey]||'')):sampleTxt,
+        previewFile:contentIsInfoMode?(((activeInfoOpt)||{}).file||previewFile):previewFile,
+        previewKey:contentIsInfoMode?infoKey:previewState.selected.key,
+        designKey:(!contentIsInfoMode&&isEditingBackDesign()?currentBackDesignKey(previewState.selected.key):(contentIsInfoMode?infoKey:previewState.selected.key)),
+        forceNoImage:contentIsInfoMode&&cardBuildModeForKey(m,infoKey)==='self',
+        sampleTxt:contentIsInfoMode?((infoKey==='cover'&&!infoCoverEnabled)?'':mdToHtml(((S.d.uitleg)||{})[infoKey]||'')):sampleTxt,
+        frontTxt:contentIsInfoMode?((infoKey==='cover'&&!infoCoverEnabled)?'':mdToHtml(((S.d.uitleg)||{})[infoKey]||'')):sampleTxt,
         forceBold:false,
         previewHint:previewFile,
         suppressEmptyFrontHint:true,
-        flipped:!isInfoMode&&isEditingBackDesign(),
-        infoRichCe:isInfoMode,
-        infoRichCeKey:isInfoMode?infoKey:null,
-        showInfoMidTitle:isInfoMode&&infoKey!=='cover'&&!!(((m.themes||[]).find(function(t){return t.key===infoKey;}))||((m.infoPages||[]).find(function(p){return p.key===infoKey;}))),
-        infoMidTitleKey:isInfoMode?infoKey:null,
-        infoMidTitleText:isInfoMode?infoMidTitleText(infoKey):'',
+        flipped:!contentIsInfoMode&&isEditingBackDesign(),
+        infoRichCe:contentIsInfoMode,
+        infoRichCeKey:contentIsInfoMode?infoKey:null,
+        showInfoMidTitle:contentIsInfoMode&&infoKey!=='cover'&&!!(((m.themes||[]).find(function(t){return t.key===infoKey;}))||((m.infoPages||[]).find(function(p){return p.key===infoKey;}))),
+        infoMidTitleKey:contentIsInfoMode?infoKey:null,
+        infoMidTitleText:contentIsInfoMode?infoMidTitleText(infoKey):'',
         layoutMode:layoutMode,
         hideToolbar:false,
         hideShapeCard:false,
         hideColorCard:false,
-        disableToolbar:spaceMode&&!isInfoMode,
-        disableShapeCard:spaceMode&&!isInfoMode,
-        disableColorCard:spaceMode&&!isInfoMode,
-        disableSticky:spaceMode&&!isInfoMode,
-        showDisabledTextBtn:!spaceMode&&!isInfoMode&&(previewState.selected.key!=='cover'),
-        leftCardOrder:(spaceMode&&!isInfoMode?['bg','shape','color']:['shape','color','bg']),
-        sidePanelHtml:'<div class="stijlQuestionPaneOuter"><div class="stijlQuestionPane'+(isInfoMode?' info-mode':'')+'">'+(spaceMode&&!isInfoMode?'':(!spaceMode&&!isInfoMode?'':opmakenPaneTabsHtml(pane)))+'<div id="stijlSidePaneBody"></div></div></div><div id="globalTipBlock" class="globalTipBlock"></div>'
+        disableToolbar:spaceMode&&!contentIsInfoMode,
+        disableShapeCard:spaceMode&&!contentIsInfoMode,
+        disableColorCard:spaceMode&&!contentIsInfoMode,
+        disableSticky:spaceMode&&!contentIsInfoMode,
+        showDisabledTextBtn:!spaceMode&&!contentIsInfoMode&&(previewState.selected.key!=='cover'),
+        leftCardOrder:(spaceMode&&!contentIsInfoMode?['bg','shape','color']:['shape','color','bg']),
+        sidePanelHtml:'<div class="stijlQuestionPaneOuter"><div class="stijlQuestionPane'+(contentIsInfoMode?' info-mode':'')+'">'+'<div id="stijlSidePaneBody"></div></div></div><div id="globalTipBlock" class="globalTipBlock"></div>'
       })+
     '</div>'+
     (layoutMode==='canvas'?'':('<div id="stijl-bg" class="stijlCardSection" data-tip="achtergrond">'+
@@ -10541,14 +11091,14 @@ function buildStijl(target){
 
   var sidePane=g('stijlSidePaneBody');
   if(sidePane){
-    if(spaceMode&&pane==='space'){
+    if(spaceMode&&contentPane==='space'){
       buildSpacePane(sidePane);
-    }else if(pane==='vragen'){
+    }else if(contentPane==='vragen'){
       buildVragen(sidePane,{filterKey:STYLE_PREVIEW_KEY||'cover'});
     }else{
       buildInfoPane(sidePane);
     }
-    renderGlobalTip(pane);
+    renderGlobalTip(contentPane);
     initTipHovers();
     setTimeout(focusOpmakenSideContent,30);
   }
@@ -10557,6 +11107,7 @@ function buildStijl(target){
   setTimeout(initSliderScrollHints,60);
   setTimeout(initHomeSetSliderDnd,70);
   setTimeout(updateGridExpandBtnVisibility,80);
+  if(isInstMode)wireInlineSettingsSlider(spaceMode);
 }
 function syncBgPalette(newAccent){
   var bc=bgCfg();
@@ -10676,7 +11227,7 @@ function updateStijlPreview(){
   var font=cv['--pk-font']||'IBM Plex Sans';
   var fs=fontSizeCss(cv['--pk-font-size']||'12');
   var color=cv['--pk-set-text']||'rgba(48,96,136,0.95)';
-  var align=(S.opmPane==='info')?(cv['--pk-text-align']||'left'):(cv['--pk-text-align']||'center');
+  var align=cv['--pk-text-align']||'center';
   var valign=cv['--pk-text-valign']||'center';
   var cardBg=cardBgForKey(m,previewKey)||ADMIN_PREVIEW_CARD_BG;
   var globalWeight=cv['--pk-font-weight']||'regular';
@@ -10690,7 +11241,7 @@ function updateStijlPreview(){
   var backFont=backCv['--pk-font']||font;
   var backFs=fontSizeCss(backCv['--pk-font-size']||cv['--pk-font-size']||'12');
   var backColor=backCv['--pk-set-text']||color;
-  var backAlign=backCv['--pk-text-align']||(S.opmPane==='info'?'left':'center');
+  var backAlign=backCv['--pk-text-align']||'center';
   var backValign=backCv['--pk-text-valign']||'center';
   var backWeight=backCv['--pk-font-weight']||'regular';
   var backItalic=backCv['--pk-font-italic']==='1';
@@ -10698,56 +11249,10 @@ function updateStijlPreview(){
   var backTextBg=normalizeHexInput(backCv['--pk-text-bg-color'])||'';
   var backLetterSpacing=backCv['--pk-letter-spacing']||'0';
   var backLineHeight=backCv['--pk-line-height']||'1.4';
-  ['stijlCardTxt','qedCardTxt'].forEach(function(id){
-    var txt=g(id);if(!txt)return;
-    var inner=txt.querySelector('.cpFrontInner')||txt;
-    txt.style.fontFamily="'"+font+"', sans-serif";
-    txt.style.fontSize=fs;
-    txt.style.color=color;
-    txt.style.textAlign=align;
-    txt.style.letterSpacing=letterSpacing==='0'?'':letterSpacing+'px';
-    txt.style.lineHeight=lineHeight;
-    var infoMode=(S.opmPane==='info');
-    if(infoMode){
-      // Info mode: card shows image only, richCe below handles its own styles
-      txt.style.fontWeight='';txt.style.fontStyle='';txt.style.textDecoration='';
-    }else{
-      txt.style.fontWeight=globalWeight==='bold'?'700':'400';
-      txt.style.fontStyle='normal';txt.style.textDecoration='none';
-      inner.style.fontWeight=globalWeight==='bold'?'700':globalWeight==='semibold'?'600':globalWeight==='medium'?'500':'400';
-      inner.style.fontStyle=globalItalic?'italic':'normal';
-      inner.style.textDecoration=globalUnderline?'underline':'none';
-      inner.style.background=globalTextBg||'transparent';
-      inner.style.padding=globalTextBg?'4px 8px':'0';
-    }
-    var overlay=txt.parentElement;
-    if(overlay){
-      overlay.style.alignItems=valign==='top'?'flex-start':valign==='bottom'?'flex-end':'center';
-      overlay.style.justifyContent=align==='left'?'flex-start':align==='right'?'flex-end':'center';
-    }
-  });
+  applyPreviewTextStyles(previewKey);
   ['stijlCardBack','qedCardBack'].forEach(function(id){
     var back=g(id);if(!back)return;
-    var inner=back.querySelector('.cpOverlay')||back;
     back.style.background=backCfg.custom?backCfg.bg:'transparent';
-    back.style.fontFamily="'"+backFont+"', sans-serif";
-    back.style.fontSize=backFs;
-    back.style.color=backColor;
-    back.style.letterSpacing=backLetterSpacing==='0'?'':backLetterSpacing+'px';
-    back.style.lineHeight=backLineHeight;
-    back.style.fontWeight='';
-    back.style.fontStyle='';
-    back.style.textDecoration='';
-    if(inner){
-      inner.style.alignItems=backValign==='top'?'flex-start':backValign==='bottom'?'flex-end':'center';
-      inner.style.justifyContent=backAlign==='left'?'flex-start':backAlign==='right'?'flex-end':'center';
-      inner.style.textAlign=backAlign;
-      inner.style.fontWeight=backWeight==='bold'?'700':backWeight==='semibold'?'600':backWeight==='medium'?'500':'400';
-      inner.style.fontStyle=backItalic?'italic':'normal';
-      inner.style.textDecoration=backUnderline?'underline':'none';
-      inner.style.background=backTextBg||'transparent';
-      inner.style.padding=backTextBg?'4px 8px':'10px';
-    }
     var backEmpty=back.querySelector('.cpBgEmpty');
     if(backEmpty&&backCfg.custom)backEmpty.style.background=cardBgValue(backCfg.bg);
   });
@@ -11216,20 +11721,9 @@ function buildInst(target){
     return '<div class="togRow"><div><label for="'+id+'">'+esc(label)+'</label>'+(sub?'<span class="togRowSub">'+esc(sub)+'</span>':'')+'</div>'+
       '<label class="tog"><input type="checkbox" id="'+id+'"'+(checked?' checked':'')+'><span class="togSl"></span></label></div>';
   }
-
-  var currentFmtId=getCardFormatId();
-  var formatPickerHtml='<section class="instSection instSectionWide">'+
-    '<div class="sLbl" style="margin-top:0">Kaartformaat</div>'+
-    '<div class="instCard">'+
-      fmtStripHtml(currentFmtId,'setCardFormat')+
-      '<p class="fHint" style="margin-top:10px">De editor bewaart kaartbeelden centraal in <code>cards/</code>. Het gekozen formaat bepaalt de verhouding ('+esc(cardFormatDimensionsText(S.d.meta))+') en wat je in previews en cropkaders ziet.</p>'+
-    '</div>'+
-  '</section>';
-
-  var backIcon='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3 4.5 8l5 5"/><path d="M5 8h6.5"/></svg>';
   target.innerHTML='<div class="panel instPanel"><div class="instShell">'+
-    '<div class="instTopbar"><div class="instIntro"><p>Bepaal welke knoppen zichtbaar zijn en hoe de kaartenviewer zich gedraagt.</p></div><button class="btnS instBackBtn" type="button" onclick="closeInstPage()">'+backIcon+'<span>Terug naar opmaak</span></button></div>'+
-    '<div class="instGrid">'+formatPickerHtml+
+    '<div class="instTopbar"><div class="instIntro"><p>Bepaal welke knoppen zichtbaar zijn en hoe de kaartenviewer zich gedraagt.</p></div></div>'+
+    '<div class="instGrid">'+
       '<section class="instSection">'+
         '<div class="sLbl" style="margin-top:0">Menu</div>'+
         '<div class="instCard">'+
@@ -11364,6 +11858,13 @@ function saveSet(cb){
 // NEW / DUPLICATE / DELETE
 // ═══════════════════════════════════════════
 function showNewSetModal(){
+  if(!canCreateSet()){
+    var lim=planLimits().maxSets;
+    showModal('<h3>Limiet bereikt</h3>'+
+      '<p>Je hebt het maximum van <strong>'+lim+' sets</strong> bereikt.</p>'+
+      '<div class="mAct"><button class="mCa" onclick="closeModal()">Sluiten</button></div>');
+    return;
+  }
   var _setNames=['bijv. Diep Luisteren','bijv. Eerlijk Vertellen','bijv. Moeilijke Gesprekken','bijv. Goed Nadenken','bijv. Vriendelijk Botsen','bijv. Rustig Reflecteren','bijv. Helder Kijken','bijv. Nieuwsgierig Zijn','bijv. Dapper Delen','bijv. Stil Staan','bijv. Vertrouwen Opbouwen','bijv. Grenzen Verkennen','bijv. Loslaten en Leren','bijv. Iets Nieuws Wagen','bijv. Patronen Doorbreken','bijv. Beter Begrijpen','bijv. Keuzes Maken','bijv. Wat Speelt Er','bijv. Terugkijken en Vooruitkijken','bijv. De Essentie Raken','bijv. Voelen wat Telt','bijv. Ongemak Omarmen','bijv. Buiten de Lijntjes','bijv. De Volgende Stap'];
   var _ph=_setNames[Math.floor(Math.random()*_setNames.length)];
   showModal('<h3>Nieuwe kaartenset</h3>'+
@@ -11961,9 +12462,25 @@ function fR(label,type,id,value,hint,readonly){
     :'<input type="text" class="fIn" id="'+id+'" value="'+esc(value)+'"'+(hint?' placeholder="'+esc(hint)+'"':'')+(readonly?' readonly':'')+' oninput="markDirty()">';
   return'<div class="fRow"><label class="fLbl">'+esc(label)+'</label>'+inp+'</div>';
 }
-function markDirty(){
+function markDirty(mode){
   S.dirty=true;
   if(S.activeKind==='set')setTopSaveStatus('dirty','Wijzigingen…');
+  if(mode==='soft'){
+    if(markDirtySoftTimer)clearTimeout(markDirtySoftTimer);
+    if(markDirtySoftSidebarTimer)clearTimeout(markDirtySoftSidebarTimer);
+    markDirtySoftTimer=setTimeout(function(){
+      pushHistorySnapshot();
+      refreshTopBarControls();
+      refreshChecklistChrome();
+      scheduleSpaceSitePreviewRefresh();
+      markDirtySoftTimer=null;
+    },90);
+    markDirtySoftSidebarTimer=setTimeout(function(){
+      renderSidebar();
+      markDirtySoftSidebarTimer=null;
+    },180);
+    return;
+  }
   pushHistorySnapshot();
   refreshTopBarControls();
   renderSidebar();
@@ -11981,6 +12498,8 @@ function lsDel(k){try{localStorage.removeItem(k);}catch(e){}}
 function parse(s){try{return JSON.parse(s);}catch(_){return null;}}
 function timeAgo(ts){var d=Math.round((Date.now()-ts)/60000);return d<1?'zojuist':d<60?d+' min geleden':Math.round(d/60)+' uur geleden';}
 var toastTm;
+var markDirtySoftTimer=null;
+var markDirtySoftSidebarTimer=null;
 function toast(msg,type){var t=g('toast');t.textContent=msg;t.className='toast on'+(type?' '+type:'');clearTimeout(toastTm);toastTm=setTimeout(function(){t.className='toast';},3200);}
 function livePreviewUrl(){
   var activeSet=(S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||null;

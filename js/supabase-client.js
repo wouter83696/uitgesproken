@@ -6,3 +6,11 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+export async function ensureOwnProfile(user) {
+  const authUser = user || (await supabase.auth.getUser()).data.user;
+  if (!authUser) return { data: null, error: new Error('No authenticated user') };
+  return supabase
+    .from('profiles')
+    .upsert({ id: authUser.id }, { onConflict: 'id' });
+}

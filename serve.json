@@ -1,0 +1,10 @@
+{
+  "rewrites": [
+    { "source": "/onboarding/**", "destination": "/onboarding/index.html" },
+    { "source": "/dashboard/**", "destination": "/dashboard/index.html" },
+    { "source": "/**/dashboard", "destination": "/dashboard/index.html" },
+    { "source": "/**/dashboard/**", "destination": "/dashboard/index.html" },
+    { "source": "/@:username", "destination": "/maker/index.html" },
+    { "source": "/@:username/**", "destination": "/maker/index.html" }
+  ]
+}

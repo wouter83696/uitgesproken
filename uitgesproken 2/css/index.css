@@ -1,0 +1,484 @@
+/* Praatkaartjes – index.css (alleen index pagina)
+   v3.7.2 – index vervangen door centrale carrousel
+*/
+
+
+/* Zorg dat iOS/Safari "buiten de pagina" (rubber-band / UI chrome) NIET mee kleurt.
+   We zetten daarom de echte document-achtergrond vast.
+   Light: vrijwel wit. Dark: vaste indigo nachtbasis. */
+html, body{
+  background: var(--cardsPageBg, #FAFAF8);
+  height: 100%;
+  min-height: 100dvh;
+}
+html[data-contrast="dark"],
+html[data-contrast="dark"] body{
+  background: rgb(var(--darkBaseRgb));
+}
+
+/* IP-variant: vaste nachtbasis (indigo/paarsblauw) */
+:root{
+  --darkBaseRgb: 24, 18, 60; /* indigo: geen zwart/grijs */
+  --cardsTopBarInset: 16px;
+  --cardsTopBarHeight: 64px;
+  --cardsTopBarGap: 14px;
+}
+
+/* Kaartenindex: topbar moet boven info-sheet/overlay blijven voor directe klik op menu/logo. */
+body[data-page="kaarten"] .topBar{
+  z-index: calc(var(--z-menu, 50) + 3);
+}
+
+/* Kaartenindex: menu mag tijdens sheet-close boven de sheet verschijnen. */
+body[data-page="kaarten"] .themeMenu{
+  z-index: calc(var(--z-menu, 50) + 2);
+}
+
+/* Kaartenindex: kruisje op uitleg-sheet verbergen. */
+body[data-page="kaarten"] #infoClose{
+  display: none !important;
+}
+
+body[data-page="kaarten"] .infoSlideText,
+body[data-page="kaarten"] .indexInfoSlideText{
+  margin-bottom: 0;
+  padding: 16px 20px 20px;
+  line-height: 1.56;
+}
+
+body[data-page="kaarten"] .infoSlideText .infoTextIntro,
+body[data-page="kaarten"] .indexInfoSlideText .infoTextIntro{
+  margin-bottom: 10px;
+  color: rgba(11,18,32,0.88);
+}
+
+html[data-contrast="dark"] body[data-page="kaarten"] .infoSlideText{
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,0.010) 0%,
+      rgba(255,255,255,0.003) 14%,
+      rgba(255,255,255,0.000) 32%
+    ),
+    rgba(20,23,49,0.94);
+  box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.018);
+  padding: 16px 20px 26px;
+}
+
+html[data-contrast="dark"] body[data-page="kaarten"] .infoSlideText .infoTextIntro,
+html[data-contrast="dark"] body[data-page="kaarten"] .indexInfoSlideText .infoTextIntro{
+  color: rgba(244,246,250,0.93);
+}
+
+/* Kaartenindex: zelfde ruimte tussen handle en uitlegkaart als main index. */
+body[data-page="kaarten"] .infoCarousel{
+  padding-top: 10px;
+  padding-left: var(--sheetContentInset, 14px);
+  padding-right: var(--sheetContentInset, 14px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
+  scroll-padding-left: var(--sheetContentInset, 14px);
+  scroll-padding-right: var(--sheetContentInset, 14px);
+}
+
+/* Kaartenindex: exact dezelfde peek-verhouding als de hoofdcarrousel. */
+body[data-page="kaarten"] .infoSlide{
+  flex: 0 0 95%;
+  width: auto;
+  padding: 0 10px 10px;
+}
+
+body[data-page="kaarten"] .infoSlideInner{
+  width: 100%;
+  margin: 0 auto;
+}
+
+@media (min-width: 720px){
+  body[data-page="kaarten"] .infoSlide{
+    flex-basis: 92%;
+  }
+}
+
+@media (min-width: 980px){
+  body[data-page="kaarten"] .infoSlide{
+    flex-basis: 88%;
+  }
+}
+
+
+/* Dynamische achtergrond – alleen achter de index grid */
+.page{
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+.indexBg{
+  /*
+    Belangrijk: achtergrond mag NIET 'meeveranderen' bij scroll.
+    Daarom fixen we hem aan de viewport (100vw/100vh) i.p.v. aan de .page hoogte.
+    Zo blijft de achtergrond exact hetzelfde terwijl de grid scrolt.
+  */
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100vh;
+  /* Blobs-laag (canvas) komt BOVEN de meekleurende ondertoon */
+  z-index: 1;
+  pointer-events: none;
+  /* Lichte modus: blobs duidelijker (minder 'waas') */
+  opacity: 0.90;
+}
+
+/* Subtiele kleur-tint die meeloopt met de actieve kaart */
+.indexTint{
+  position: fixed;
+  inset: 0;
+  /* Onder-toon (bijna wit) moet ACHTER de blobs zitten */
+  z-index: 0;
+  pointer-events: none;
+  /* Light mode: subtiele tint op wit (kijkt rustiger weg),
+     direct gezet vanuit JS als een bijna-witte kleur.
+     Geen waas / papier / overlays. */
+  display: block;
+  background: rgb(var(--activeTintRgb, 255, 255, 255));
+  transition: background-color var(--ui-contrast-duration, 240ms) var(--ui-contrast-ease, cubic-bezier(0.24, 0.9, 0.32, 1));
+}
+
+/* Light mode: geen volle kleurlaag over de hele pagina */
+html[data-contrast="light"] .indexTint{
+  background: transparent !important;
+}
+
+/* Donkere modus: blobs iets sterker. */
+html[data-contrast="dark"] .indexBg{ opacity: 0.78; }
+
+/* Dark mode: kleuren net iets minder 'poppend' (rustiger voor het oog) */
+html[data-contrast="dark"] .indexBgSvg{
+  /* Serieuzer: iets minder neon-pop, meer "mist" */
+  filter: saturate(0.66) brightness(0.92);
+}
+
+/* Dark mode: vaste achtergrondkleur (niet per kaart wisselen).
+   Alleen de grote, zachte meekleur-blob (indexSoftBlob) mag mee-ademen. */
+html[data-contrast="dark"] .indexTint{
+  background: rgb(var(--darkBaseRgb));
+  transition: none;
+}
+
+/* Centrale carrousel layout */
+.carouselStage{
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(env(safe-area-inset-top, 0px) + var(--cardsTopBarInset) + var(--cardsTopBarHeight) + var(--cardsTopBarGap)) 0 44px;
+}
+
+@media (max-width: 680px){
+  :root{
+    --cardsTopBarInset: 16px;
+    --cardsTopBarHeight: 56px;
+    --cardsTopBarGap: 10px;
+  }
+}
+
+/* Geen extra waas/vlek achter de kaart.
+   De kaart zelf blijft leidend; achtergrond blijft schoon. */
+.carouselStage::before{
+  content:"";
+  position: absolute;
+  inset: 0;
+  z-index: 1; /* boven blobs, onder cards (cards zitten op z-index 2 via .carouselStage content) */
+  pointer-events: none;
+  background: none;
+}
+
+html[data-contrast="dark"] .carouselStage::before{ display: none; }
+
+/* Carrousel: laat net genoeg van de buur-kaarten zien ("peek") */
+.mainCarousel{
+  width: 100%;
+  max-width: 920px;
+  padding: 0 14px;
+  scroll-snap-type: x mandatory;
+}
+
+@keyframes pkCardsPageIn{
+  0%{
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.993);
+  }
+  62%{
+    opacity: 1;
+    transform: translate3d(0, -2px, 0) scale(1.001);
+  }
+  100%{
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+body[data-page="kaarten"].pkCardsIntro .carouselStage{
+  animation: pkCardsPageIn 520ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce){
+  body[data-page="kaarten"].pkCardsIntro .carouselStage{
+    animation: none !important;
+  }
+}
+
+.mainCarousel .cardsSlide{
+  /* Subtiel "peek" van de buur-kaart (niet te veel zichtbaar) */
+  flex: 0 0 95%;
+  scroll-snap-align: center;
+  padding: 0 10px 10px 10px;
+}
+
+.mainCarousel .cardsSlideInner{
+  max-width: none;
+}
+
+@media (min-width: 720px){
+  .mainCarousel .cardsSlide{ flex-basis: 92%; }
+}
+
+@media (min-width: 980px){
+  .mainCarousel .cardsSlide{ flex-basis: 88%; }
+}
+
+
+.indexBgSvg{
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100vh;
+  /* SVG-blobs liggen boven de ondertoon, net als canvas */
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Kaartenindex: geen SVG-shape overlay (voorkomt letters/grote kleurvlakken) */
+body[data-page="kaarten"] .indexBgSvg{
+  display: none !important;
+}
+
+/* Kaartenindex: houd een vaste onderlaag zichtbaar zoals in stable-1107.
+   Daardoor blijft de basis stabiel tijdens contrastwissels en zie je geen
+   wit/paars tussenscherm achter de transparante kaart-opbouw. */
+body[data-page="kaarten"] .indexTint{
+  display: block !important;
+  transition: none !important;
+}
+html[data-contrast="light"] body[data-page="kaarten"] .indexTint{
+  background: var(--cardsPageBg, #FAFAF8) !important;
+}
+html[data-contrast="dark"] body[data-page="kaarten"] .indexTint{
+  background: rgb(var(--darkBaseRgb)) !important;
+}
+body[data-page="kaarten"] .indexSoftBlob{
+  display: block !important;
+  transition: none !important;
+}
+
+
+/* --- Overrides (auto-generated) --- */
+.card + .card-text,
+.explanation,
+.description,
+.card-description {
+  margin-top: 40px !important;
+  padding-top: 8px !important;
+}
+
+.index .label,
+.index .title,
+.index .name,
+.index .caption,
+.card-index .label,
+.card-index .title {
+  display: none !important;
+}
+
+
+/* ===== Revision: kaarten opaak, achtergrond hiërarchie strak ===== */
+/* (Tint zit achter blobs; blobs zijn minder dominant; kaarten blijven leidend.) */
+
+/* Kaartenindex: geen extra witte rechthoek achter de kaart */
+.cardsSlideCard{
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Let op: sheet visibility wordt door JS geregeld via [hidden]. */
+
+/* ===== Extra diepte via 1 zachte, meekleurende achtergrond-blob ===== */
+
+.indexSoftBlob{
+  position: fixed;
+  inset: -20vh -20vw auto auto;
+  width: 140vw;
+  height: 140vw;
+  border-radius: 999px;
+  z-index: 0; /* boven indexTint (zelfde z-index, maar later in DOM) */
+  pointer-events: none;
+  /* Kleurt subtiel mee (4–6% opacity), groot en sterk geblurd.
+     Blijft deels buiten beeld en kleurt zacht mee bij kaartwissel. */
+  /* Gebruik de originele dominante kleur (hue) zodat deze laag ook in dark mode
+     zichtbaar blijft (anders wordt hij te donker en verdwijnt hij). */
+  background: radial-gradient(circle at 35% 35%, rgba(var(--activeHueRgb, 120, 160, 190), 0.030) 0%, rgba(var(--activeHueRgb, 120, 160, 190), 0) 64%);
+  filter: blur(140px) saturate(0.95);
+  transition: background var(--ui-contrast-duration, 240ms) var(--ui-contrast-ease, cubic-bezier(0.24, 0.9, 0.32, 1));
+}
+
+/* Light mode: geen extra waas-veld */
+html[data-contrast="light"] .indexSoftBlob{
+  background: transparent !important;
+}
+html[data-contrast="light"] body[data-page="kaarten"] .indexSoftBlob{
+  background: radial-gradient(
+    circle at 35% 35%,
+    rgba(var(--activeHueRgb, 120, 160, 190), 0.022) 0%,
+    rgba(var(--activeHueRgb, 120, 160, 190), 0) 66%
+  ) !important;
+}
+
+html[data-contrast="dark"] .indexSoftBlob{
+  inset: auto auto -18vh -18vw;
+  background: radial-gradient(circle at 65% 65%, rgba(var(--activeHueRgb, 120, 160, 190), 0.032) 0%, rgba(var(--activeHueRgb, 120, 160, 190), 0) 70%);
+  filter: blur(160px) saturate(0.95);
+
+  /* Optie 1 (vaste nachtbasis): de meekleur-blob mag niet "lekken" naar de
+     boven/onder safe-area. We clippen hem met een verticale mask zodat de
+     top- en bottom-rand visueel stabiel blijven. */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent 10%,
+    rgba(0,0,0,1) 24%,
+    rgba(0,0,0,1) 76%,
+    transparent 90%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent 10%,
+    rgba(0,0,0,1) 24%,
+    rgba(0,0,0,1) 76%,
+    transparent 90%,
+    transparent 100%
+  );
+}
+
+/* Light mode: geen extra sluier rond de kaart.
+   Dark mode: safe zone (zie boven) mag blijven. */
+
+
+/* ===== Landscape (telefoon gedraaid): kaart-only, maar met de echte carrousel =====
+   Belangrijk: we gebruiken exact dezelfde kaart-rendering (incl. font/typografie)
+   en houden de carrousel actief zodat je kunt swipen/scrollen.
+   (Geen logo/menu/achtergrond.)
+   Beperkt tot kleine hoogtes (telefoon), zodat desktop-landscape niet geraakt wordt.
+*/
+
+@media (orientation: landscape) and (max-height: 520px){
+  /* Landscape: text sizing (bigger, still IBM Plex Sans) */
+  .qText{
+    font-family: "IBM Plex Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+    /* vmin schaalt mee met de kleinste schermmaat (landscape => hoogte)
+       zodat tekst proportioneel blijft t.o.v. de kaart. */
+    font-size: clamp(16px, 4.4vmin, 22px) !important;
+    line-height: 1.22 !important;
+    letter-spacing: -0.01em;
+    max-width: 82%;
+    margin-inline: auto;
+  }
+
+  /* Alles weg behalve de kaarten */
+  .topBar,
+  #themeMenuOverlay,
+  #themeMenu,
+  #infoOverlay,
+  #infoSheet{
+    display: none !important;
+  }
+
+  /* In landscape wil je wél subtiele blobs achter de kaart (geen UI). */
+  #indexBg,
+  .indexBg,
+  .indexTint,
+  .indexSoftBlob{
+    display: block !important;
+  }
+
+  /* Blobs extra subtiel in landscape, zodat de kaart leidend blijft. */
+  .indexBg{ opacity: 0.40 !important; }
+  html[data-contrast="dark"] .indexBg{ opacity: 0.28 !important; }
+
+  /* Meekleurende tint en soft-blob nog iets rustiger in landscape */
+  .indexSoftBlob{
+    filter: blur(170px) saturate(0.90) !important;
+  }
+
+  .carouselStage{
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    min-height: 100dvh;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+  }
+
+  /* Carrousel: geen "peek" in landscape, 1 kaart per view */
+  .mainCarousel{
+    max-width: none;
+    width: 100vw;
+    height: 100dvh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    scroll-snap-type: x mandatory;
+  }
+
+  .mainCarousel .cardsSlide{
+    flex: 0 0 100%;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    scroll-snap-align: center;
+  }
+
+  .mainCarousel .cardsSlideInner{
+    width: auto;
+    max-width: none;
+    /* Geef de kaart wat ademruimte in landscape (telefoon): minder 'geplet'. */
+    height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 14vh);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+  }
+
+  .mainCarousel .cardsSlideCard{
+    width: auto;
+    height: 100%;
+    aspect-ratio: 85 / 55;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .mainCarousel .cardsSlideCard img{
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "uitgesproken",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "/Users/wouter/Desktop/uitgesproken", "-l", "8744", "--no-clipboard"],
+      "port": 8744
+    }
+  ]
+}

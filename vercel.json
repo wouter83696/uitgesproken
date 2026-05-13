@@ -1,5 +1,7 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/space/index.html" }
+    { "source": "/@:username/:setSlug", "destination": "/maker/index.html" },
+    { "source": "/@:username",          "destination": "/maker/index.html" },
+    { "source": "/(.*)",                "destination": "/space/index.html" }
   ]
 }
