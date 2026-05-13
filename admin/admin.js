@@ -1234,7 +1234,7 @@ function renderEditor(){
     '</div>'+
     '<button class="btnIconDanger" type="button" onclick="doDelete()" title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
     saveStatus+
-    '<button class="btn tbRSaveBtn" id="saveBtn" onclick="saveSet()"><span>Opslaan</span></button>'+
+    '<button class="btn tbRSaveBtn" id="saveBtn" onclick="saveSet()"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>Opslaan</span></button>'+
     profileMenu+
   '</div></div>';
   renderEditorShell(headTitle,headActions);
@@ -1254,7 +1254,7 @@ function renderSpaceEditor(){
     '</div>'+
     '<button class="btnIconDanger" type="button" onclick="toast(\'Nog niet actief in home-editor\',\'amber\')" title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
     saveStatus+
-    '<button class="btn tbRSaveBtn" id="saveSpaceBtn" type="button" onclick="saveSpaceSettings()"><span>Opslaan</span></button>'+
+    '<button class="btn tbRSaveBtn" id="saveSpaceBtn" type="button" onclick="saveSpaceSettings()"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>Opslaan</span></button>'+
     profileMenu+
   '</div></div>';
   renderEditorShell(headTitle,headActions);
