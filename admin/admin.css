@@ -621,10 +621,10 @@ html.admin-night .cropModal{background:rgba(3,8,14,.7)}
 .sbScroll{flex:1;overflow-y:auto;padding:9px 7px 8px}
 .sbScroll::-webkit-scrollbar{width:3px}
 .sbScroll::-webkit-scrollbar-thumb{background:var(--tl);border-radius:2px}
-.sbLbl{font-size:9.5px;font-weight:600;color:var(--k3);letter-spacing:.07em;text-transform:uppercase;padding:6px 8px 3px}
-.sbLblSets{padding-top:12px}
-.sbLblPersonal{padding-top:4px}
-.sbLblWs{padding-top:10px}
+.sbLbl{font-size:9.5px;font-weight:600;color:var(--k3);letter-spacing:.07em;text-transform:uppercase;padding:8px 8px 4px}
+.sbLblSets{padding-top:14px}
+.sbLblPersonal{padding-top:6px}
+.sbLblWs{padding-top:12px}
 .sbUserTag{font-size:12px;font-weight:600;color:var(--k2);padding:2px 8px 6px;letter-spacing:-.01em}
 .sbUserTag .sbUserAt{color:var(--k3);font-weight:400}
 .tbRMenuUsername{font-size:10.5px;color:#5b7fa6;font-weight:500;line-height:1.3}
@@ -638,14 +638,14 @@ html.admin-night .cropModal{background:rgba(3,8,14,.7)}
 .proBadge{font-size:9.5px;font-weight:700;letter-spacing:.06em;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-radius:5px;padding:3px 7px}
 .proGateLabel{font-size:11.5px;color:#64748b;font-weight:500}
 .sbDivider{height:1px;background:var(--br);margin:4px 8px 6px}
-.sItem{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border-radius:7px;border:none;background:transparent;font-family:inherit;font-size:12.5px;cursor:pointer;text-align:left;color:var(--k);transition:background .12s;position:relative}
-.sItem:hover{background:rgba(79,142,158,.08)}
-.sItem.active{background:rgba(79,142,158,.12);color:var(--tld)}
-.sItem-home{padding:6px 8px;margin-bottom:2px;border-radius:7px;background:transparent}
+.sItem{display:flex;align-items:center;gap:8px;width:100%;padding:7px 8px;border-radius:7px;border:none;background:transparent;font-family:inherit;font-size:12.5px;font-weight:400;line-height:1.4;cursor:pointer;text-align:left;color:var(--k);transition:background .12s,color .12s;position:relative}
+.sItem:hover{background:rgba(79,142,158,.08);color:#5a7282}
+.sItem.active{background:rgba(79,142,158,.12);color:var(--tld);font-weight:500}
+.sItem-home{padding:7px 8px;margin-bottom:3px;border-radius:7px;background:transparent}
 .sItem-home:hover{background:rgba(79,142,158,.08)}
-.sItem-home .sNm{font-weight:500;color:var(--k)}
+.sItem-home .sNm{font-weight:500;color:var(--k);line-height:1.4}
 .sItem-home.active{background:var(--tlp);color:var(--tld)}
-.sItem-home.active .sNm{color:var(--tld)}
+.sItem-home.active .sNm{color:var(--tld);font-weight:600}
 .sItem:not(.sItem-home) .sNm{font-weight:400}
 .sLeadIcon{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;color:#8295a7}
 .sLeadIcon svg{width:16px;height:16px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -674,8 +674,8 @@ html.admin-night .cropModal{background:rgba(3,8,14,.7)}
 .sPub.unlisted:hover{background:rgba(99,102,241,.14);border-color:rgba(99,102,241,.22)}
 .sDirty{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:5px;height:5px;border-radius:50%;background:var(--am);display:none;pointer-events:none}
 .sItem.dirty .sDirty{display:block}
-.addBtn{display:flex;align-items:center;gap:5px;width:100%;padding:6px 8px;border-radius:7px;border:1px solid rgba(79,142,158,.18);background:rgba(79,142,158,.08);font-family:inherit;font-size:12.5px;color:var(--tld);cursor:pointer;margin-top:3px;transition:all .12s}
-.addBtn:hover{border-color:rgba(79,142,158,.28);background:rgba(79,142,158,.14);color:var(--tld)}
+.addBtn{display:flex;align-items:center;gap:5px;width:100%;padding:7px 8px;border-radius:7px;border:1px solid rgba(79,142,158,.16);background:rgba(79,142,158,.06);font-family:inherit;font-size:12.5px;font-weight:500;color:var(--tld);cursor:pointer;margin-top:4px;transition:all .12s}
+.addBtn:hover{border-color:rgba(79,142,158,.32);background:rgba(79,142,158,.12);color:#2d7a8a}
 .addBtnIcon{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;flex-shrink:0;line-height:1}
 .addBtnIcon svg{width:16px;height:16px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
 .addBtnLabel,.sbGhLabel{opacity:1;max-width:140px;overflow:hidden;white-space:nowrap;transform:translateX(0);transition:opacity .1s ease,transform .14s ease}
