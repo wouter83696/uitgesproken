@@ -1227,6 +1227,11 @@ function renderEditor(){
     '<span class="clHeadThemeSep" id="editorThemeSep" style="display:none"></span>'+
     '<input id="editorThemeTitle" class="clHeadThemeInput" type="text" value="" placeholder="Thema" style="display:none" oninput="updateActiveHeaderThemeName(this.value)">'+
   '</div>';
+  var headCenter='<div class="editorViewModeBtns">'+
+    '<button class="editorViewModeBtn"'+(S.mode==='edit'?' active':'')+'" type="button" title="Bewerk modus" onclick="S.mode=\'edit\';renderEditor()">Bewerk</button>'+
+    '<button class="editorViewModeBtn"'+(S.mode==='view'?' active':'')+'" type="button" title="Weergave modus" onclick="S.mode=\'view\';renderEditor()">Weergave</button>'+
+    '<button class="editorViewModeBtn"'+(S.mode==='checklist'?' active':'')+'" type="button" title="Stappenplan modus" onclick="S.mode=\'checklist\';renderEditor()">Stappenplan</button>'+
+  '</div>';
   var headActions='<div class="tbRWrap"><div class="tbR">'+
     '<div class="tbRActions">'+
       '<button class="btnIcon" id="undoBtn" type="button" onclick="undoSetChanges()"'+(canUndo()?'':' disabled')+' title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
@@ -1237,7 +1242,7 @@ function renderEditor(){
     '<button class="btn tbRSaveBtn" id="saveBtn" onclick="saveSet()"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>Opslaan</span></button>'+
     profileMenu+
   '</div></div>';
-  renderEditorShell(headTitle,headActions);
+  renderEditorShell(headTitle,headActions,headCenter);
 }
 function renderSpaceEditor(){
   hideFloatingTextBar(true);
@@ -1246,6 +1251,11 @@ function renderSpaceEditor(){
   var saveStatus=buildTopSaveStatusHtml();
   var headTitle='<div class="clHeadTitle">'+
     '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="Home" readonly>'+
+  '</div>';
+  var headCenter='<div class="editorViewModeBtns">'+
+    '<button class="editorViewModeBtn"'+(S.mode==='edit'?' active':'')+'" type="button" title="Bewerk modus" onclick="S.mode=\'edit\';renderEditor()">Bewerk</button>'+
+    '<button class="editorViewModeBtn"'+(S.mode==='view'?' active':'')+'" type="button" title="Weergave modus" onclick="S.mode=\'view\';renderEditor()">Weergave</button>'+
+    '<button class="editorViewModeBtn"'+(S.mode==='settings'?' active':'')+'" type="button" title="Instellingen modus" onclick="S.mode=\'settings\';renderEditor()">Instellingen</button>'+
   '</div>';
   var headActions='<div class="tbRWrap"><div class="tbR">'+
     '<div class="tbRActions">'+
@@ -1257,7 +1267,7 @@ function renderSpaceEditor(){
     '<button class="btn tbRSaveBtn" id="saveSpaceBtn" type="button" onclick="saveSpaceSettings()"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>Opslaan</span></button>'+
     profileMenu+
   '</div></div>';
-  renderEditorShell(headTitle,headActions);
+  renderEditorShell(headTitle,headActions,headCenter);
 }
 function currentSpaceLayoutMode(){
   var publicPage=currentSpacePublicPage();
