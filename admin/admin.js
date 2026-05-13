@@ -831,8 +831,17 @@ function renderSidebar(){
     return !q||title.indexOf(q)>=0||id.indexOf(q)>=0;
   });
   var homeIcon='<span class="sLeadIcon sLeadHome" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></span>';
+  var wsSwitcher='<div class="wsSwitcher">'+
+    '<button class="wsSwitcherBtn" type="button" onclick="toggleWsMenu()" id="wsSwitcherBtn">'+
+      '<span>Ruimte</span>'+
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>'+
+    '</button>'+
+    '<div class="wsMenu" id="wsMenu">'+
+      '<button class="wsMenuItem'+(S.activeKind==='space'?' active':'')+'" type="button" onclick="closeWsMenu();reqLoadSpace()">Home</button>'+
+    '</div>'+
+  '</div>';
   var ruimteBtn=
-    '<div class="sbLbl sbLblWs">Ruimte</div>'+
+    '<div class="sbLbl sbLblWs"><span>Ruimte</span>'+wsSwitcher+'</div>'+
     '<button class="sItem sItem-home'+(S.activeKind==='space'?' active':'')+'" type="button" title="Home" onclick="reqLoadSpace()">'+
       homeIcon+
       '<span class="sNm">Home</span>'+
@@ -865,6 +874,24 @@ function renderSidebar(){
   }
   initSbDrag();
 }
+function toggleWsMenu(){
+  var btn=g('wsSwitcherBtn'),menu=g('wsMenu');
+  if(!btn||!menu)return;
+  menu.classList.toggle('open');
+  btn.classList.toggle('open');
+}
+function closeWsMenu(){
+  var btn=g('wsSwitcherBtn'),menu=g('wsMenu');
+  if(!btn||!menu)return;
+  menu.classList.remove('open');
+  btn.classList.remove('open');
+}
+document.addEventListener('click',function(e){
+  var wsMenu=g('wsMenu');
+  if(wsMenu&&!e.target.closest('.wsSwitcher')){
+    closeWsMenu();
+  }
+});
 function reqLoadSpace(){
   if(S.activeKind==='space')return;
   if(S.dirty&&S.activeKind==='set'){
