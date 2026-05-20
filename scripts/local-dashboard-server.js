@@ -32,7 +32,8 @@ const RESERVED_ROOT_SEGMENTS = {
   login: true,
   scripts: true,
   sets: true,
-  templates: true
+  templates: true,
+  wizard: true
 };
 
 function safeDecode(value) {
@@ -58,6 +59,13 @@ function rewritePrettyDashboard(pathname) {
   return '/dashboard' + rest;
 }
 
+function rewriteWizardPath(pathname) {
+  if (/^\/dashboard\/wizard(?:\/.*)?$/.test(pathname)) {
+    return '/dashboard/index.html';
+  }
+  return pathname;
+}
+
 function isReservedRootSegment(segment) {
   return !!RESERVED_ROOT_SEGMENTS[String(segment || '').toLowerCase()];
 }
@@ -77,6 +85,7 @@ function rewritePrettyPublic(pathname) {
 
 function resolveFilePath(requestPath) {
   let pathname = rewritePrettyDashboard(normalizeUrlPath(requestPath));
+  pathname = rewriteWizardPath(pathname);
   pathname = rewritePrettyPublic(pathname);
 
   if (pathname === '/') {

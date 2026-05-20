@@ -11,7 +11,8 @@ const RESERVED_PUBLIC_SEGMENTS = {
   login: 1,
   scripts: 1,
   sets: 1,
-  templates: 1
+  templates: 1,
+  wizard: 1
 };
 const PUBLIC_ROUTE = parsePublicRoute();
 const VIEW_IMAGE_FOLDER_ORDER = ['cards_rect', 'cards', 'cards_square'];
@@ -403,23 +404,48 @@ async function initCardsPage() {
   function renderMainCarousel() {
     if (!els.mainCarousel) return;
     const cards = set.shuffled ? shuffleArray(set.cards) : set.cards.slice();
+    const sharedRenderer = window.PK && window.PK.sharedCardRenderer && typeof window.PK.sharedCardRenderer.render === 'function'
+      ? window.PK.sharedCardRenderer
+      : null;
     els.mainCarousel.innerHTML = cards.map(function(card){
       const hasBack = !!String(card.backText || '').trim();
-      const backModeClass = set.backMode === 'mirror' ? ' is-mirror' : '';
+      let cardMarkup = '';
+      if (sharedRenderer) {
+        const previewKey = card.themeKey || 'algemeen';
+        const mode = typeof sharedRenderer.cardBuildModeForKey === 'function'
+          ? sharedRenderer.cardBuildModeForKey(set.meta || {}, previewKey)
+          : 'image';
+        cardMarkup = sharedRenderer.render({
+          meta: set.meta || {},
+          wrapClass: 'pkViewerCardWrap',
+          imgSrc: card.img || '',
+          forceNoImage: mode === 'self',
+          previewKey: previewKey,
+          themeKey: previewKey,
+          frontTxt: card.frontText || '',
+          backTxt: card.backText || '',
+          backDesignKey: card.backDesignKey || '',
+          suppressEmptyFrontHint: true
+        });
+      } else {
+        const backModeClass = set.backMode === 'mirror' ? ' is-mirror' : '';
+        cardMarkup = '' +
+          '<div class="pkFlipInner">' +
+            '<div class="pkFace pkFront">' +
+              (card.img ? '<img class="bg" src="' + esc(card.img) + '" alt="">' : '') +
+              '<div class="cardsSlideQ"><div class="cardsSlideQText">' + esc(card.frontText) + '</div></div>' +
+            '</div>' +
+            '<div class="pkFace pkBack">' +
+              (card.img ? '<img class="pkBackImg' + backModeClass + '" src="' + esc(card.img) + '" alt="">' : '') +
+              '<div class="cardsSlideBackText"><div class="cardsSlideBackTextInner">' + esc(card.backText || '') + '</div></div>' +
+            '</div>' +
+          '</div>';
+      }
       return '' +
         '<div class="cardsSlide" data-theme-key="' + esc(card.themeKey) + '">' +
           '<div class="cardsSlideInner">' +
             '<div class="cardsSlideCard' + (hasBack ? '' : ' is-static') + '" tabindex="0" role="' + (hasBack ? 'button' : 'img') + '" aria-label="' + esc(card.frontText) + '" data-flippable="' + (hasBack ? '1' : '0') + '">' +
-              '<div class="pkFlipInner">' +
-                '<div class="pkFace pkFront">' +
-                  (card.img ? '<img class="bg" src="' + esc(card.img) + '" alt="">' : '') +
-                  '<div class="cardsSlideQ"><div class="cardsSlideQText">' + esc(card.frontText) + '</div></div>' +
-                '</div>' +
-                '<div class="pkFace pkBack">' +
-                  (card.img ? '<img class="pkBackImg' + backModeClass + '" src="' + esc(card.img) + '" alt="">' : '') +
-                  '<div class="cardsSlideBackText"><div class="cardsSlideBackTextInner">' + esc(card.backText || '') + '</div></div>' +
-                '</div>' +
-              '</div>' +
+              cardMarkup +
             '</div>' +
             '<div class="cardsSlideCaption">' + esc(card.themeLabel) + '</div>' +
           '</div>' +
@@ -427,13 +453,21 @@ async function initCardsPage() {
     }).join('');
 
     els.mainCarousel.querySelectorAll('.cardsSlideCard[data-flippable="1"]').forEach(function(cardEl){
-      cardEl.addEventListener('click', function(){
+      function toggleCard() {
+        const faceInner = cardEl.querySelector('.cardFaceInner');
+        if (faceInner) {
+          faceInner.classList.toggle('flipped');
+          return;
+        }
         cardEl.classList.toggle('is-flipped');
+      }
+      cardEl.addEventListener('click', function(){
+        toggleCard();
       });
       cardEl.addEventListener('keydown', function(e){
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          cardEl.classList.toggle('is-flipped');
+          toggleCard();
         }
       });
     });
@@ -555,7 +589,8 @@ async function loadCardsSetRecord(id, fallbackTitle, fallbackSlug) {
         themeLabel: theme.label,
         frontText: item && (item.voorkant || item.q || '') || '',
         backText: item && (item.achterkant || item.back || '') || '',
-        img: theme.card
+        img: theme.card,
+        backDesignKey: item && item._qid ? ('__back_card__:' + item._qid) : ''
       });
     });
   });
@@ -706,7 +741,8 @@ function mapPublicCardsSet(row) {
         themeLabel: theme.label,
         frontText: item && (item.voorkant || item.q || item.front || '') || '',
         backText: item && (item.achterkant || item.back || '') || '',
-        img: theme.card
+        img: theme.card,
+        backDesignKey: item && item._qid ? ('__back_card__:' + item._qid) : ''
       });
     });
   });

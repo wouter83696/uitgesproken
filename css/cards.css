@@ -284,6 +284,187 @@ body.setsIndex .menuThumbCard img{
   box-shadow: none !important;
 }
 
+.pkViewerCardWrap{
+  width:100%;
+  height:100%;
+  display:block;
+}
+
+.pkViewerCardWrap .cardFaceOuter{
+  width:100%;
+  height:100%;
+}
+
+.cardFaceOuter{
+  aspect-ratio:var(--cardAspect,85/55);
+  border-radius:var(--radius);
+  box-shadow:none;
+  perspective:1200px;
+  position:relative;
+}
+
+.cardFaceInner{
+  position:relative;
+  width:100%;
+  height:100%;
+  transform-style:preserve-3d;
+  -webkit-transform-style:preserve-3d;
+  transition:transform 520ms cubic-bezier(.4,0,.2,1);
+}
+
+.cardFaceInner.flipped{
+  transform:rotateY(180deg);
+}
+
+.cardFaceFront,
+.cardFaceBack{
+  position:absolute;
+  inset:0;
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+  border-radius:var(--radius);
+  overflow:hidden;
+  box-shadow:none;
+}
+
+.cardFaceBack{
+  transform:rotateY(180deg) translateZ(0);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:12px;
+  text-align:center;
+  font-weight:600;
+  line-height:1.4;
+  word-break:break-word;
+  overflow:hidden;
+}
+
+.cardFaceBack .cpBg.is-reflect,
+.cardFaceBack .cpShapeLayer.is-reflect{
+  transform:scaleX(-1);
+}
+
+.cpBg{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+
+.cpBgEmpty{
+  position:absolute;
+  inset:0;
+}
+
+.cpOverlay{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:10px;
+  pointer-events:none;
+}
+
+.cpFront{
+  font-size:12pt;
+  font-weight:500;
+  text-align:center;
+  line-height:1.35;
+  width:100%;
+  word-break:break-word;
+  padding:6px;
+  max-height:100%;
+  overflow:hidden;
+  color:#36485a;
+}
+
+.cpOverlay.coverPreview{
+  padding:14px 16px;
+  align-items:flex-start !important;
+  justify-content:flex-start !important;
+}
+
+.cpFront.coverPreviewText{
+  width:60%;
+  max-width:60%;
+  padding:0;
+  text-align:left !important;
+  line-height:1.16;
+  font-weight:600;
+  text-wrap:balance;
+  word-break:normal;
+  color:#35556f;
+}
+
+.cpLabel{
+  font-size:10px;
+  color:var(--muted);
+  text-align:center;
+  margin-top:5px;
+  letter-spacing:.02em;
+}
+
+.cpTextLayer,
+.cpShapeLayer{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  overflow:hidden;
+}
+
+.cpShape{
+  position:absolute;
+  transform:translate(-50%,-50%);
+  display:block;
+  pointer-events:none;
+  border-radius:14px;
+}
+
+.cpShape svg{
+  width:100%;
+  height:100%;
+  display:block;
+  overflow:visible;
+}
+
+.cpFrontInner{
+  display:inline-block;
+  max-width:100%;
+  padding:0;
+  border-radius:2px;
+}
+
+.cpTextBlock{
+  position:absolute;
+  min-width:0;
+  max-width:92%;
+  width:max-content;
+}
+
+.cpTextBlockText{
+  position:relative;
+  z-index:0;
+  display:block;
+  max-width:100%;
+  white-space:nowrap;
+  word-break:normal;
+  overflow-wrap:normal;
+  line-height:1.2;
+}
+
+.cpTextBlockText.hasBg::before{
+  content:'';
+  position:absolute;
+  z-index:-1;
+  inset:-12px -18px;
+  border-radius:10px;
+  background:var(--cp-text-bg,transparent);
+}
+
 /* Kaartenpagina: geen kaartschaduw */
 body[data-page="kaarten"] .cardInner{
   box-shadow: none !important;

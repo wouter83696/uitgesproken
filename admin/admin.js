@@ -2,8 +2,9 @@
 // ═══════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════
-var S={repo:'',token:'',sets:[],indexSha:'',indexData:{},activeId:null,activeKind:'space',space:null,d:{},mode:'checklist',wizStep:0,clTab:'opmaken',opmPane:'vragen',infoSlideIdx:0,dirty:false,thumbsOpen:false,homeSliderPane:'hero',homeCardsPane:'hero',history:{past:[],future:[],lastSig:'',suspend:false}};
-var CC={},KF={},SC={},bgTimer=null,asTimer=null,_lp=null,dragSrc=null;
+var S={repo:'',token:'',sets:[],sharedSets:[],indexSha:'',indexData:{},activeId:null,activeKind:'space',_view:'dashboard',_mySetsOpen:true,space:null,d:{},mode:'checklist',wizStep:0,clTab:'opmaken',opmPane:'vragen',infoSlideIdx:0,dirty:false,thumbsOpen:false,homeSliderPane:'hero',homeCardsPane:'hero',editorMode:'edit',history:{past:[],future:[],lastSig:'',suspend:false},_wizardSetId:null};
+var CC={},KF={},SC={},SIDEBAR_SET_THUMB_CACHE={},SIDEBAR_SET_THUMB_PENDING={},SIDEBAR_SET_THUMB_WARM_TIMER=0,CARD_PREVIEW_WARM_TIMER=0,bgTimer=null,asTimer=null,_lp=null,dragSrc=null;
+var _mySetsFilter='all',_mySetsSearch='',_mySetsView='list',_mySetsSearchTimer=null;
 var SAVE_UI={state:'idle',text:'',hideTimer:null};
 var _savedSpaceSig=null;
 var SET_EDITOR_PANE='themes'; // 'themes' | 'format'
@@ -22,12 +23,70 @@ var SPACE_PREVIEW_H=930;
 var STYLE_PAL_EXPANDED={};
 var BG_ACTIVE_PAL_INDEX=0;
 var STIJL_KLEUR_TAB='settc';
+var STYLE_CARD_COLOR_OPEN={};
+var STYLE_BG_CARD_OPEN={};
+var STYLE_SHAPE_ADJUST_OPEN={};
+var STYLE_SHAPE_COLOR_OPEN={};
+var QUESTION_SIDE_PANEL_OPEN={};
 var Q_EDITOR_SIDE='front';
 var QUESTION_ENTITY_SEQ=0;
 var SELECTED_LIB_PATH='';
 var ACTIVE_TARGET_PATH='';
 var PRELOAD={token:0,active:false,total:0,done:0};
 var RT={target:null,seed:0,richCeTarget:null,savedRange:null,ceBlurTimer:null};
+var FORCE_EDITOR_SCROLL_RESET=false;
+function syncAppBootProgress(pct){
+  var fill=g('appBootFill');
+  if(!fill)return;
+  var v=Math.max(0,Math.min(100,Number(pct)||0));
+  fill.style.width=v+'%';
+}
+function setAppPreparing(active){
+  var app=g('app');
+  var boot=g('appBoot');
+  if(!app)return;
+  app.classList.toggle('app-preparing',!!active);
+  if(boot) boot.classList.toggle('is-hidden',!active);
+}
+function requestEditorScrollReset(){
+  FORCE_EDITOR_SCROLL_RESET=true;
+}
+function applyEditorScrollReset(){
+  if(!FORCE_EDITOR_SCROLL_RESET)return;
+  var contentEl=document.querySelector('.content');
+  var panelEl=g('pw');
+  [contentEl,panelEl].forEach(function(node){
+    if(!node)return;
+    node.scrollTop=0;
+    node.scrollLeft=0;
+  });
+  FORCE_EDITOR_SCROLL_RESET=false;
+}
+function storedOpenState(store,key,defaultOpen){
+  return Object.prototype.hasOwnProperty.call(store,key)?!!store[key]:!!defaultOpen;
+}
+function toggleStoredOpenState(store,key,defaultOpen){
+  var next=!storedOpenState(store,key,defaultOpen);
+  store[key]=next;
+  return next;
+}
+function buildSectionChevronSvg(open){
+  return '<svg class="sectionChevronIcon'+(open?' is-open':'')+'" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>';
+}
+function buildSectionCollapseToggleHtml(opts){
+  opts=opts||{};
+  var open=!!opts.open;
+  var labelHtml=opts.labelHtml!=null
+    ? String(opts.labelHtml)
+    : '<div class="'+(opts.labelClass||'stijlSectionLabel')+'">'+esc(opts.label||'')+'</div>';
+  var cls=(opts.className||'sectionCollapseBtn')+(open?' is-open':'');
+  var title=opts.title||((open?'Inklappen':'Uitklappen'));
+  var ariaLabel=opts.ariaLabel||opts.label||'Sectie';
+  return '<button class="'+cls+'" type="button" onclick="'+(opts.onclick||'')+'" title="'+esc(title)+'" aria-label="'+esc(ariaLabel)+'" aria-expanded="'+(open?'true':'false')+'">'+
+    '<div class="'+(opts.labelWrapClass||'sectionCollapseLabel')+'">'+labelHtml+'</div>'+
+    '<span class="sectionChevronWrap" aria-hidden="true">'+buildSectionChevronSvg(open)+'</span>'+
+  '</button>';
+}
 function resetTransientEditorState(){
   COVER_TEXT_DRAG=null;
   COVER_TEXT_ACTIVE=-1;
@@ -346,6 +405,7 @@ function connect(){
   if(!repo||!token){toast('Vul beide velden in','red');return;}
   var btn=g('conBtn');btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Verbinden…';
   S.repo=repo;S.token=token;localStorage.setItem('pk_cfg',JSON.stringify({repo:repo,token:token}));
+  setAppPreparing(true);
   lbStart();
   loadIndex().catch(function(e){
     btn.disabled=false;btn.innerHTML='Verbinden';
@@ -369,6 +429,7 @@ var _lbTimer=null,_lbVal=0;
 function lbStart(){
   var b=g('loadBar');if(!b)return;
   clearInterval(_lbTimer);_lbVal=0;
+  syncAppBootProgress(0);
   b.style.background='rgba(79,142,158,.78)';
   b.style.transition='none';b.style.width='0%';b.classList.add('on');
   setTimeout(function(){
@@ -378,6 +439,7 @@ function lbStart(){
       var step=_lbVal<30?4:_lbVal<60?2:_lbVal<85?0.8:0.2;
       _lbVal=Math.min(_lbVal+step,90);
       b.style.width=_lbVal+'%';
+      syncAppBootProgress(_lbVal);
     },100);
   },20);
 }
@@ -385,6 +447,7 @@ function lbSet(pct){
   var b=g('loadBar');if(!b)return;
   clearInterval(_lbTimer);_lbTimer=null;
   _lbVal=Math.max(0,Math.min(100,Number(pct)||0));
+  syncAppBootProgress(_lbVal);
   b.style.background='rgba(79,142,158,.78)';
   b.classList.add('on');
   b.style.transition='width .18s cubic-bezier(.33,1,.68,1),opacity .26s ease';
@@ -393,8 +456,9 @@ function lbSet(pct){
 function lbDone(){
   var b=g('loadBar');if(!b)return;
   clearInterval(_lbTimer);_lbTimer=null;_lbVal=100;
+  syncAppBootProgress(100);
   b.style.width='100%';
-  setTimeout(function(){b.classList.remove('on');setTimeout(function(){b.style.width='0%';},400);},280);
+  setTimeout(function(){b.classList.remove('on');setTimeout(function(){b.style.width='0%';syncAppBootProgress(0);},400);},280);
 }
 function lbFail(){var b=g('loadBar');if(!b)return;clearInterval(_lbTimer);b.style.background='var(--rd)';lbDone();setTimeout(function(){b.style.background='var(--tl)';},800);}
 
@@ -490,9 +554,11 @@ function calcPctFromBundle(bundle){
 function cacheSetBundle(id,bundle){
   var stored=cloneSetBundle(bundle);
   SC[id]=stored;
+  SIDEBAR_SET_THUMB_CACHE[id]=buildSidebarThumbDataUrl({id:id},stored)||'';
+  delete SIDEBAR_SET_THUMB_PENDING[id];
   var idx=S.sets.findIndex(function(s){return s.id===id;});
   if(idx>=0){
-    S.sets[idx].bundle=cloneSetBundle(stored);
+    S.sets[idx]._hasBundle=true;
     if(stored&&stored.meta){
       if(stored.meta.title)S.sets[idx].title=stored.meta.title;
       if(stored.meta.slug)S.sets[idx].slug=stored.meta.slug;
@@ -619,6 +685,8 @@ function redoSetChanges(){
 function clearSetClientState(id){
   if(!id)return;
   delete SC[id];
+  delete SIDEBAR_SET_THUMB_CACHE[id];
+  delete SIDEBAR_SET_THUMB_PENDING[id];
   lsDel('pk_draft_'+id);
   lsDel('pk_mode_'+id);
   Object.keys(CC).forEach(function(path){
@@ -686,7 +754,8 @@ function preloadAllSets(){
   var chain=Promise.resolve();
   sets.forEach(function(set){
     chain=chain.then(function(){
-      return loadSetFiles(set.id)
+      var existing=spacePreviewSetBundle(set);
+      return Promise.resolve(existing?cloneSetBundle(existing):loadSetFiles(set.id))
         .then(function(bundle){
           cacheSetBundle(set.id,bundle);
           return preloadSetAssets(set.id,bundle);
@@ -695,7 +764,6 @@ function preloadAllSets(){
         .then(function(){
           if(token!==PRELOAD.token) return;
           PRELOAD.done+=1;
-          renderSidebar();
           lbSet((PRELOAD.done/PRELOAD.total)*100);
         });
     });
@@ -703,14 +771,17 @@ function preloadAllSets(){
   return chain.then(function(){
     if(token!==PRELOAD.token) return;
     PRELOAD.active=false;
+    renderSidebar();
     lbDone();
   }).catch(function(){
     if(token!==PRELOAD.token) return;
     PRELOAD.active=false;
+    renderSidebar();
     lbDone();
   });
 }
 function renderLoadedWelcome(){
+  setAppPreparing(false);
   var count=(S.sets||[]).length;
   var label=count===1?'kaartenset':'kaartensets';
   hideFloatingTextBar(true);
@@ -722,6 +793,7 @@ function renderLoadedWelcome(){
   '</div>';
 }
 function renderSelectSetWelcome(){
+  setAppPreparing(false);
   hideFloatingTextBar(true);
   g('mc').innerHTML='<div class="welcome" style="gap:12px">'+
     '<img src="../assets/logo-icons/masters/master-transparent.svg" style="width:72px;height:72px" alt="Uitgesproken">'+
@@ -733,6 +805,7 @@ function renderSelectSetWelcome(){
 // INDEX
 // ═══════════════════════════════════════════
 function loadIndex(){
+  setAppPreparing(true);
   show('app');hide('setup');g('sbRepo').textContent=S.repo;
   applySidebarState();
   if(g('sbQ'))g('sbQ').value='';
@@ -791,6 +864,84 @@ function sidebarMiniCardHtml(){
     '</span>'+
   '</span>';
 }
+function sidebarThumbShell(innerHtml,isActive,setId,isFallback,styleAttr){
+  return '<span class="sLeadMiniThumb'+(isFallback?' is-fallback':'')+(isActive?' is-active':'')+'" data-thumb-id="'+esc(setId||'')+'" aria-hidden="true"'+(styleAttr?' style="'+esc(styleAttr)+'"':'')+'>'+innerHtml+'</span>';
+}
+function refreshSidebarThumbNodes(setId,dataUrl){
+  if(!setId||!dataUrl)return;
+  Array.prototype.forEach.call(document.querySelectorAll('.sLeadMiniThumb[data-thumb-id]'),function(node){
+    if((node.dataset&&node.dataset.thumbId)!==setId)return;
+    node.classList.remove('is-fallback');
+    node.innerHTML='<img src="'+esc(dataUrl)+'" alt="">';
+  });
+}
+function buildSidebarThumbDataUrl(set,bundle){
+  var sid=String((set&&set.id)||'').trim();
+  if(!sid)return '';
+  var sourceBundle=bundle||spacePreviewSetBundle(set);
+  if(!sourceBundle)return '';
+  try{
+    return spacePreviewSetCoverDataUrl({id:sid},sourceBundle)||'';
+  }catch(_e){
+    return '';
+  }
+}
+function queueSidebarThumbBuild(set){
+  var sid=String((set&&set.id)||'').trim();
+  if(!sid||SIDEBAR_SET_THUMB_CACHE[sid]||SIDEBAR_SET_THUMB_PENDING[sid])return;
+  var bundle=spacePreviewSetBundle(set);
+  if(!bundle)return;
+  SIDEBAR_SET_THUMB_PENDING[sid]=true;
+  var run=function(){
+    if(!SIDEBAR_SET_THUMB_PENDING[sid])return;
+    var cover=buildSidebarThumbDataUrl(set,bundle);
+    if(cover){
+      SIDEBAR_SET_THUMB_CACHE[sid]=cover;
+      refreshSidebarThumbNodes(sid,cover);
+    }
+    delete SIDEBAR_SET_THUMB_PENDING[sid];
+  };
+  if(typeof requestIdleCallback==='function')requestIdleCallback(run,{timeout:180});
+  else setTimeout(run,16);
+}
+function cancelSidebarThumbWarmup(){
+  if(!SIDEBAR_SET_THUMB_WARM_TIMER)return;
+  clearTimeout(SIDEBAR_SET_THUMB_WARM_TIMER);
+  SIDEBAR_SET_THUMB_WARM_TIMER=0;
+}
+function cancelCardPreviewWarmup(){
+  if(!CARD_PREVIEW_WARM_TIMER)return;
+  clearTimeout(CARD_PREVIEW_WARM_TIMER);
+  CARD_PREVIEW_WARM_TIMER=0;
+}
+function scheduleCardPreviewWarmup(delay){
+  cancelCardPreviewWarmup();
+  var wait=Math.max(0,parseInt(delay,10)||0);
+  var loadId=S.activeId;
+  var loadKind=S.activeKind;
+  CARD_PREVIEW_WARM_TIMER=setTimeout(function(){
+    CARD_PREVIEW_WARM_TIMER=0;
+    if(S.activeId!==loadId||S.activeKind!==loadKind)return;
+    loadCardPreviews();
+  },wait);
+}
+function scheduleSidebarThumbWarmup(){
+  if(SIDEBAR_SET_THUMB_WARM_TIMER)return;
+  SIDEBAR_SET_THUMB_WARM_TIMER=setTimeout(function(){
+    SIDEBAR_SET_THUMB_WARM_TIMER=0;
+    (S.sets||[]).forEach(function(set){ queueSidebarThumbBuild(set); });
+  },240);
+}
+function sidebarSetThumbHtml(set,isActive){
+  var title=(set&&set.title)||'';
+  var bundle=spacePreviewSetBundle(set);
+  var cover=(set&&set.id&&SIDEBAR_SET_THUMB_CACHE[set.id])||'';
+  if(cover){
+    return sidebarThumbShell('<img src="'+esc(cover)+'" alt="">',isActive,set&&set.id,false);
+  }
+  var colors=_setThumbColors(title);
+  return sidebarThumbShell(_setThumbSvg(colors.shape),isActive,set&&set.id,true,'background:'+colors.bg);
+}
 function applySidebarState(){
   var app=g('app'),btn=g('sbToggle'),q=g('sbQ');
   var collapsed=sidebarCollapsed();
@@ -820,89 +971,304 @@ function setSidebarCollapsed(next){
 function toggleSidebar(){
   setSidebarCollapsed(!sidebarCollapsed());
 }
+function isValidSpaceView(v){
+  return v==='dashboard'||v==='home'||v==='my-sets'||v==='shared'||v==='trash';
+}
+function resolveSpaceEditorView(opts){
+  opts=opts||{};
+  if(isValidSpaceView(opts.view))return opts.view;
+  if(opts.preserveView&&isValidSpaceView(S._view))return S._view;
+  return 'home';
+}
+function cleanupSidebarCollapseBody(body){
+  if(!body||!body._sbCollapseEndHandler)return;
+  body.removeEventListener('transitionend',body._sbCollapseEndHandler);
+  body._sbCollapseEndHandler=null;
+}
+function primeSidebarCollapseBody(body,open){
+  if(!body)return;
+  cleanupSidebarCollapseBody(body);
+  body.classList.toggle('is-open',!!open);
+  body.classList.toggle('is-closed',!open);
+  body.setAttribute('aria-hidden',open?'false':'true');
+  body.style.height=open?'auto':'0px';
+}
+function animateSidebarCollapseBody(body,open){
+  if(!body)return;
+  cleanupSidebarCollapseBody(body);
+  var startHeight=body.getBoundingClientRect().height;
+  if(open){
+    body.classList.remove('is-closed');
+    body.classList.add('is-open');
+    body.setAttribute('aria-hidden','false');
+    body.style.height='auto';
+    var targetHeight=body.scrollHeight;
+    body.style.height=startHeight+'px';
+    body.offsetHeight;
+    body.style.height=targetHeight+'px';
+  }else{
+    body.style.height=startHeight+'px';
+    body.offsetHeight;
+    body.classList.remove('is-open');
+    body.classList.add('is-closed');
+    body.setAttribute('aria-hidden','true');
+    body.style.height='0px';
+  }
+  var onEnd=function(e){
+    if(e.target!==body||e.propertyName!=='height')return;
+    cleanupSidebarCollapseBody(body);
+    body.style.height=open?'auto':'0px';
+  };
+  body._sbCollapseEndHandler=onEnd;
+  body.addEventListener('transitionend',onEnd);
+}
 function renderSidebar(){
-  var sbQ=g('sbQ'),setList=g('setList'),spaceNav=g('spaceNav');
+  var setList=g('setList'),spaceNav=g('spaceNav'),spacesList=g('spacesList');
   if(!setList||!spaceNav)return;
   applySidebarState();
-  var q=String(sbQ&&sbQ.value||'').toLowerCase();
-  var list=(Array.isArray(S.sets)?S.sets:[]).filter(function(s){
-    var title=String((s&&s.title)||'').toLowerCase();
-    var id=String((s&&s.id)||'').toLowerCase();
-    return !q||title.indexOf(q)>=0||id.indexOf(q)>=0;
-  });
-  var homeIcon='<span class="sLeadIcon sLeadHome" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></span>';
-  var wsSwitcher='<div class="wsSwitcher">'+
-    '<button class="wsSwitcherBtn" type="button" onclick="toggleWsMenu()" id="wsSwitcherBtn">'+
-      '<span>Ruimte</span>'+
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>'+
-    '</button>'+
-    '<div class="wsMenu" id="wsMenu">'+
-      '<button class="wsMenuItem'+(S.activeKind==='space'?' active':'')+'" type="button" onclick="closeWsMenu();reqLoadSpace()">Home</button>'+
-    '</div>'+
-  '</div>';
-  var ruimteBtn=
-    '<div class="sbLbl sbLblWs"><span>Ruimte</span>'+wsSwitcher+'</div>'+
-    '<button class="sItem sItem-home'+(S.activeKind==='space'?' active':'')+'" type="button" title="Home" onclick="reqLoadSpace()">'+
-      homeIcon+
-      '<span class="sNm">Home</span>'+
+
+  var isDashboard=S.activeKind==='space'&&(S._view==='dashboard'||S._view==='wizard');
+  var isHome=S.activeKind==='space'&&S._view==='home';
+  var isShared=S.activeKind==='space'&&S._view==='shared';
+  var isTrash=S.activeKind==='space'&&S._view==='trash';
+
+  // ── spaceNav: Dashboard + Home ──────────────────────────────
+  var dashIcon='<span class="sLeadIcon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>';
+  var homeIcon='<span class="sLeadIcon sLeadHome" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></span>';
+  spaceNav.innerHTML=
+    '<button class="sItem sItem-nav'+(isDashboard?' active':'')+'" data-nav-view="dashboard" type="button" onclick="goView(\'dashboard\')">'+
+      dashIcon+'<span class="sNm">Dashboard</span>'+
     '</button>';
-  spaceNav.innerHTML=ruimteBtn;
-  var setsLabel=list.length?'<div class="sbLbl sbLblSets">Sets</div>':'';
-  var setsHtml=list.map(function(s){
-    var sid=String((s&&s.id)||'');
-    var pct=calcPct(sid),isDirty=S.activeKind==='set'&&sid===S.activeId&&S.dirty;
-    var setStatus=(s&&s.status)||'draft';
-    var setVis=(s&&s.visibility)||'private';
-    var pubCls,pubLabel;
-    if(setStatus==='draft'){ pubCls=' private'; pubLabel='Draft'; }
-    else if(setVis==='public'){ pubCls=' public'; pubLabel='Public'; }
-    else if(setVis==='unlisted'){ pubCls=' unlisted'; pubLabel='Unlisted'; }
-    else { pubCls=' private'; pubLabel='Private'; }
-    var pubTitle='Publicatie-instellingen';
-    var title=(s&&s.title)||sid;
-    return '<button class="sItem'+(S.activeKind==='set'&&sid===S.activeId?' active':'')+(isDirty?' dirty':'')+'" draggable="true" data-sid="'+esc(sid)+'" onclick="reqLoad(\''+esc(sid)+'\')">'+
-      '<span class="sLeadBadge" aria-hidden="true">'+esc(sidebarBadgeText(title))+'</span>'+
-      sidebarMiniCardHtml()+
-      '<span class="sNmWrap"><span class="sNm">'+esc((s&&s.title)||sid)+'</span><span class="sRenameBtn" role="button" tabindex="0" title="Naam wijzigen" aria-label="Naam wijzigen" onclick="event.stopPropagation();startSidebarSetRename(\''+esc(sid)+'\',this.parentNode.querySelector(\'.sNm\'))" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();startSidebarSetRename(\''+esc(sid)+'\',this.parentNode.querySelector(\'.sNm\'));}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span></span>'+
-      '<span class="sMeta"><span class="sPct">'+pct+'%</span></span>'+
-      '<span class="sPub'+pubCls+'" title="'+pubTitle+'" onclick="event.stopPropagation();openSettingsForSet(\''+esc(sid)+'\')">'+pubLabel+'</span>'+
-      '<span class="sDirty" title="Niet opgeslagen"></span></button>';
-  }).join('');
-  setList.innerHTML=setsLabel+setsHtml;
-  if(!list.length&&Array.isArray(S.sets)&&S.sets.length&&!q){
-    setList.innerHTML='<div class="empty" style="padding:10px 0;color:var(--k3)">Er ging iets mis bij het tonen van de sets.</div>';
+
+  // ── setList: Mijn kaartensets (inklapbaar) + Gedeeld + Prullenbak ──
+  var setsOpen=S._mySetsOpen!==false;
+  var list=Array.isArray(S.sets)?S.sets:[];
+  var setsBodyHtml='';
+  if(list.length){
+    setsBodyHtml=list.map(function(s){
+      var sid=String((s&&s.id)||'');
+      var isDirty=S.activeKind==='set'&&sid===S.activeId&&S.dirty;
+      var isActive=S.activeKind==='set'&&sid===S.activeId;
+      var title=(s&&s.title)||sid;
+      return '<button class="sItem sItem-set'+(isActive?' active':'')+(isDirty?' dirty':'')+'" type="button" draggable="true" data-sid="'+esc(sid)+'" onclick="reqLoad(\''+esc(sid)+'\')">'+
+        sidebarSetThumbHtml(s,isActive)+
+        '<span class="sNm" title="Dubbelklik om naam te wijzigen" ondragstart="event.preventDefault();event.stopPropagation()" ondblclick="event.preventDefault();event.stopPropagation();startSidebarSetRename(\''+esc(sid)+'\',this)">'+esc(title)+'</span>'+
+        '<span class="sDirty" title="Niet opgeslagen"></span>'+
+      '</button>';
+    }).join('');
+  } else {
+    setsBodyHtml='<div class="sbEmpty">Nog geen sets. Maak er een aan!</div>';
   }
+  var sharedIcon='<span class="sLeadIcon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>';
+  var trashIcon='<span class="sLeadIcon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></span>';
+  setList.innerHTML=
+    '<div class="sbLbl sbLblSets">Sets</div>'+
+    '<div class="sbCollapse">'+
+      '<button class="sbCollapseHead'+(S.activeKind==='set'?' has-active':'')+'" type="button" aria-expanded="'+(setsOpen?'true':'false')+'" onclick="toggleMySets()">'+
+        '<span class="sLeadIcon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6"/><path d="M9 13h4"/></svg></span>'+
+        '<span class="sNm">Mijn kaartensets</span>'+
+        '<span class="sbCollapseChev'+(setsOpen?' open':'')+'" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m4 6 4 4 4-4"/></svg></span>'+
+      '</button>'+
+      '<div class="sbCollapseBody'+(setsOpen?' is-open':' is-closed')+'" aria-hidden="'+(setsOpen?'false':'true')+'">'+setsBodyHtml+
+        '<button class="sbAllSetsBtn" onclick="goView(\'my-sets\')">Alle kaartensets bekijken <span aria-hidden="true">→</span></button>'+
+      '</div>'+
+    '</div>'+
+    '<button class="sItem sItem-nav'+(isShared?' active':'')+'" data-nav-view="shared" type="button" onclick="goView(\'shared\')">'+
+      sharedIcon+'<span class="sNm">Gedeeld met mij</span>'+
+    '</button>'+
+    '<button class="sItem sItem-nav'+(isTrash?' active':'')+'" data-nav-view="trash" type="button" onclick="goView(\'trash\')">'+
+      trashIcon+'<span class="sNm">Prullenbak</span>'+
+    '</button>'+
+    '<div style="padding-top:12px">'+
+      '<button class="sbNewSetBtn" type="button" onclick="openNewSetWizard()">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'+
+        '<span>Nieuwe set</span>'+
+      '</button>'+
+    '</div>';
+  primeSidebarCollapseBody(setList.querySelector('.sbCollapseBody'),setsOpen);
   initSbDrag();
-}
-function toggleWsMenu(){
-  var btn=g('wsSwitcherBtn'),menu=g('wsMenu');
-  if(!btn||!menu)return;
-  menu.classList.toggle('open');
-  btn.classList.toggle('open');
-}
-function closeWsMenu(){
-  var btn=g('wsSwitcherBtn'),menu=g('wsMenu');
-  if(!btn||!menu)return;
-  menu.classList.remove('open');
-  btn.classList.remove('open');
-}
-document.addEventListener('click',function(e){
-  var wsMenu=g('wsMenu');
-  if(wsMenu&&!e.target.closest('.wsSwitcher')){
-    closeWsMenu();
+
+  // ── sbRepo bovenaan: alleen gebruikersnaam (zonder @) ────────
+  if(g('sbRepo')) g('sbRepo').textContent=S._username||'';
+
+  // ── Gebruiker onderaan ───────────────────────────────────────
+  var userArea=g('sbUserArea');
+  if(userArea){
+    var uName=S._userName||S._username||'';
+    var uAt=S._username?('@'+S._username):'';
+    var avatarHtml='';
+    if(S._userAvatar){
+      avatarHtml='<img class="sbUserAvatar" src="'+esc(S._userAvatar)+'" alt="'+esc(uName)+'">';
+    }else{
+      var initials=(uName||'?').trim().charAt(0).toUpperCase();
+      avatarHtml='<span class="sbUserAvatar sbUserAvatarFb">'+esc(initials)+'</span>';
+    }
+    userArea.innerHTML=
+      '<button class="sbUserBtn" type="button" onclick="toggleUserMenu(event)">'+
+        avatarHtml+
+        '<span class="sbUserInfo"><span class="sbUserName">'+esc(uName||uAt)+'</span>'+
+          (uAt?'<span class="sbUserAt">'+esc(uAt)+'</span>':'')+
+        '</span>'+
+        '<svg class="sbUserChev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m4 6 4 4 4-4"/></svg>'+
+      '</button>';
   }
-});
-function reqLoadSpace(){
-  if(S.activeKind==='space')return;
+
+  scheduleSidebarThumbWarmup();
+
+  // ── spacesList: workspace sectie met Home ──────────────────────────────────
+  if(spacesList){
+    var spaceName=(S.space&&S.space.name)||'Home';
+    // Toon switcher alleen als gebruiker meerdere spaces heeft
+    var hasMultipleSpaces=false; // TODO: Pas aan wanneer multi-space support beschikbaar is
+    var wsHtml='<div class="sbLbl sbLblWs">Ruimte</div>';
+    if(hasMultipleSpaces){
+      wsHtml+='<button class="sbWorkspaceSwitcher" type="button" onclick="toggleWorkspaceMenu(event)" title="Wissel van ruimte">'+
+        '<span class="sbWsName">'+esc(spaceName)+'</span>'+
+        '<svg class="sbWsChev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m4 6 4 4 4-4"/></svg>'+
+      '</button>';
+    }
+    wsHtml+='<button class="sItem sItem-nav sItem-home'+(isHome?' active':'')+'" data-nav-view="home" type="button" onclick="reqLoadSpace()">'+
+      homeIcon+'<span class="sNm">Home</span>'+
+    '</button>';
+    spacesList.innerHTML=wsHtml;
+  }
+}
+function syncSidebarSelectionState(){
+  var setList=g('setList'),spaceNav=g('spaceNav'),spacesList=g('spacesList');
+  if(!setList||!spaceNav||!spacesList)return false;
+  var setButtons=setList.querySelectorAll('.sItem-set[data-sid]');
+  if((S.sets||[]).length&&!setButtons.length)return false;
+  Array.prototype.forEach.call(setButtons,function(btn){
+    var sid=btn.dataset?btn.dataset.sid:'';
+    var isActive=S.activeKind==='set'&&sid===S.activeId;
+    var isDirty=isActive&&!!S.dirty;
+    btn.classList.toggle('active',isActive);
+    btn.classList.toggle('dirty',isDirty);
+    var thumb=btn.querySelector('.sLeadMiniThumb');
+    if(thumb)thumb.classList.toggle('is-active',isActive);
+  });
+  var setHead=setList.querySelector('.sbCollapseHead');
+  if(setHead)setHead.classList.toggle('has-active',S.activeKind==='set');
+  Array.prototype.forEach.call(spaceNav.querySelectorAll('[data-nav-view]'),function(btn){
+    var view=btn.dataset&&btn.dataset.navView;
+    var isActive=S.activeKind==='space'&&(S._view===view || (S._view==='wizard'&&view==='dashboard'));
+    btn.classList.toggle('active',isActive);
+  });
+  Array.prototype.forEach.call(setList.querySelectorAll('[data-nav-view]'),function(btn){
+    var view=btn.dataset&&btn.dataset.navView;
+    var isActive=S.activeKind==='space'&&(S._view===view || (S._view==='wizard'&&view==='dashboard'));
+    btn.classList.toggle('active',isActive);
+  });
+  Array.prototype.forEach.call(spacesList.querySelectorAll('[data-nav-view]'),function(btn){
+    var view=btn.dataset&&btn.dataset.navView;
+    var isActive=S.activeKind==='space'&&(S._view===view || (S._view==='wizard'&&view==='dashboard'));
+    btn.classList.toggle('active',isActive);
+  });
+  return true;
+}
+function goView(v){
   if(S.dirty&&S.activeKind==='set'){
-    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(S.activeId)+'</strong>?</p>'+
+    var activeName=(S.sets.find(function(s){return s.id===S.activeId;})||{}).title||S.activeId;
+    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(activeName)+'</strong>?</p>'+
       '<div class="mAct">'+
-      '<button class="mCa" onclick="closeModal();loadSpaceEditor()">Niet opslaan</button>'+
-      '<button class="mOk" onclick="closeModal();saveSet(function(){loadSpaceEditor();})">Opslaan</button>'+
+      '<button class="mCa" onclick="closeModal();_goViewNow(\''+esc(v)+'\')">Niet opslaan</button>'+
+      '<button class="mOk" onclick="closeModal();saveSet(function(){_goViewNow(\''+esc(v)+'\');})">Opslaan</button>'+
       '</div>');
     return;
   }
-  loadSpaceEditor();
+  _goViewNow(v);
+}
+function _goViewNow(v){
+  S._view=v;
+  S.activeKind='space';
+  S.dirty=false;
+  if(!syncSidebarSelectionState())renderSidebar();
+  renderEditor();
+}
+function toggleMySets(){
+  S._mySetsOpen=!S._mySetsOpen;
+  var open=S._mySetsOpen!==false;
+  var body=document.querySelector('.sbCollapseBody');
+  var chev=document.querySelector('.sbCollapseChev');
+  var head=document.querySelector('.sbCollapseHead');
+  if(body)animateSidebarCollapseBody(body,open);
+  if(chev)chev.classList.toggle('open',open);
+  if(head)head.setAttribute('aria-expanded',open?'true':'false');
+}
+function toggleUserMenu(e){
+  e.stopPropagation();
+  var existing=document.getElementById('sbUserMenu');
+  if(existing){ existing.remove(); return; }
+  var btn=e.currentTarget;
+  var rect=btn.getBoundingClientRect();
+  var menu=document.createElement('div');
+  menu.id='sbUserMenu';
+  menu.className='sbUserMenu';
+  menu.innerHTML=
+    '<button class="sbUserMenuItem" onclick="showShortcuts();document.getElementById(\'sbUserMenu\')&&document.getElementById(\'sbUserMenu\').remove()">'+
+      '<svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="3"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h12"/></svg>Sneltoetsen'+
+    '</button>'+
+    '<div class="sbUserMenuDivider"></div>'+
+    '<button class="sbUserMenuItem sbUserMenuDanger" onclick="adminSignOut()">'+
+      '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Uitloggen'+
+    '</button>';
+  // Positioneer boven de knop
+  menu.style.position='fixed';
+  menu.style.bottom=(window.innerHeight-rect.top+6)+'px';
+  menu.style.left=rect.left+'px';
+  menu.style.width=rect.width+'px';
+  document.body.appendChild(menu);
+  // Sluit bij klik buiten
+  setTimeout(function(){
+    document.addEventListener('click',function close(){ menu.remove(); document.removeEventListener('click',close); },{ once:true });
+  },0);
+}
+function toggleWorkspaceMenu(e){
+  e.stopPropagation();
+  var existing=document.getElementById('sbWorkspaceMenu');
+  if(existing){ existing.remove(); return; }
+  var btn=e.currentTarget;
+  var rect=btn.getBoundingClientRect();
+  var menu=document.createElement('div');
+  menu.id='sbWorkspaceMenu';
+  menu.className='sbWorkspaceMenu'+(document.documentElement.classList.contains('admin-night')?' dark':'');
+  var currentSpaceName=(S.space&&S.space.name)||'Home';
+  var menuHtml='<button class="sbWsMenuBtn active" type="button" title="'+esc(currentSpaceName)+'">'+
+    '<span class="sbWsMenuIcon">✓</span>'+
+    '<span>'+esc(currentSpaceName)+'</span>'+
+  '</button>';
+  // Later: voeg meer ruimtes toe wanneer beschikbaar
+  // menuHtml+='<div class="sbWsMenuDivider"></div>';
+  // menuHtml+='<button class="sbWsMenuBtn" onclick="showAddSpaceModal()"><span class="sbWsMenuIcon">+</span>Nieuwe ruimte</button>';
+  menu.innerHTML=menuHtml;
+  // Positioneer onder de knop
+  menu.style.position='fixed';
+  menu.style.top=(rect.bottom+6)+'px';
+  menu.style.left=rect.left+'px';
+  document.body.appendChild(menu);
+  // Sluit bij klik buiten
+  setTimeout(function(){
+    document.addEventListener('click',function close(){ menu.remove(); document.removeEventListener('click',close); },{ once:true });
+  },0);
+}
+function showAddSpaceModal(){
+  if(!isPro()){
+    showModal('<h3>PRO-functie</h3><p>Meerdere ruimtes zijn beschikbaar met een PRO-account.</p><div class="mAct"><button class="mOk" onclick="closeModal()">Sluiten</button></div>');
+    return;
+  }
+  toast('Ruimtes aanmaken komt binnenkort!','green');
+}
+function reqLoadSpace(){
+  if(S.activeKind==='space'&&S._view==='home')return;
+  if(S.dirty&&S.activeKind==='set'){
+    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(S.activeId)+'</strong>?</p>'+
+      '<div class="mAct">'+
+      '<button class="mCa" onclick="closeModal();loadSpaceEditor({view:\'home\'})">Niet opslaan</button>'+
+      '<button class="mOk" onclick="closeModal();saveSet(function(){loadSpaceEditor({view:\'home\'});})">Opslaan</button>'+
+      '</div>');
+    return;
+  }
+  loadSpaceEditor({view:'home'});
 }
 function calcPct(id){
   if(id!==S.activeId){
@@ -939,6 +1305,12 @@ function initSbDrag(){
 // ═══════════════════════════════════════════
 function reqLoad(id){
   if(id===S.activeId&&S.activeKind==='set')return;
+  cancelSidebarThumbWarmup();
+  cancelCardPreviewWarmup();
+  if(PRELOAD.active){
+    PRELOAD.token+=1;
+    PRELOAD.active=false;
+  }
   if(S.dirty){
     var activeName=(S.sets.find(function(s){return s.id===S.activeId;})||{}).title||S.activeId;
     showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(activeName)+'</strong>?</p>'+
@@ -954,13 +1326,17 @@ function loadSet(id,opts){
   opts=opts||{};
   S.activeKind='set';
   S.activeId=id;S.dirty=false;S.wizStep=0;S.clTab='opmaken';S.opmPane='vragen';S.infoSlideIdx=0;
+  requestEditorScrollReset();
+  CANVAS_ZOOM_PCT=100;
+  CANVAS_ZOOM_SCOPE_VALUES={};
+  rememberCanvasZoomForScope(canvasZoomScopeKeyForPane('set','vragen'),CANVAS_ZOOM_PCT);
   STYLE_PREVIEW_KEY=null;
   resetTransientEditorState();
   if(!opts.silent){
     lbStart();
     g('mc').innerHTML='<div class="welcome" style="opacity:.3"><p style="font-size:11.5px;color:var(--k3)">Laden…</p></div>';
   }
-  renderSidebar();
+  if(!syncSidebarSelectionState())renderSidebar();
   var loader=SC[id]
     ? Promise.resolve(cloneSetBundle(SC[id]))
     : loadSetFiles(id).then(function(bundle){
@@ -990,19 +1366,25 @@ function loadSet(id,opts){
 }
 function loadSpaceEditor(opts){
   opts=opts||{};
+  cancelCardPreviewWarmup();
   S.activeKind='space';
+  S._view=resolveSpaceEditorView(opts);
   S.opmPane=(S.opmPane==='info')?'info':'space';
   S.dirty=false;
   S.infoSlideIdx=0;
+  requestEditorScrollReset();
+  CANVAS_ZOOM_PCT=100;
+  CANVAS_ZOOM_SCOPE_VALUES={};
+  rememberCanvasZoomForScope(canvasZoomScopeKeyForPane('space',S.opmPane),CANVAS_ZOOM_PCT);
   STYLE_PREVIEW_KEY=null;
   resetTransientEditorState();
   document.documentElement.style.setProperty('--cardAspect','85/55');
   document.documentElement.classList.remove('card-fmt-narrow');
   if(!opts.silent){
     lbStart();
-    g('mc').innerHTML='<div class="welcome" style="opacity:.3"><p style="font-size:11.5px;color:var(--k3)">Ruimte laden…</p></div>';
+    g('mc').innerHTML='<div class="welcome" style="opacity:.3"><p style="font-size:11.5px;color:var(--k3)">Ruimte aan het verkennen...</p></div>';
   }
-  renderSidebar();
+  if(!syncSidebarSelectionState())renderSidebar();
   var sid=(Array.isArray(S.sets)&&S.sets.length)
     ? ((S.activeId&&S.sets.some(function(s){return s.id===S.activeId;})) ? S.activeId : S.sets[0].id)
     : null;
@@ -1077,8 +1459,8 @@ function afterLoad(id){
   syncDirtyFromSnapshot();
   startAutoSave();
   setTopSaveStatus('idle','');
-  // Start preloading card images immediately in background
-  setTimeout(loadCardPreviews,100);
+  // Warm previews after the first paint, not during the set-switch click flow.
+  scheduleCardPreviewWarmup(320);
   renderEditor();
 }
 function startAutoSave(){
@@ -1091,8 +1473,17 @@ function startAutoSave(){
   },15000);
 }
 function buildTopSaveStatusHtml(){
-  var show=S.activeKind!=='space'&&!!SAVE_UI.text;
-  return '<div class="tbRStatus'+(show?' on':'')+(SAVE_UI.state?' is-'+SAVE_UI.state:'')+'" id="saveMiniStatus" aria-live="polite">'+(show?esc(SAVE_UI.text):'')+'</div>';
+  return '';
+}
+function buildTopSaveBtnInnerHtml(label){
+  var safeLabel=esc(label||'Opslaan');
+  return ''+
+    '<svg class="tbRSaveIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+
+      '<path d="M4 5.5a1.5 1.5 0 0 1 1.5-1.5h10.4L20 8.1V18.5A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5z"/>'+
+      '<path d="M8 4v5.5h7V5"/>'+
+      '<path d="M8 20v-6.5h8V20"/>'+
+    '</svg>'+
+    '<span>'+safeLabel+'</span>';
 }
 
 // ═══════════════════════════════════════════
@@ -1241,60 +1632,1477 @@ function buildTopProfileMenuHtml(){
 }
 
 // ═══════════════════════════════════════════
+// DASHBOARD / OVERZICHT PAGINA'S
+// ═══════════════════════════════════════════
+function renderDashboard(){
+  setAppPreparing(false);
+  hideFloatingTextBar(true);
+  var rawName=S._userName||S._username||'';
+  var firstName=rawName?rawName.trim().split(' ')[0]:'';
+  firstName=firstName.charAt(0).toUpperCase()+firstName.slice(1);
+
+  var allSets=S.sets||[];
+  var recentSets=allSets.slice(0,5);
+  var draftSets=allSets.filter(function(s){return (!s.status||s.status==='draft');}).slice(0,4);
+  var totalSets=allSets.length;
+
+  // ── Stat-kaarten — semantic tokens: mint=sets, blue=visitors, peach=analytics, lavender=collaboration
+  var statsHtml=
+    '<div class="dbStats">'+
+      _dbStat('Kaartensets','<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6"/><path d="M9 13h4"/></svg>',totalSets,null,'mint')+
+      _dbStat('Bezoekers (30 dagen)','<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>','—',null,'blue')+
+      _dbStat('Paginaweergaven','<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>','—',null,'peach')+
+      _dbStat('Gedeeld','<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>','—',null,'lavender')+
+    '</div>';
+
+  // ── Recente sets (met kaartenaantal, datum, status, oog-count + menu)
+  var recentHtml=recentSets.length?recentSets.map(function(s){
+    var colors=_setThumbColors(s.title);
+    var cardCount=_countCards(spacePreviewSetBundle(s));
+    var timeAgo=_timeAgo(s.updatedAt);
+    var timeLabel=timeAgo?'Bijgewerkt '+timeAgo:'';
+    var meta=(cardCount?cardCount+(cardCount===1?' kaart':' kaarten'):'')+(cardCount&&timeLabel?' • ':'')+timeLabel;
+    return '<div class="dbSetRow">'+
+      '<button class="dbSetRowMain" onclick="reqLoad(\''+esc(s.id||'')+'\')">'+
+        '<span class="dbSetThumb" style="background:'+colors.bg+'">'+_setThumbSvg(colors.shape)+'</span>'+
+        '<span class="dbSetInfo">'+
+          (function(){var lbl=_setStatusLabel(s),cls=_setStatusCls(s);return(
+            '<span class="dbSetTitle"><span>'+esc(s.title||'Naamloos')+'</span>'+
+              (lbl?'<span class="dbSetStatus '+cls+'">'+lbl+'</span>':'')+
+            '</span>'+
+            (meta?'<span class="dbSetMeta">'+esc(meta)+'</span>':'')
+          );})()+
+        '</span>'+
+      '</button>'+
+      '<span class="dbSetRight">'+
+        '<span class="dbSetViews"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>—</span></span>'+
+        '<button class="dbSetMenuBtn" type="button" title="Opties" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/></svg></button>'+
+      '</span>'+
+    '</div>';
+  }).join(''):
+    '<div class="dbEmpty">Nog geen sets. Maak een nieuwe aan.</div>';
+
+  // ── Snelle acties (verticale lijst, mint + paars)
+  var actiesHtml=
+    _dbActie('reqLoadSpace()','home',
+      '<svg viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>',
+      'Home bewerken','Bewerk je publieke pagina')+
+    _dbActie('openNewSetWizard()','new',
+      '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></svg>',
+      'Nieuwe kaartenset','Maak een nieuwe set met vragen')+
+    _dbActie('','import',
+      '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+      'Importeren','Importeer een set vanuit bestand',true)+
+    _dbActie('goView(\'shared\')','share',
+      '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+      'Uitnodigen','Nodig iemand uit om samen te werken',false);
+
+  // ── Concepten sectie (met thumbnail + menu)
+  var conceptenHtml=draftSets.length?draftSets.map(function(s){
+    var colors=_setThumbColors(s.title);
+    var cardCount=_countCards(spacePreviewSetBundle(s));
+    var timeAgo=_timeAgo(s.updatedAt);
+    var timeLabel=timeAgo?'Bijgewerkt '+timeAgo:'';
+    var meta=(cardCount?cardCount+(cardCount===1?' kaart':' kaarten'):'')+(cardCount&&timeLabel?' • ':'')+timeLabel;
+    return '<div class="dbConceptRow">'+
+      '<button class="dbConceptRowMain" onclick="reqLoad(\''+esc(s.id||'')+'\')">'+
+        '<span class="dbConceptThumb" style="background:'+colors.bg+'">'+_setThumbSvg(colors.shape)+'</span>'+
+        '<span class="dbConceptInfo">'+
+          '<span class="dbConceptTitle">'+esc(s.title||'Naamloos')+'</span>'+
+          (meta?'<span class="dbConceptMeta">'+esc(meta)+'</span>':'')+
+        '</span>'+
+      '</button>'+
+      '<span class="dbConceptRight">'+
+        '<span class="dbSetStatus ssc-draft">Concept</span>'+
+        '<button class="dbSetMenuBtn" type="button" title="Opties" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/></svg></button>'+
+      '</span>'+
+    '</div>';
+  }).join(''):
+    '<div class="dbEmpty">Geen concepten.</div>';
+
+  g('mc').innerHTML=
+    '<div class="dbPage">'+
+      '<div class="dbTop">'+
+        '<div>'+
+          '<p class="dbPageLabel">Dashboard</p>'+
+          '<h1 class="dbH1">Welkom terug'+(firstName?', '+esc(firstName):'')+'!</h1>'+
+          '<p class="dbSub">Hier is een overzicht van je ruimte.</p>'+
+        '</div>'+
+      '</div>'+
+      statsHtml+
+      // Hoofd-grid: recente sets + snelle acties
+      '<div class="dbMainGrid">'+
+        '<div class="dbCard">'+
+          '<div class="dbCardHead">'+
+            '<span class="dbCardTitle">Recente kaartensets</span>'+
+            '<button class="dbLinkBtn" onclick="goView(\'my-sets\')">Bekijk alle</button>'+
+          '</div>'+
+          '<div class="dbSetList">'+recentHtml+'</div>'+
+        '</div>'+
+        '<div class="dbCard">'+
+          '<div class="dbCardHead">'+
+            '<span class="dbCardTitle">Snelle acties</span>'+
+            '<button class="dbActieNewBtn" onclick="openNewSetWizard()">+ Nieuwe kaartenset</button>'+
+          '</div>'+
+          '<div class="dbActieList">'+actiesHtml+'</div>'+
+        '</div>'+
+      '</div>'+
+      // Onder-grid: concepten + bezoekers + statistieken
+      '<div class="dbBottomGrid">'+
+        '<div class="dbCard">'+
+          '<div class="dbCardHead">'+
+            '<span class="dbCardTitle">Concepten</span>'+
+            '<button class="dbLinkBtn" onclick="goView(\'my-sets\')">Bekijk alle</button>'+
+          '</div>'+
+          '<div class="dbConceptList">'+conceptenHtml+'</div>'+
+        '</div>'+
+        '<div class="dbCard">'+
+          '<div class="dbCardHead">'+
+            '<span class="dbCardTitle">Laatste bezoekers</span>'+
+            '<button class="dbLinkBtn">Bekijk alle</button>'+
+          '</div>'+
+          '<div class="dbEmpty dbEmptyCenter">Bezoekersdata beschikbaar zodra statistieken actief zijn.</div>'+
+        '</div>'+
+        '<div class="dbCard">'+
+          '<div class="dbCardHead">'+
+            '<span class="dbCardTitle">Statistieken</span>'+
+            '<button class="dbLinkBtn">30 dagen ↓</button>'+
+          '</div>'+
+          '<div class="dbEmpty dbEmptyCenter">Statistieken komen binnenkort.</div>'+
+        '</div>'+
+      '</div>'+
+      // Tip-balk
+      _dbTipBarHtml('dashboard')+
+    '</div>';
+}
+var _DB_TIPS={
+  dashboard:[
+    {text:'Maak je Home-pagina persoonlijker door een achtergrond en eigen vormen toe te voegen.',btn:'Naar Home',action:'reqLoadSpace()'},
+    {text:'Geef je publieke pagina een eigen stijl — kies een lay-out, kleur en introductietekst.',btn:'Naar Home',action:'reqLoadSpace()'},
+    {text:'Deel een kaartenset via een publieke link. Zet hem op "Openbaar" via de instellingen.',btn:null,action:null},
+    {text:'Gebruik thema\'s om vragen per onderwerp te groeperen binnen één set.',btn:null,action:null},
+    {text:'Nodig medewerkers uit om samen aan een set te werken via Instellingen → Samenwerking.',btn:null,action:null}
+  ],
+  mysets:[
+    {text:'Gebruik kaartensets om vragen en thema\'s te organiseren per onderwerp.',btn:null,action:null},
+    {text:'Deel een set via een publieke link — zet hem op "Openbaar" via de set-instellingen.',btn:null,action:null},
+    {text:'Dupliceer een bestaande set als startpunt voor een nieuwe.',btn:null,action:null},
+    {text:'Voeg een set toe aan je Home-pagina zodat bezoekers hem direct zien.',btn:'Naar Home',action:'reqLoadSpace()'},
+    {text:'Sets in de prullenbak worden na 30 dagen automatisch verwijderd.',btn:null,action:null}
+  ]
+};
+var _dbTipIdxMap={};
+function _dbTipBarHtml(key,extraStyle){
+  var tips=_DB_TIPS[key]||[];
+  if(!tips.length)return '';
+  var idx=_dbTipIdxMap[key]||0;
+  var tip=tips[idx];
+  var total=tips.length;
+  var ico='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21h6"/><path d="M9 18h6"/><path d="M9 15c0-1-.4-1.9-1.2-2.6a6 6 0 1 1 8.4 0C15.4 13.1 15 14 15 15H9z"/></svg>';
+  var chevL='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 4L6 8l4 4"/></svg>';
+  var chevR='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 4l4 4-4 4"/></svg>';
+  var nav='<div class="dbTipNav">'+
+    '<button class="dbTipNavBtn" type="button" onclick="_dbTipNav(\''+key+'\',-1)"'+(idx===0?' disabled':'')+'>'+chevL+'</button>'+
+    '<span class="dbTipNavCount">'+(idx+1)+'/'+total+'</span>'+
+    '<button class="dbTipNavBtn" type="button" onclick="_dbTipNav(\''+key+'\',1)"'+(idx===total-1?' disabled':'')+'>'+chevR+'</button>'+
+  '</div>';
+  var btn=tip.btn?'<button class="dbTipBarBtn" onclick="'+tip.action+'">'+esc(tip.btn)+' →</button>':'';
+  return '<div class="dbTipBar" id="dbTipBar_'+key+'"'+(extraStyle?' style="'+extraStyle+'"':'')+'>'+
+    '<span class="dbTipBarIcon">'+ico+'</span>'+
+    '<span class="dbTipBarText" id="dbTipBarText_'+key+'"><strong>Tip:</strong> '+esc(tip.text)+'</span>'+
+    nav+
+    btn+
+  '</div>';
+}
+function _dbTipNav(key,dir){
+  var tips=_DB_TIPS[key]||[];
+  var idx=(_dbTipIdxMap[key]||0)+dir;
+  idx=Math.max(0,Math.min(tips.length-1,idx));
+  _dbTipIdxMap[key]=idx;
+  var el=document.getElementById('dbTipBar_'+key);
+  if(!el)return;
+  var style=el.getAttribute('style')||'';
+  el.outerHTML=_dbTipBarHtml(key,style||null);
+}
+function _dbStat(label,iconSvg,value,sub,color){
+  return '<div class="dbStatCard dbStatCard-'+color+'">'+
+    '<div class="dbStatIcon">'+iconSvg+'</div>'+
+    '<div class="dbStatBody">'+
+      '<div class="dbStatValue">'+esc(String(value))+'</div>'+
+      '<div class="dbStatLabel">'+esc(label)+'</div>'+
+      (sub?'<div class="dbStatSub">'+esc(sub)+'</div>':'')+
+    '</div>'+
+  '</div>';
+}
+function _dbActie(onclick,key,iconSvg,label,sub,disabled){
+  var cls='dbActieRow'+(disabled?' dbActieDisabled':'');
+  var attr=onclick&&!disabled?'onclick="'+onclick+'"':'';
+  return '<button class="'+cls+'" '+attr+' type="button">'+
+    '<span class="dbActieIconWrap dbActieIcon-'+key+'">'+iconSvg+'</span>'+
+    '<span class="dbActieInfo">'+
+      '<span class="dbActieLabel">'+esc(label)+'</span>'+
+      '<span class="dbActieSub">'+esc(sub)+'</span>'+
+    '</span>'+
+    (!disabled?'<svg class="dbActieArrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 4 4 4-4 4"/></svg>':'')+
+  '</button>';
+}
+var _setThumbPalettes=[
+  {bg:'#fde8d8',shape:'#f5b896'},
+  {bg:'#fef3d0',shape:'#f7d882'},
+  {bg:'#e0eef8',shape:'#9dc8e8'},
+  {bg:'#e4f0e8',shape:'#8dcba8'},
+  {bg:'#ede8f8',shape:'#b8a8e8'},
+  {bg:'#fde8ee',shape:'#f0a8bc'}
+];
+function _setThumbColors(title){
+  var h=0;for(var i=0;i<(title||'').length;i++)h=(h*31+title.charCodeAt(i))&0xffff;
+  return _setThumbPalettes[h%_setThumbPalettes.length];
+}
+function _setThumbSvg(color){
+  return '<svg viewBox="0 0 48 40" xmlns="http://www.w3.org/2000/svg">'+
+    '<ellipse cx="22" cy="22" rx="18" ry="14" fill="'+color+'" opacity=".7"/>'+
+    '<ellipse cx="32" cy="14" rx="10" ry="8" fill="'+color+'" opacity=".5"/>'+
+  '</svg>';
+}
+function _setStatusLabel(s){
+  if(!s||s.status==='draft') return 'Concept';
+  if(s.visibility==='public') return '';          // Openbaar = standaard, geen badge
+  if(s.visibility==='unlisted') return 'Verborgen link';
+  return 'Privé';
+}
+function _setStatusCls(s){
+  if(!s||s.status==='draft') return 'ssc-draft';
+  if(s.visibility==='public') return '';
+  if(s.visibility==='unlisted') return 'ssc-unlisted';
+  return 'ssc-private';
+}
+var _dotPalette=['#f0a8bc','#b8a8e8','#f7c96a','#7dd4a8','#9cc8e6','#f5a880'];
+function _setDotColor(title){
+  var h=0;for(var i=0;i<(title||'').length;i++)h=(h*31+title.charCodeAt(i))&0xffff;
+  return _dotPalette[h%_dotPalette.length];
+}
+function _setBadgeColor(title){
+  var colors=['#e8f4f8','#e8f0fb','#f0eaf8','#e8f8f0','#fdf0e8','#f8f4e8'];
+  var h=0;for(var i=0;i<(title||'').length;i++)h=(h*31+title.charCodeAt(i))&0xffff;
+  return colors[h%colors.length];
+}
+function _countCards(bundle){
+  if(!bundle||typeof bundle!=='object')return 0;
+  var questions=bundle.questions||{};
+  return Object.keys(questions).reduce(function(total,key){
+    return total+(Array.isArray(questions[key])?questions[key].length:0);
+  },0);
+}
+function _timeAgo(dateStr){
+  if(!dateStr)return '';
+  var d=new Date(dateStr);
+  if(isNaN(d.getTime()))return '';
+  var diffMs=Date.now()-d.getTime();
+  var diffMins=Math.floor(diffMs/60000);
+  if(diffMins<2)return 'zojuist';
+  if(diffMins<60)return diffMins+' min. geleden';
+  var diffHours=Math.floor(diffMins/60);
+  if(diffHours<24)return diffHours+(diffHours===1?' uur':' uur')+' geleden';
+  var diffDays=Math.floor(diffHours/24);
+  if(diffDays<7)return diffDays+(diffDays===1?' dag':' dagen')+' geleden';
+  var diffWeeks=Math.floor(diffDays/7);
+  if(diffWeeks<5)return diffWeeks+(diffWeeks===1?' week':' weken')+' geleden';
+  var diffMonths=Math.floor(diffDays/30);
+  if(diffMonths<12)return diffMonths+(diffMonths===1?' maand':' maanden')+' geleden';
+  var diffYears=Math.floor(diffDays/365);
+  return diffYears+(diffYears===1?' jaar':' jaar')+' geleden';
+}
+// ═══════════════════════════════════════════
+// MIJN KAARTENSETS PAGINA
+// ═══════════════════════════════════════════
+function renderMySets(){
+  hideFloatingTextBar(true);
+  var allSets=S.sets||[];
+  var q=(_mySetsSearch||'').trim().toLowerCase();
+  var filtered=allSets.filter(function(s){
+    if(q&&!(s.title||'').toLowerCase().includes(q))return false;
+    if(_mySetsFilter==='public') return s.status!=='draft'&&s.visibility==='public';
+    if(_mySetsFilter==='private') return s.status!=='draft'&&(s.visibility==='private'||!s.visibility);
+    if(_mySetsFilter==='draft') return !s.status||s.status==='draft';
+    if(_mySetsFilter==='unlisted') return s.status!=='draft'&&s.visibility==='unlisted';
+    return true;
+  });
+  // Filter tabs
+  var tabs=[
+    {k:'all',label:'Alle'},
+    {k:'public',label:'Openbaar'},
+    {k:'private',label:'Privé'},
+    {k:'draft',label:'Concept'},
+    {k:'unlisted',label:'Verborgen link'}
+  ];
+  var tabsHtml=tabs.map(function(t){
+    return '<button class="msTab'+(t.k===_mySetsFilter?' active':'')+'" type="button" onclick="setMySetsFilter(\''+t.k+'\')">'+t.label+'</button>';
+  }).join('');
+  // Rows
+  var eyeIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var cardIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6"/><path d="M9 13h4"/></svg>';
+  var rowsHtml=filtered.length?filtered.map(function(s){
+    var colors=_setThumbColors(s.title);
+    var cardCount=_countCards(spacePreviewSetBundle(s));
+    var timeAgo=_timeAgo(s.updatedAt);
+    var isDraft=!s.status||s.status==='draft';
+    var fullLabel=isDraft?'Concept':s.visibility==='public'?'Openbaar':s.visibility==='unlisted'?'Verborgen link':'Privé';
+    var fullCls=isDraft?'ssc-draft':s.visibility==='public'?'ssc-public':s.visibility==='unlisted'?'ssc-unlisted':'ssc-private';
+    return '<div class="msRow" data-sid="'+esc(s.id||'')+'">'+
+      '<button class="msRowMain" onclick="reqLoad(\''+esc(s.id||'')+'\')" type="button">'+
+        '<span class="msThumb" style="background:'+colors.bg+'">'+_setThumbSvg(colors.shape)+'</span>'+
+        '<span class="msInfo">'+
+          '<span class="msTitle">'+esc(s.title||'Naamloos')+
+            '<span class="dbSetStatus '+fullCls+'">'+fullLabel+'</span>'+
+          '</span>'+
+          '<span class="msMeta">'+(timeAgo?'Bijgewerkt '+esc(timeAgo):'—')+'</span>'+
+        '</span>'+
+      '</button>'+
+      '<span class="msRight">'+
+        '<span class="msCount">'+cardIco+(cardCount?cardCount+(cardCount===1?' kaart':' kaarten'):'—')+'</span>'+
+        '<button class="msEditBtn" onclick="reqLoad(\''+esc(s.id||'')+'\')" type="button">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+          'Bewerken'+
+        '</button>'+
+        '<button class="msMenuBtn" onclick="showSetContextMenu(event,\''+esc(s.id||'')+'\')" type="button" title="Meer opties">'+
+          '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg>'+
+        '</button>'+
+      '</span>'+
+    '</div>';
+  }).join(''):
+    '<div class="msEmpty">'+
+      (q||_mySetsFilter!=='all'?'Geen sets gevonden voor deze filter.':'Nog geen sets. Maak er een aan!')+
+    '</div>';
+
+  g('mc').innerHTML=
+    '<div class="msPage">'+
+      '<div class="msHeader">'+
+        '<div>'+
+          '<h1 class="dbH1">Mijn kaartensets</h1>'+
+          '<p class="dbSub">Bekijk en beheer al je kaartensets op één plek.</p>'+
+        '</div>'+
+        '<div class="msHeaderActions">'+
+          '<div class="msSearchWrap">'+
+            '<svg class="msSearchIco" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>'+
+            '<input class="msSearchInput" type="search" placeholder="Zoek kaartensets…" value="'+esc(_mySetsSearch)+'" oninput="debounceMySetsSearch(this.value)" spellcheck="false">'+
+          '</div>'+
+          '<button class="msNewBtn" onclick="openNewSetWizard()" type="button">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'+
+            'Nieuwe kaartenset'+
+          '</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="msToolbar">'+
+        '<div class="msFilterTabs">'+tabsHtml+'</div>'+
+        '<div class="msToolbarRight">'+
+          '<button class="msSortBtn" type="button">Naam <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m4 6 4 4 4-4"/></svg></button>'+
+          '<div class="msViewToggle">'+
+            '<button class="msViewBtn'+((_mySetsView==='list')?' active':'')+'" onclick="setMySetsView(\'list\')" type="button" title="Lijstweergave">'+
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>'+
+            '</button>'+
+            '<button class="msViewBtn'+((_mySetsView==='grid')?' active':'')+'" onclick="setMySetsView(\'grid\')" type="button" title="Rasterweergave">'+
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>'+
+            '</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="msList">'+rowsHtml+'</div>'+
+      _dbTipBarHtml('mysets', 'margin-top:20px')+
+    '</div>';
+}
+function setMySetsFilter(f){
+  _mySetsFilter=f;
+  renderMySets();
+}
+function setMySetsView(v){
+  _mySetsView=v;
+  renderMySets();
+}
+function debounceMySetsSearch(val){
+  _mySetsSearch=val;
+  if(_mySetsSearchTimer)clearTimeout(_mySetsSearchTimer);
+  _mySetsSearchTimer=setTimeout(function(){renderMySets();},200);
+}
+function showSetContextMenu(e,sid){
+  e.stopPropagation();
+  document.querySelectorAll('.msContextMenu').forEach(function(m){m.remove();});
+  var s=(S.sets||[]).find(function(x){return x.id===sid;});
+  if(!s)return;
+  var isDraft=!s.status||s.status==='draft';
+  var isPublic=!isDraft&&s.visibility==='public';
+  var isUnlisted=!isDraft&&s.visibility==='unlisted';
+  var isPrivate=!isDraft&&!isPublic&&!isUnlisted;
+  var menuItems='';
+  menuItems+='<button class="msCtxItem" onclick="reqLoad(\''+esc(sid)+'\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+    'Bewerken</button>';
+  menuItems+='<div class="msCtxDivider"></div>';
+  if(!isPublic)menuItems+='<button class="msCtxItem" onclick="updateSetStatus(\''+esc(sid)+'\',\'live\',\'public\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'+
+    'Openbaar maken</button>';
+  if(!isPrivate)menuItems+='<button class="msCtxItem" onclick="updateSetStatus(\''+esc(sid)+'\',\'live\',\'private\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'+
+    'Privé instellen</button>';
+  if(!isUnlisted)menuItems+='<button class="msCtxItem" onclick="updateSetStatus(\''+esc(sid)+'\',\'live\',\'unlisted\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>'+
+    'Verborgen link</button>';
+  if(!isDraft)menuItems+='<button class="msCtxItem" onclick="updateSetStatus(\''+esc(sid)+'\',\'draft\',\'private\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><circle cx="18" cy="6" r="4"/></svg>'+
+    'Terug naar concept</button>';
+  menuItems+='<div class="msCtxDivider"></div>';
+  menuItems+='<button class="msCtxItem msCtxDanger" onclick="doDeleteSet(\''+esc(sid)+'\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg>'+
+    'Verwijderen</button>';
+  var menu=document.createElement('div');
+  menu.className='msContextMenu';
+  menu.innerHTML=menuItems;
+  document.body.appendChild(menu);
+  var btn=e.currentTarget||e.target;
+  var rect=btn.getBoundingClientRect();
+  var mw=200;
+  var left=Math.min(rect.right-mw,window.innerWidth-mw-8);
+  menu.style.cssText='position:fixed;top:'+(rect.bottom+4)+'px;left:'+Math.max(8,left)+'px;z-index:9999';
+  setTimeout(function(){document.addEventListener('click',function rm(){menu.remove();document.removeEventListener('click',rm);},{once:true});},0);
+}
+async function updateSetStatus(sid,status,visibility){
+  var db=window._supa;
+  if(!db)return;
+  var r=await db.from('sets').update({status:status,visibility:visibility}).eq('id',sid);
+  if(r.error){toast('Fout: '+r.error.message,'red');return;}
+  var s=(S.sets||[]).find(function(x){return x.id===sid;});
+  if(s){s.status=status;s.visibility=visibility;}
+  renderMySets();
+  renderSidebar();
+  toast('Status bijgewerkt ✓','green');
+}
+// ── ⋮ Editor meer-menu ──────────────────────────────────────────
+function openEditorMoreMenu(btn){
+  document.querySelectorAll('.clMoreMenu').forEach(function(m){m.remove();});
+  var isSet=S.activeKind==='set';
+  var settingsIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+  var shareIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98"/></svg>';
+  var exportIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+  var items='';
+  items+=_moreMenuItem(shareIco,'Delen','openEditorShareModal()');
+  items+=_moreMenuItem(exportIco,'Exporteren','openEditorExportModal()');
+
+  var menu=document.createElement('div');
+  menu.className='clMoreMenu';
+  menu.innerHTML=items;
+  document.body.appendChild(menu);
+  var rect=btn.getBoundingClientRect();
+  menu.style.cssText='position:fixed;top:'+(rect.bottom+6)+'px;right:'+(window.innerWidth-rect.right)+'px;z-index:9999';
+  setTimeout(function(){
+    function dismiss(e){
+      if(!menu.contains(e.target)&&e.target!==btn){menu.remove();document.removeEventListener('click',dismiss);}
+    }
+    document.addEventListener('click',dismiss);
+    function onKey(e){if(e.key==='Escape'){menu.remove();document.removeEventListener('keydown',onKey);}}
+    document.addEventListener('keydown',onKey);
+  },0);
+}
+function _moreMenuItem(ico,label,onclick){
+  return '<button class="clMoreItem" type="button" onclick="'+onclick+';document.querySelectorAll(\'.clMoreMenu\').forEach(function(m){m.remove();})">'+
+    '<span class="clMoreItemIco">'+ico+'</span>'+esc(label)+
+  '</button>';
+}
+function openEditorSettingsFromMenu(){
+  if(S.opmPane==='inst'){toggleInlineSettingsPane();}
+  else{toggleInlineSettingsPane();}
+}
+function openEditorShareModal(){
+  var currentSet=(S.sets||[]).find(function(s){return s.id===S.activeId;})||{};
+  var slug=currentSet.slug||'';
+  var isPublic=currentSet.visibility==='public'&&currentSet.status!=='draft';
+  var pubUrl=(S._username&&slug)?window.location.origin+'/@'+S._username+'/'+slug:'';
+  var linkHtml=pubUrl
+    ? '<div class="clShareLinkWrap">'+
+        '<input class="clShareLinkInput" type="text" value="'+esc(pubUrl)+'" readonly onclick="this.select()">'+
+        '<button class="clShareLinkCopy" type="button" onclick="navigator.clipboard.writeText(\''+esc(pubUrl)+'\').then(function(){toast(\'Link gekopieerd ✓\',\'green\');})">Kopiëren</button>'+
+      '</div>'+
+      (!isPublic?'<p class="clShareNote">Deze set is nog niet openbaar. Zet hem op \'Openbaar\' via Mijn kaartensets om de link te activeren.</p>':'')
+    : '<p class="clShareNote">Geen publieke link beschikbaar.</p>';
+  showModal(
+    '<h3>Delen</h3>'+
+    '<p style="font-size:12.5px;color:var(--k3);margin-bottom:14px">Deel de publieke link van deze kaartenset.</p>'+
+    linkHtml+
+    '<div class="mAct"><button class="mCa" onclick="closeModal()">Sluiten</button></div>'
+  );
+}
+function openEditorExportModal(){
+  showModal(
+    '<h3>Exporteren</h3>'+
+    '<p style="font-size:12.5px;color:var(--k3);margin-bottom:6px">Exportopties zijn beschikbaar in een volgende update.</p>'+
+    '<p style="font-size:11.5px;color:var(--k3)">Gepland: PDF, CSV, en Anki-formaat.</p>'+
+    '<div class="mAct"><button class="mCa" onclick="closeModal()">Sluiten</button></div>'
+  );
+}
+function doDeleteSet(sid){
+  var s=(S.sets||[]).find(function(x){return x.id===sid;});
+  var name=(s&&s.title)||'deze set';
+  showModal('<h3>Naar prullenbak?</h3><p>Zet <strong>'+esc(name)+'</strong> in de prullenbak. Je kunt hem binnen 30 dagen herstellen.</p>'+
+    '<div class="mAct">'+
+    '<button class="mCa" onclick="closeModal()">Annuleren</button>'+
+    '<button class="mOk mOkDanger" onclick="closeModal();_confirmDeleteSet(\''+esc(sid)+'\')">Naar prullenbak</button>'+
+    '</div>');
+}
+function doDeleteWizardSet(sid){
+  var s=(S.sets||[]).find(function(x){return x.id===sid;});
+  var name=(s&&s.title)||'deze set';
+  showModal('<h3>Naar prullenbak?</h3><p>Zet <strong>'+esc(name)+'</strong> in de prullenbak. Je kunt hem binnen 30 dagen herstellen.</p>'+
+    '<div class="mAct">'+
+    '<button class="mCa" onclick="closeModal()">Annuleren</button>'+
+    '<button class="mOk mOkDanger" onclick="closeModal();_confirmDeleteSet(\''+esc(sid)+'\',\'wizard\')">Naar prullenbak</button>'+
+    '</div>');
+}
+async function _confirmDeleteSet(sid,source){
+  var db=window._supa;
+  if(!db)return;
+  var now=new Date().toISOString();
+  var r=await db.from('sets').update({deleted_at:now}).eq('id',sid);
+  if(r.error){toast('Fout: '+r.error.message,'red');return;}
+  S.sets=(S.sets||[]).filter(function(x){return x.id!==sid;});
+  if(source==='wizard'){
+    if(S.activeId===sid)S.activeId=null;
+    renderSidebar();
+    location.href=dashboardBaseUrl();
+    return;
+  }
+  renderMySets();
+  renderSidebar();
+  toast('Naar prullenbak verplaatst','green');
+}
+function renderSharedWithMe(){
+  hideFloatingTextBar(true);
+  g('mc').innerHTML=
+    '<div class="swmPage">'+
+      '<div class="swmHeader">'+
+        '<h1 class="dbH1">Gedeeld met mij</h1>'+
+        '<p class="dbSub">Kaartensets waar je bent uitgenodigd als medewerker.</p>'+
+      '</div>'+
+      '<div id="swmListWrap" class="swmListWrap">'+
+        '<div class="swmLoading"><span>Laden…</span></div>'+
+      '</div>'+
+    '</div>';
+  if(typeof window.loadSharedWithMe==='function'){
+    window.loadSharedWithMe().then(function(items){
+      S.sharedSets=items||[];
+      _renderSharedList();
+    }).catch(function(e){
+      var wrap=g('swmListWrap');
+      if(wrap)wrap.innerHTML='<div class="swmEmpty"><p>Laden mislukt: '+esc(e.message)+'</p></div>';
+    });
+  } else {
+    _renderSharedList();
+  }
+}
+function _renderSharedList(){
+  var wrap=g('swmListWrap');
+  if(!wrap)return;
+  var items=S.sharedSets||[];
+  if(!items.length){
+    wrap.innerHTML=
+      '<div class="swmList">'+
+        '<div class="swmEmpty">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" style="width:34px;height:34px;opacity:.25;margin-bottom:10px;display:block;margin-left:auto;margin-right:auto"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'+
+          '<p>Nog geen gedeelde sets.<br>Vraag iemand jou uit te nodigen als medewerker.</p>'+
+        '</div>'+
+      '</div>';
+    return;
+  }
+  var cardIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6"/><path d="M9 13h4"/></svg>';
+  var rowsHtml=items.map(function(item){
+    var s=item.set||{};
+    var colors=_setThumbColors(s.title||'');
+    var cardCount=_countCards(s.bundle||{});
+    var ownerLabel=item.ownerUsername?'@'+item.ownerUsername:(item.spaceName||'Onbekend');
+    var ownerInitial=(item.ownerUsername||item.spaceName||'?').charAt(0).toUpperCase();
+    var isDraft=!s.status||s.status==='draft';
+    var fullLabel=isDraft?'Concept':s.visibility==='public'?'Openbaar':s.visibility==='unlisted'?'Verborgen link':'Privé';
+    var fullCls=isDraft?'ssc-draft':s.visibility==='public'?'ssc-public':s.visibility==='unlisted'?'ssc-unlisted':'ssc-private';
+    return '<div class="swmRow">'+
+      '<button class="swmRowMain" onclick="openSharedSet(\''+esc(s.id||'')+'\')" type="button">'+
+        '<span class="swmThumb" style="background:'+colors.bg+'">'+_setThumbSvg(colors.shape)+'</span>'+
+        '<span class="swmInfo">'+
+          '<span class="swmTitle">'+esc(s.title||'Naamloos')+
+            (fullCls?'<span class="dbSetStatus '+fullCls+'">'+fullLabel+'</span>':'')+
+          '</span>'+
+          '<span class="swmMeta">'+
+            '<span class="swmOwnerChip">'+
+              '<span class="swmOwnerAv" style="background:'+colors.bg+';color:'+colors.fg+'">'+esc(ownerInitial)+'</span>'+
+              esc(ownerLabel)+
+            '</span>'+
+          '</span>'+
+        '</span>'+
+      '</button>'+
+      '<span class="swmRight">'+
+        '<span class="swmCount">'+cardIco+(cardCount?cardCount+(cardCount===1?' kaart':' kaarten'):'—')+'</span>'+
+        '<button class="swmEditBtn" onclick="openSharedSet(\''+esc(s.id||'')+'\')" type="button">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+          'Bewerken'+
+        '</button>'+
+      '</span>'+
+    '</div>';
+  }).join('');
+  wrap.innerHTML='<div class="swmList">'+rowsHtml+'</div>';
+}
+function renderTrash(){
+  hideFloatingTextBar(true);
+  g('mc').innerHTML=
+    '<div class="msPage">'+
+      '<div class="msHeader">'+
+        '<div>'+
+          '<h1 class="dbH1">Prullenbak</h1>'+
+          '<p class="dbSub">Sets worden na 30 dagen automatisch verwijderd.</p>'+
+        '</div>'+
+        '<div class="msHeaderActions" id="trashHeaderActions"></div>'+
+      '</div>'+
+      '<div class="msList" id="trashList">'+
+        '<div class="msEmpty" style="opacity:.5">Laden…</div>'+
+      '</div>'+
+    '</div>';
+  if(typeof window.loadTrashedSets==='function'){
+    window.loadTrashedSets().then(function(sets){
+      _renderTrashList(sets);
+    });
+  }
+}
+function _renderTrashList(sets){
+  var listEl=g('trashList');
+  var actEl=g('trashHeaderActions');
+  if(!listEl)return;
+  if(!sets||!sets.length){
+    listEl.innerHTML='<div class="msEmpty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" style="width:32px;height:32px;opacity:.25;display:block;margin:0 auto 10px"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg>De prullenbak is leeg.</div>';
+    if(actEl) actEl.innerHTML='';
+    return;
+  }
+  if(actEl) actEl.innerHTML='<button class="msEmptyTrashBtn" type="button" onclick="_confirmEmptyTrash()">Prullenbak leegmaken</button>';
+  var now=Date.now();
+  var html=sets.map(function(s){
+    var deletedMs=new Date(s.deleted_at).getTime();
+    var daysLeft=Math.ceil((30*24*60*60*1000-(now-deletedMs))/(24*60*60*1000));
+    daysLeft=Math.max(1,daysLeft);
+    var title=esc((s.bundle&&s.bundle.meta&&s.bundle.meta.title)||s.title||s.id);
+    return '<div class="trashItem" data-id="'+esc(s.id)+'">'+
+      '<div class="trashItemInfo">'+
+        '<div class="trashItemTitle">'+title+'</div>'+
+        '<div class="trashItemMeta">Nog '+daysLeft+' dag'+(daysLeft===1?'':'en')+'</div>'+
+      '</div>'+
+      '<div class="trashItemActions">'+
+        '<button class="trashRestoreBtn" type="button" onclick="restoreSet(\''+esc(s.id)+'\')">Herstellen</button>'+
+        '<button class="trashDeleteBtn" type="button" onclick="_confirmPurgeSet(\''+esc(s.id)+'\',\''+title+'\')">Permanent verwijderen</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+  listEl.innerHTML=html;
+}
+function _confirmEmptyTrash(){
+  showModal('<h3>Prullenbak leegmaken?</h3><p>Alle sets in de prullenbak worden permanent verwijderd. Dit kan niet ongedaan worden gemaakt.</p>'+
+    '<div class="mAct"><button class="mCa" onclick="closeModal()">Annuleren</button><button class="mDng" onclick="closeModal();emptyTrash()">Leegmaken</button></div>');
+}
+function _confirmPurgeSet(id,name){
+  showModal('<h3>Permanent verwijderen?</h3><p><strong>'+name+'</strong> wordt definitief verwijderd. Dit kan niet ongedaan worden gemaakt.</p>'+
+    '<div class="mAct"><button class="mCa" onclick="closeModal()">Annuleren</button><button class="mDng" onclick="closeModal();purgeSet(\''+id+'\',function(){goView(\'trash\');})">Verwijderen</button></div>');
+}
+
+// ═══════════════════════════════════════════
 // RENDER EDITOR
 // ═══════════════════════════════════════════
 function renderEditor(){
-  if(S.activeKind==='space'){ renderSpaceEditor(); return; }
+  var mcRoot=g('mc');
+  if(mcRoot)mcRoot.classList.remove('view-mode-mc','view-focus-mode');
+  var appRoot=g('app');
+  if(appRoot)appRoot.classList.remove('focus-presentation-active');
+  if(!isViewCardsFocusModeActive())exitFocusPresentationFullscreen();
+  if(S.activeKind==='space'){
+    if(S._view==='dashboard'){ renderDashboard(); return; }
+    if(S._view==='my-sets'){ renderMySets(); return; }
+    if(S._view==='shared'){ renderSharedWithMe(); return; }
+    if(S._view==='trash'){ renderTrash(); return; }
+    if(S._view==='wizard'){ renderDashboardWizardPage(); return; }
+    renderSpaceEditor(); return;
+  }
   hideFloatingTextBar(true);
-  var profileMenu=buildTopProfileMenuHtml();
   var saveStatus=buildTopSaveStatusHtml();
+  var currentSet=(S.sets||[]).find(function(s){return s.id===S.activeId;})||{};
   var setTitle=esc((S.d&&S.d.meta&&S.d.meta.title)||S.activeId||'');
-  var headTitle='<div class="clHeadTitle">'+
-    '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="'+setTitle+'" placeholder="Setnaam" oninput="updateStyleSetName(this.value)">'+
-    '<span class="clHeadThemeSep" id="editorThemeSep" style="display:none"></span>'+
-    '<input id="editorThemeTitle" class="clHeadThemeInput" type="text" value="" placeholder="Thema" style="display:none" oninput="updateActiveHeaderThemeName(this.value)">'+
-  '</div>';
-  var headCenter='<div class="editorViewModeBtns">'+
-    '<button class="editorViewModeBtn"'+(S.mode==='edit'?' active':'')+'" type="button" title="Bewerk modus" onclick="S.mode=\'edit\';renderEditor()">Bewerk</button>'+
-    '<button class="editorViewModeBtn"'+(S.mode==='view'?' active':'')+'" type="button" title="Weergave modus" onclick="S.mode=\'view\';renderEditor()">Weergave</button>'+
-    '<button class="editorViewModeBtn"'+(S.mode==='checklist'?' active':'')+'" type="button" title="Stappenplan modus" onclick="S.mode=\'checklist\';renderEditor()">Stappenplan</button>'+
-  '</div>';
-  var headActions='<div class="tbRWrap"><div class="tbR">'+
-    '<div class="tbRActions">'+
-      '<button class="btnIcon" id="undoBtn" type="button" onclick="undoSetChanges()"'+(canUndo()?'':' disabled')+' title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
-      '<button class="btnIcon" id="redoBtn" type="button" onclick="redoSetChanges()"'+(canRedo()?'':' disabled')+' title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
+  var statusCls=_setStatusCls(currentSet);
+  var statusLabel=_setStatusLabel(currentSet);
+  // "Openbaar" heeft geen badge → toon altijd badge voor duidelijkheid in editor
+  var editorBadgeLabel=(!currentSet.status||currentSet.status==='draft')?'Concept':(currentSet.visibility==='public'?'Openbaar':(currentSet.visibility==='unlisted'?'Verborgen link':'Privé'));
+  var editorBadgeCls=(!currentSet.status||currentSet.status==='draft')?'ssc-draft':(currentSet.visibility==='public'?'ssc-public':(currentSet.visibility==='unlisted'?'ssc-unlisted':'ssc-private'));
+  var updatedAt=(S.d&&S.d.meta&&S.d.meta.updatedAt)||currentSet.updatedAt||null;
+  // Ondertitel alleen tonen als de set medewerkers heeft — voor een solo set voegt dit niets toe
+  var hasCollaborators=(currentSet._memberCount||0)>0;
+  var lastEditedBy=(S.d&&S.d.meta&&S.d.meta.lastEditedBy)||currentSet.lastEditedBy||null;
+  var lastEdited='';
+  if(updatedAt&&hasCollaborators){
+    var lastEditedByStr=lastEditedBy?'door @'+esc(lastEditedBy)+' · ':'';
+    lastEdited='<div class="clHeadSub">Laatste bewerkt '+lastEditedByStr+esc(_timeAgo(updatedAt))+'</div>';
+  }
+  var headTitle='<div class="clHeadMeta">'+
+    '<div class="clHeadTitle">'+
+      '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="'+setTitle+'" placeholder="Setnaam" readonly title="Dubbelklik om naam te wijzigen" ondblclick="startEditorSetTitleEdit(this)" onblur="finishEditorSetTitleEdit(this)" onkeydown="handleEditorSetTitleKey(event,this)" oninput="updateStyleSetName(this.value)">'+
+      '<span class="clHeadThemeSep" id="editorThemeSep" style="display:none"></span>'+
+      '<input id="editorThemeTitle" class="clHeadThemeInput" type="text" value="" placeholder="Thema" style="display:none" oninput="updateActiveHeaderThemeName(this.value)">'+
     '</div>'+
-    '<button class="btnIconDanger" type="button" onclick="doDelete()" title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
-    saveStatus+
-    '<button class="btn tbRSaveBtn" id="saveBtn" onclick="saveSet()"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>Opslaan</span></button>'+
-    profileMenu+
-  '</div></div>';
-  renderEditorShell(headTitle,headActions,headCenter);
+    lastEdited+
+  '</div>';
+  var slug=(currentSet.slug||'');
+  var previewUrl=(S._username&&slug)?'/@'+S._username+'/'+slug:'';
+  var em=S.editorMode||'edit';
+  var isViewFocusMode=em==='view'&&getViewCardsBrowserMode()==='focus';
+  if(isViewFocusMode)lastEdited='';
+  var modeBtns=
+    '<div class="edModeSwitcher">'+
+      '<button class="edModeBtn'+(em==='edit'?' active':'')+'" type="button" onclick="setEditorMode(\'edit\')" title="Bewerken" aria-label="Bewerken">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+      '</button>'+
+      '<button class="edModeBtn'+(em==='view'?' active':'')+'" type="button" onclick="setEditorMode(\'view\')" title="Bekijken" aria-label="Bekijken">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'+
+      '</button>'+
+      '<button class="edModeBtn" type="button" onclick="setEditorMode(\'wizard\')" title="Wizard" aria-label="Wizard">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"/></svg>'+
+      '</button>'+
+    '</div>';
+  var headActions;
+  if(isViewFocusMode){
+    var focusNightOn=previewNightMode()||adminNightMode();
+    var focusNightLabel=focusNightOn?'Dagmodus tonen':'Nachtmodus tonen';
+    var focusNightIcon=focusNightPresentationIconHtml(focusNightOn);
+    var focusBackMode=((S.d&&S.d.meta&&S.d.meta.backMode)||'mirror');
+    var focusCanFlip=focusBackMode!=='blank';
+    var focusFlipIcon='<span class="flipGlyph" aria-hidden="true">↻</span>';
+    var focusCloseIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+    headActions=
+      '<div class="tbRWrap tbRWrap-editor tbRWrap-focus">'+
+        '<div class="focusHeadHotspot" aria-hidden="true"></div>'+
+        '<div class="focusHeadPanel"><div class="tbR tbR-focus">'+
+          '<div class="focusHeadBar">'+
+            '<div class="focusHeadBarSide focusHeadBarSide-left">'+buildCanvasZoomControlHtml('focusHeadZoom')+'</div>'+
+            '<div class="focusHeadBarSide focusHeadBarSide-right"><div class="focusHeadActions">'+
+              (focusCanFlip?('<button class="btnIcon focusHeadBtn stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" data-focus-flip-toggle="1" type="button" onclick="toggleCanvasFlip()" title="Kaart omdraaien" aria-label="Kaart omdraaien">'+focusFlipIcon+'</button>'):'')+
+              '<button class="btnIcon focusHeadBtn'+(focusNightOn?' is-active':'')+'" data-focus-night-toggle="1" type="button" onclick="togglePreviewNight()" title="'+focusNightLabel+'" aria-label="'+focusNightLabel+'">'+focusNightIcon+'</button>'+
+              '<button class="btnIcon focusHeadBtn" type="button" onclick="exitViewCardsFocusMode()" title="Focusmodus sluiten" aria-label="Focusmodus sluiten">'+focusCloseIcon+'</button>'+
+            '</div></div>'+
+          '</div>'+
+        '</div></div>'+
+      '</div>';
+  }else{
+    headActions=
+      '<div class="tbRWrap tbRWrap-editor"><div class="tbR">'+
+        modeBtns+
+        '<div class="tbRActions">'+
+          '<button class="btnIcon" id="undoBtn" type="button" onclick="undoSetChanges()"'+(canUndo()?'':' disabled')+' title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
+          '<button class="btnIcon" id="redoBtn" type="button" onclick="redoSetChanges()"'+(canRedo()?'':' disabled')+' title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
+          '<button class="btnIconDanger" type="button" onclick="doDelete()" title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
+        '</div>'+
+        saveStatus+
+        '<button class="btn tbRSaveBtn" id="saveBtn" onclick="saveSet()">'+buildTopSaveBtnInnerHtml('Opslaan')+'</button>'+
+        '<button class="btnIcon clMoreBtn" id="clMoreBtn" type="button" title="Meer opties" aria-label="Meer opties" onclick="openEditorMoreMenu(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg></button>'+
+      '</div></div>';
+  }
+  if(em==='view'){ renderEditorViewMode(headTitle,headActions); return; }
+  if(em==='wizard'){ openCurrentSetWizard(); return; }
+  renderEditorShell(headTitle,headActions);
+}
+function setEditorMode(mode){
+  var mc=g('mc');
+  if(mc)mc.classList.remove('view-mode-mc');
+  if(mode==='wizard'){
+    openCurrentSetWizard();
+    return;
+  }
+  S.editorMode=mode;
+  renderEditor();
+}
+function renderEditorViewMode(headTitle,headActions){
+  renderEditorShell(headTitle,headActions);
+  var pw=g('pw');
+  if(pw){
+    pw.classList.add('view-mode');
+    pw.classList.remove('is-preparing');
+  }
+  var mc=g('mc');
+  var focusMode=isViewCardsFocusModeActive();
+  var app=g('app');
+  if(app)app.classList.toggle('focus-presentation-active',focusMode);
+  if(mc){
+    mc.classList.add('view-mode-mc');
+    mc.classList.toggle('view-focus-mode',focusMode);
+    var head=mc.querySelector('.clHead');
+    if(head)head.classList.toggle('is-focus-presentation',focusMode);
+  }
+}
+function setViewPreviewQuestion(key,qi){
+  QUESTION_SELECTION[key]=Math.max(0,parseInt(qi,10)||0);
+  setStylePreviewKey(key);
+}
+function normalizeViewCardsBrowserMode(mode){
+  mode=String(mode||'grid').toLowerCase();
+  if(mode==='list')return 'list';
+  if(mode==='focus')return 'focus';
+  return 'grid';
+}
+function getViewCardsOverviewMode(){
+  var mode=normalizeViewCardsBrowserMode(S.viewCardsBrowserBaseMode||'grid');
+  return mode==='focus'?'grid':mode;
+}
+function getViewCardsBrowserMode(){
+  var mode=S.viewCardsBrowserMode;
+  if(!mode)mode='grid';
+  S.viewCardsBrowserMode=normalizeViewCardsBrowserMode(mode);
+  if(!S.viewCardsBrowserBaseMode)S.viewCardsBrowserBaseMode='grid';
+  return S.viewCardsBrowserMode;
+}
+function isViewCardsFocusModeActive(){
+  return S.editorMode==='view'&&getViewCardsBrowserMode()==='focus';
+}
+function focusPresentationRootEl(){
+  return g('app')||document.documentElement||document.body;
+}
+function focusPresentationFullscreenElement(){
+  return document.fullscreenElement||document.webkitFullscreenElement||document.msFullscreenElement||document.mozFullScreenElement||null;
+}
+function isFocusPresentationFullscreenActive(){
+  var root=focusPresentationRootEl();
+  var active=focusPresentationFullscreenElement();
+  if(!active)return false;
+  return active===root||active===document.documentElement||(!!root&&typeof root.contains==='function'&&root.contains(active));
+}
+function enterFocusPresentationFullscreen(){
+  var root=focusPresentationRootEl();
+  if(!root||isFocusPresentationFullscreenActive())return;
+  var req=root.requestFullscreen||root.webkitRequestFullscreen||root.msRequestFullscreen||root.mozRequestFullScreen;
+  if(typeof req!=='function')return;
+  try{
+    var res=req.call(root);
+    if(res&&typeof res.catch==='function')res.catch(function(){});
+  }catch(_e){}
+}
+function exitFocusPresentationFullscreen(){
+  var active=focusPresentationFullscreenElement();
+  if(!active)return;
+  var exit=document.exitFullscreen||document.webkitExitFullscreen||document.msExitFullscreen||document.mozCancelFullScreen;
+  if(typeof exit!=='function')return;
+  try{
+    var res=exit.call(document);
+    if(res&&typeof res.catch==='function')res.catch(function(){});
+  }catch(_e){}
+}
+function setViewCardsBrowserMode(mode){
+  mode=normalizeViewCardsBrowserMode(mode);
+  var current=getViewCardsBrowserMode();
+  if(mode==='focus'){
+    if(current!=='focus')S.viewCardsBrowserBaseMode=current;
+    var currentPreviewWrap=document.querySelector('#pw.view-mode .stijlCanvasWindow.viewer-only-preview #bgWrap, #pw .stijlCanvasWindow:not(.site-preview-window) #bgWrap');
+    if(currentPreviewWrap){
+      capturePreviewBackgroundReferenceMetrics(currentPreviewWrap);
+      capturePreviewBackgroundSnapshot(currentPreviewWrap);
+    }
+  }else{
+    S.viewCardsBrowserBaseMode=mode;
+  }
+  S.viewCardsBrowserMode=mode;
+  if(S.editorMode==='view'&&(current==='focus'||mode==='focus')){
+    renderEditor();
+    if(mode==='focus')enterFocusPresentationFullscreen();
+    else exitFocusPresentationFullscreen();
+    return;
+  }
+  if(S.editorMode==='view'){
+    refreshViewCardsBrowserSidebar();
+    return;
+  }
+  buildStijlPreserveBg(g('pw'));
+}
+function exitViewCardsFocusMode(){
+  setViewCardsBrowserMode(getViewCardsOverviewMode());
+}
+function normalizeThemeLabelForCompare(value){
+  return String(value||'')
+    .toLowerCase()
+    .replace(/\btheme\b/g,'thema')
+    .replace(/[^a-z0-9]+/g,'');
+}
+function buildViewThemeDisplayLabel(index,rawLabel,joiner,baseLabel){
+  var base=(baseLabel||'Thema')+' '+index;
+  var clean=String(rawLabel||'').trim();
+  if(!clean)return base;
+  var normBase=normalizeThemeLabelForCompare(base);
+  var normOrdinal=normalizeThemeLabelForCompare(themeOrdinalLabel(index));
+  var normClean=normalizeThemeLabelForCompare(clean);
+  if(!normClean)return base;
+  if(normClean===normBase||normClean===normOrdinal)return base;
+  var parts=clean.split(/\s+[·•|\/–—-]\s+/).map(function(part){
+    return normalizeThemeLabelForCompare(part);
+  }).filter(Boolean);
+  if(parts.length&&parts.every(function(part){return part===parts[0];})&&(parts[0]===normBase||parts[0]===normOrdinal))return base;
+  return base+(joiner||' · ')+clean;
+}
+function buildCanvasZoomControlHtml(extraClass){
+  return '<div class="cvZoomControl'+(extraClass?' '+extraClass:'')+'">'+
+    '<button class="cvZoomBtn" type="button" onclick="stepCanvasZoom(-25)" title="Uitzoomen">−</button>'+
+    '<button class="cvZoomPct" type="button" onclick="resetCanvasZoom()" title="Telefoon-formaat (100%)">'+CANVAS_ZOOM_PCT+'%</button>'+
+    '<button class="cvZoomBtn" type="button" onclick="stepCanvasZoom(25)" title="Inzoomen">+</button>'+
+  '</div>';
+}
+function focusNightPresentationIconHtml(isNight){
+  return isNight
+    ?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 12.5A5.5 5.5 0 1 1 11.5 7 4.5 4.5 0 0 0 17 12.5Z"/></svg>'
+    :'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.4"/><path d="M12 2.5v2.2M12 19.3v2.2M21.5 12h-2.2M4.7 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></svg>';
+}
+function refreshFocusPresentationHeadActions(){
+  var btn=document.querySelector('.focusHeadBtn[data-focus-night-toggle="1"]');
+  if(!btn)return;
+  var isNight=previewNightMode()||adminNightMode();
+  var label=isNight?'Dagmodus tonen':'Nachtmodus tonen';
+  btn.classList.toggle('is-active',isNight);
+  btn.setAttribute('title',label);
+  btn.setAttribute('aria-label',label);
+  btn.innerHTML=focusNightPresentationIconHtml(isNight);
+}
+function viewCardSequence(){
+  var previewState=stylePreviewState((S.d&&S.d.meta)||{});
+  var items=[];
+  var coverOpt=previewState.options.find(function(opt){return opt.key==='cover';});
+  var themeOpts=previewState.options.filter(function(opt){return opt.key!=='cover';});
+  if(coverOpt)items.push({kind:'cover',key:'cover',qi:-1});
+  themeOpts.forEach(function(opt){
+    var qs=(S.d&&S.d.questions&&S.d.questions[opt.key])||[];
+    qs.forEach(function(_q,qi){
+      items.push({kind:'question',key:opt.key,qi:qi});
+    });
+  });
+  return items;
+}
+function currentViewCardSequenceIndex(){
+  var selectedKey=STYLE_PREVIEW_KEY||'cover';
+  var selectedQi=selectedKey==='cover'?-1:selectedQuestionIndex(selectedKey);
+  var items=viewCardSequence();
+  if(!items.length)return -1;
+  for(var i=0;i<items.length;i++){
+    if(items[i].key===selectedKey&&items[i].qi===selectedQi)return i;
+  }
+  for(var j=0;j<items.length;j++){
+    if(items[j].key===selectedKey)return j;
+  }
+  return 0;
+}
+function applyViewCardSequenceItem(item){
+  if(!item)return;
+  if(item.kind==='cover'||item.key==='cover'){setStylePreviewKey('cover');return;}
+  setViewPreviewQuestion(item.key,item.qi);
+}
+function viewPreviewNavBack(){
+  var items=viewCardSequence();
+  if(!items.length)return;
+  var idx=currentViewCardSequenceIndex();
+  if(idx<0)idx=0;
+  applyViewCardSequenceItem(items[Math.max(0,idx-1)]);
+}
+function viewPreviewNavForward(){
+  var items=viewCardSequence();
+  if(!items.length)return;
+  var idx=currentViewCardSequenceIndex();
+  if(idx<0)idx=0;
+  applyViewCardSequenceItem(items[Math.min(items.length-1,idx+1)]);
+}
+function viewCardListText(raw,fallback){
+  var txt=String(raw||'').replace(/\s+/g,' ').trim();
+  return txt||fallback||'Kaart';
+}
+function buildViewCardsModeBarHtml(activeMode){
+  activeMode=normalizeViewCardsBrowserMode(activeMode||'grid');
+  var buttons=[
+    {
+      id:'grid',
+      label:'Grid',
+      icon:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="4.2" height="4.2" rx="1.1"></rect><rect x="9.8" y="2" width="4.2" height="4.2" rx="1.1"></rect><rect x="2" y="9.8" width="4.2" height="4.2" rx="1.1"></rect><rect x="9.8" y="9.8" width="4.2" height="4.2" rx="1.1"></rect></svg>'
+    },
+    {
+      id:'list',
+      label:'Lijst',
+      icon:'<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="3.3" r="1"></circle><circle cx="3" cy="8" r="1"></circle><circle cx="3" cy="12.7" r="1"></circle><line x1="6" y1="3.3" x2="13.5" y2="3.3"></line><line x1="6" y1="8" x2="13.5" y2="8"></line><line x1="6" y1="12.7" x2="13.5" y2="12.7"></line></svg>'
+    },
+    {
+      id:'focus',
+      label:'Focus',
+      icon:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5H2.5V5"></path><path d="M11 2.5h2.5V5"></path><path d="M5 13.5H2.5V11"></path><path d="M11 13.5h2.5V11"></path><rect x="5.2" y="5.2" width="5.6" height="5.6" rx="1.2"></rect></svg>'
+    }
+  ];
+  return '<div class="evpModeBar" role="tablist" aria-label="Kaartviewer weergave">'+
+    buttons.map(function(btn){
+      return '<button class="evpModeBtn'+(activeMode===btn.id?' sel':'')+'" type="button" role="tab" aria-selected="'+(activeMode===btn.id?'true':'false')+'" title="'+esc(btn.label)+'" aria-label="'+esc(btn.label)+'" onclick="setViewCardsBrowserMode(\''+btn.id+'\')">'+btn.icon+'</button>';
+    }).join('')+
+  '</div>';
+}
+function buildViewListRowHtml(opts){
+  opts=opts||{};
+  return '<button class="evpListRow'+(opts.active?' sel':'')+'" type="button" onclick="'+(opts.onclick||'')+'" title="'+esc(opts.title||opts.label||'Kaart')+'">'+
+    '<span class="evpListThumbWrap">'+
+      (opts.thumb?'<img class="evpListThumb" src="'+opts.thumb+'" alt="'+esc(opts.alt||opts.label||'Kaart')+'" aria-hidden="true">':'<span class="evpListThumbPlaceholder"></span>')+
+    '</span>'+
+    '<span class="evpListBody">'+
+      '<span class="evpListTitle">'+esc(opts.label||'Kaart')+'</span>'+
+      (opts.meta?'<span class="evpListMeta">'+esc(opts.meta)+'</span>':'')+
+    '</span>'+
+  '</button>';
+}
+function buildSetThemeQuestionCards(themeKey,selectedKey,largeMode){
+  var qs=(S.d&&S.d.questions&&S.d.questions[themeKey])||[];
+  if(!qs.length){
+    return '<div class="setThemeQEmpty'+(largeMode?' is-large':'')+'">Nog geen vraagkaarten</div>';
+  }
+  var selectedIdx=(selectedKey===themeKey)?selectedQuestionIndex(themeKey):0;
+  return qs.map(function(q,qi){
+    var front=q.voorkant||q.q||'';
+    var back=q.achterkant||q.back||'';
+    return '<button class="stijlSlideCard setThemeQCard'+(largeMode?' is-large':'')+((selectedKey===themeKey&&selectedIdx===qi)?' sel':'')+'" type="button" onclick="setViewPreviewQuestion(\''+esc(themeKey)+'\','+qi+')">'+
+      '<div class="stijlSlideThumb setThemeQThumb">'+
+        '<div class="setThemeQFront">'+esc(front||'—')+'</div>'+
+        (back?'<div class="setThemeQBack">'+esc(back)+'</div>':'')+
+      '</div>'+
+    '</button>';
+  }).join('');
+}
+function buildSetThemePickerSections(selectedKey,opts){
+  opts=opts||{};
+  var largeMode=!!opts.largeMode;
+  var previewState=stylePreviewState((S.d&&S.d.meta)||{});
+  var themeOpts=previewState.options.filter(function(o){return o.key!=='cover';});
+  var coverOpt=previewState.options.find(function(o){return o.key==='cover';});
+  var sectionCls=largeMode?' evpThemeSection':' setThemeSection';
+  var railCls=largeMode?' homeHeroPickerRail setThemePickerRail evpThemeRail':'homeHeroPickerRail setThemePickerRail';
+  var coverSection=coverOpt
+    ? '<div class="homeHeroPickerSection'+(largeMode?' evpCoverSection':'')+'">'+
+        '<div class="homeHeroPickerLabel">Cover</div>'+
+        '<div class="'+railCls+'">'+styleSlideCardHtml(coverOpt,selectedKey)+'</div>'+
+      '</div>'
+    : '';
+  var themeSections=themeOpts.length
+    ? themeOpts.map(function(opt){
+        var label=opt.label||opt.key;
+        var questionCount=((S.d&&S.d.questions&&S.d.questions[opt.key])||[]).length;
+        var cardCount=questionCount+1;
+        return '<div class="homeHeroPickerSection'+sectionCls+'">'+
+          '<div class="homeHeroPickerLabel setThemeSectionLabel"><span>'+esc(label)+'</span><span class="evpThemeCount">'+cardCount+' kaart'+(cardCount===1?'':'en')+'</span></div>'+
+          '<div class="'+railCls+'">'+
+            styleSlideCardHtml(opt,selectedKey)+
+            buildSetThemeQuestionCards(opt.key,selectedKey,largeMode)+
+          '</div>'+
+        '</div>';
+      }).join('')
+    : '<div class="homeSetSliderEmpty">Nog geen thema\'s.</div>';
+  return coverSection+themeSections;
+}
+function buildViewCardsBrowserHtml(){
+  var selectedKey=STYLE_PREVIEW_KEY||'cover';
+  var mode=getViewCardsBrowserMode();
+  var bodyMode=(mode==='focus'?getViewCardsOverviewMode():mode);
+  var previewState=stylePreviewState((S.d&&S.d.meta)||{});
+  var coverOpt=previewState.options.find(function(o){return o.key==='cover';});
+  var themeOpts=previewState.options.filter(function(o){return o.key!=='cover';});
+  var totalThemes=themeOpts.length;
+  var totalCards=themeOpts.reduce(function(sum,opt){
+    return sum+(((S.d&&S.d.questions&&S.d.questions[opt.key])||[]).length);
+  },0);
+  var metaStr=totalThemes+' thema'+(totalThemes===1?'':'\'s')+' / '+totalCards+' kaart'+(totalCards===1?'':'en');
+  var html='<div class="evpBrowser evpBrowser--'+bodyMode+'">'+
+    '<div class="evpBrowserHead">'+
+      '<div class="evpBrowserHeadLeft">'+
+        '<span class="evpBrowserTitle">Kaartviewer</span>'+
+        '<span class="evpBrowserMeta">'+esc(metaStr)+'</span>'+
+      '</div>'+buildViewCardsModeBarHtml(mode)+
+    '</div>'+
+    '<div class="evpBrowserBody">';
+  if(coverOpt){
+    var coverCached=((cachedCardAssetForFile(S.activeId,coverOpt.file)||{}).asset)||null;
+    var coverThumb=(coverCached&&coverCached.dataUrl)||styleSlideThumbDataUrl(coverOpt);
+    html+='<div class="evpSection">'+
+      '<div class="evpSectionHead">'+
+        '<span class="evpSectionTitle evpSectionTitleEm">COVER</span>'+
+        '<span class="evpSectionCount">1 kaart</span>'+
+      '</div>'+(bodyMode==='list'
+        ?('<div class="evpList">'+
+            buildViewListRowHtml({
+              active:selectedKey==='cover',
+              onclick:'setStylePreviewKey(\'cover\')',
+              label:'Cover',
+              meta:'Openingskaart',
+              thumb:coverThumb,
+              alt:'Cover'
+            })+
+          '</div>')
+        :('<div class="evpGrid evpGrid--cover">'+
+            '<button class="evpTile'+(selectedKey==='cover'?' sel':'')+'" type="button" onclick="setStylePreviewKey(\'cover\')">'+
+              (coverThumb?'<img class="evpTileImg" src="'+coverThumb+'" alt="Cover">':'')+
+            '</button>'+
+          '</div>'))+
+    '</div>';
+  }
+  var _themeNumber=0;
+  themeOpts.forEach(function(opt){
+    var qs=(S.d&&S.d.questions&&S.d.questions[opt.key])||[];
+    var count=qs.length;
+    var selIdx=selectedKey===opt.key?selectedQuestionIndex(opt.key):-1;
+    _themeNumber++;
+    var rawLabel=String(opt.label||opt.key||'');
+    var displayLabel=buildViewThemeDisplayLabel(_themeNumber,rawLabel,' – ','THEMA');
+    var thCached=((cachedCardAssetForFile(S.activeId,opt.file)||{}).asset)||null;
+    var thumbDataUrl=(thCached&&thCached.dataUrl)||styleSlideThumbDataUrl(opt);
+    html+='<div class="evpSection">'+
+      '<div class="evpSectionHead">'+
+        '<span class="evpSectionTitle evpSectionTitleEm">'+esc(displayLabel)+'</span>'+
+        '<span class="evpSectionCount">'+count+' kaart'+(count===1?'':'en')+'</span>'+
+      '</div>'+(bodyMode==='list'?'<div class="evpList">':'<div class="evpGrid">');
+    if(!count){
+      html+='<div class="evpTileEmpty">Nog geen kaarten</div>';
+    }else{
+      qs.forEach(function(q,qi){
+        var isActive=selectedKey===opt.key&&selIdx===qi;
+        if(bodyMode==='list'){
+          var themeMetaLabel=buildViewThemeDisplayLabel(_themeNumber,rawLabel,'','Thema');
+          html+=buildViewListRowHtml({
+            active:isActive,
+            onclick:'setViewPreviewQuestion(\''+esc(opt.key)+'\','+qi+')',
+            label:viewCardListText(q.voorkant||q.q,'Kaart '+(qi+1)),
+            meta:themeMetaLabel,
+            thumb:thumbDataUrl,
+            alt:'Kaart '+(qi+1)
+          });
+        }else{
+          html+='<button class="evpTile'+(isActive?' sel':'')+'" type="button" onclick="setViewPreviewQuestion(\''+esc(opt.key)+'\','+qi+')">'+
+            (thumbDataUrl?'<img class="evpTileImg" src="'+thumbDataUrl+'" alt="Kaart '+(qi+1)+'" aria-hidden="true">':'')+
+          '</button>';
+        }
+      });
+    }
+    html+='</div></div>';
+  });
+  if(!coverOpt&&!themeOpts.length){
+    html+='<div class="evpTileEmpty">Nog geen kaarten.</div>';
+  }
+  html+='</div></div>';
+  return html;
+}
+function refreshViewCardsBrowserSidebar(){
+  var sidebar=document.querySelector('#pw.view-mode .evpViewerSidebar');
+  if(!sidebar){
+    buildStijlPreserveBg(g('pw'));
+    return;
+  }
+  var body=sidebar.querySelector('.evpBrowserBody');
+  var prevScrollTop=body?body.scrollTop:0;
+  sidebar.innerHTML=buildViewCardsBrowserHtml();
+  var nextBody=sidebar.querySelector('.evpBrowserBody');
+  if(nextBody)nextBody.scrollTop=prevScrollTop;
+}
+function buildViewFocusRailHtml(){
+  var selectedKey=STYLE_PREVIEW_KEY||'cover';
+  var previewState=stylePreviewState((S.d&&S.d.meta)||{});
+  var coverOpt=previewState.options.find(function(o){return o.key==='cover';});
+  var themeOpts=previewState.options.filter(function(o){return o.key!=='cover';});
+  var groups=[];
+  if(coverOpt){
+    var coverCached=((cachedCardAssetForFile(S.activeId,coverOpt.file)||{}).asset)||null;
+    var coverThumb=(coverCached&&coverCached.dataUrl)||styleSlideThumbDataUrl(coverOpt);
+    groups.push(
+      '<div class="viewFocusRailGroup">'+
+        '<div class="viewFocusRailLabel">Cover</div>'+
+        '<div class="viewFocusRailItems">'+
+          '<button class="viewFocusRailTile'+(selectedKey==='cover'?' sel':'')+'" type="button" onclick="setStylePreviewKey(\'cover\')" title="Cover">'+
+            (coverThumb?'<img class="viewFocusRailTileImg" src="'+coverThumb+'" alt="Cover" aria-hidden="true">':'<span class="viewFocusRailTilePlaceholder"></span>')+
+          '</button>'+
+        '</div>'+
+      '</div>'
+    );
+  }
+  var themeNumber=0;
+  themeOpts.forEach(function(opt){
+    var qs=(S.d&&S.d.questions&&S.d.questions[opt.key])||[];
+    if(!qs.length)return;
+    themeNumber++;
+    var rawLabel=String(opt.label||opt.key||'').trim();
+    var label=buildViewThemeDisplayLabel(themeNumber,rawLabel,' · ','Thema');
+    var thCached=((cachedCardAssetForFile(S.activeId,opt.file)||{}).asset)||null;
+    var thumbDataUrl=(thCached&&thCached.dataUrl)||styleSlideThumbDataUrl(opt);
+    var selIdx=selectedKey===opt.key?selectedQuestionIndex(opt.key):-1;
+    var items=qs.map(function(_q,qi){
+      var active=selectedKey===opt.key&&selIdx===qi;
+      return '<button class="viewFocusRailTile'+(active?' sel':'')+'" type="button" onclick="setViewPreviewQuestion(\''+esc(opt.key)+'\','+qi+')" title="'+esc(rawLabel||('Kaart '+(qi+1)))+'">'+
+        (thumbDataUrl?'<img class="viewFocusRailTileImg" src="'+thumbDataUrl+'" alt="Kaart '+(qi+1)+'" aria-hidden="true">':'<span class="viewFocusRailTilePlaceholder"></span>')+
+      '</button>';
+    }).join('');
+    groups.push(
+      '<div class="viewFocusRailGroup">'+
+        '<div class="viewFocusRailLabel">'+esc(label)+'</div>'+
+        '<div class="viewFocusRailItems">'+items+'</div>'+
+      '</div>'
+    );
+  });
+  if(!groups.length)return '';
+  return '<div class="viewFocusRailWrap" aria-label="Kaartnavigatie focusmodus">'+
+    '<div class="viewFocusRailHotspot" aria-hidden="true"></div>'+
+    '<div class="viewFocusRailPanel">'+
+      '<div class="viewFocusRailScroller">'+groups.join('')+'</div>'+
+    '</div>'+
+  '</div>';
+}
+function toggleViewNav(){
+  S._viewModeNav=!S._viewModeNav;
+  renderEditor();
+}
+function _buildViewPanelHtml(){
+  var m=S.d&&S.d.meta||{};
+  var themes=(m.themes&&m.themes.length)?m.themes:[{key:'algemeen',label:''}];
+  var html='';
+  themes.forEach(function(theme,idx){
+    var key=theme.key||'algemeen';
+    var qs=(S.d&&S.d.questions&&S.d.questions[key])||[];
+    var label=themeLabelForIndex(idx,theme.label)||('Thema '+(idx+1));
+    // Theme header
+    html+='<div class="evpTheme">'+
+      '<div class="evpThemeHead">'+
+        '<span class="evpThemeName">'+esc(label)+'</span>'+
+        '<span class="evpThemeCount">'+qs.length+(qs.length===1?' kaart':' kaarten')+'</span>'+
+      '</div>';
+    // Cover card for this theme
+    html+='<button class="evpCard evpCoverCard" type="button" onclick="previewState&&switchPreviewCard(\''+esc(key)+'\');cardPreviewNavHome()" title="Cover">'+
+      '<span class="evpCardLabel">Cover</span>'+
+    '</button>';
+    // Question cards
+    if(qs.length){
+      qs.forEach(function(q,qi){
+        var front=(q.voorkant||q.q||'').trim();
+        var back=(q.achterkant||q.back||'').trim();
+        html+='<button class="evpCard" type="button" onclick="selectQuestion(\''+esc(key)+'\','+qi+')" title="'+esc(front||'Kaart '+(qi+1))+'">'+
+          '<span class="evpCardQ">'+esc(front||'—')+'</span>'+
+          (back?'<span class="evpCardA">'+esc(back)+'</span>':'')+
+        '</button>';
+      });
+    } else {
+      html+='<div class="evpEmpty">Nog geen kaarten</div>';
+    }
+    html+='</div>';
+  });
+  return html;
+}
+function renderEditorWizardMode(){
+  openCurrentSetWizard();
+}
+function renderChromeShell(headTitle,headActions,headCenter,opts){
+  var keepPreparing=!!(opts&&opts.keepPreparing);
+  g('mc').innerHTML='<div class="clHead">'+headTitle+(headCenter?'<div class="clHeadCenter">'+headCenter+'</div>':'')+headActions+'</div><div class="clBody is-preparing" id="pw"></div>';
+  requestAnimationFrame(function(){
+    applyEditorScrollReset();
+    requestAnimationFrame(function(){
+      var pw=g('pw');
+      if(pw&&!keepPreparing)pw.classList.remove('is-preparing');
+      if(!keepPreparing)setAppPreparing(false);
+    });
+  });
+}
+function markDashboardWizardReady(){
+  var pw=g('pw');
+  var shell=g('wizardWorkspaceShell');
+  var frame=g('wizardWorkspaceFrame');
+  if(pw)pw.classList.remove('is-preparing');
+  if(shell){
+    shell.classList.remove('is-loading');
+    shell.classList.add('is-ready');
+  }
+  if(frame)frame.classList.add('is-ready');
+  setAppPreparing(false);
+}
+function dashboardWizardFrameHasRenderableContent(){
+  var frame=g('wizardWorkspaceFrame');
+  if(!frame)return false;
+  try{
+    var doc=frame.contentDocument;
+    var appRoot=doc&&doc.getElementById('wizardApp');
+    if(!appRoot)return false;
+    if(appRoot.children&&appRoot.children.length)return true;
+    return String(appRoot.innerHTML||'').trim().length>0;
+  }catch(_err){
+    return false;
+  }
+}
+function queueDashboardWizardReadyCheck(attempt){
+  if(S._view!=='wizard')return;
+  if(dashboardWizardFrameHasRenderableContent()){
+    markDashboardWizardReady();
+    return;
+  }
+  if((attempt||0)>=24){
+    markDashboardWizardReady();
+    return;
+  }
+  setTimeout(function(){
+    queueDashboardWizardReadyCheck((attempt||0)+1);
+  },80);
+}
+function markDashboardWizardIframeLoaded(){
+  if(S._view!=='wizard')return;
+  queueDashboardWizardReadyCheck(0);
+}
+function postWizardFrameAction(action){
+  var frame=g('wizardWorkspaceFrame');
+  if(!frame||!frame.contentWindow)return;
+  try{
+    frame.contentWindow.postMessage({uitgesproken:1,type:'wizardAction',action:String(action||'')},window.location.origin);
+  }catch(_err){}
+}
+function wizardUndoAction(){
+  postWizardFrameAction('undo');
+}
+function wizardRedoAction(){
+  postWizardFrameAction('redo');
+}
+function wizardDeleteAction(){
+  var targetId=S._wizardSetId||S.activeId||null;
+  var currentSet=(S.sets||[]).find(function(set){return set&&set.id===targetId;})||null;
+  if(!currentSet||!currentSet.id)return;
+  doDeleteWizardSet(currentSet.id);
+}
+function syncDashboardWizardHeader(payload){
+  var data=payload&&typeof payload==='object'?payload:{};
+  var title=String(data.title||'').trim();
+  var stepLabel=String(data.stepLabel||'').trim();
+  var titleEl=g('editorSetTitle');
+  var stepEl=g('editorThemeTitle');
+  var sepEl=g('editorThemeSep');
+  var undoBtn=g('wizardUndoBtn');
+  var redoBtn=g('wizardRedoBtn');
+  var deleteBtn=g('wizardDeleteBtn');
+  if(data.setId)S._wizardSetId=String(data.setId);
+  if(titleEl&&title)titleEl.value=title;
+  if(stepEl)stepEl.value=stepLabel||'Wizard';
+  if(sepEl)sepEl.style.display=stepLabel?'inline-block':'none';
+  if(undoBtn)undoBtn.disabled=!data.canUndo;
+  if(redoBtn)redoBtn.disabled=!data.canRedo;
+  if(deleteBtn)deleteBtn.disabled=!data.canDelete;
+  syncEditorHeaderWidths();
+  markDashboardWizardReady();
+}
+function openWizardMoreMenu(btn){
+  document.querySelectorAll('.clMoreMenu').forEach(function(m){m.remove();});
+  var currentSet=(S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||null;
+  var hasSet=!!(currentSet&&currentSet.id);
+  var editHref=hasSet?(dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=edit'):dashboardBaseUrl();
+  var viewHref=hasSet?(dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=view'):'';
+  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+S._username+'/'+currentSet.slug):'';
+  var restartHref=dashboardBaseUrl()+'wizard/';
+  var editIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  var viewIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var restartIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>';
+  var items='';
+  if(hasSet)items+=_moreMenuItem(editIco,'Verder in editor','location.href='+JSON.stringify(editHref));
+  if(viewHref)items+=_moreMenuItem(viewIco,'Open viewer','location.href='+JSON.stringify(viewHref));
+  if(previewHref)items+=_moreMenuItem(viewIco,'Publieke preview','window.open('+JSON.stringify(previewHref)+',"_blank","noopener")');
+  items+=_moreMenuItem(restartIco,'Nieuwe wizard','location.href='+JSON.stringify(restartHref));
+  var menu=document.createElement('div');
+  menu.className='clMoreMenu';
+  menu.innerHTML=items;
+  document.body.appendChild(menu);
+  var rect=btn.getBoundingClientRect();
+  menu.style.cssText='position:fixed;top:'+(rect.bottom+6)+'px;right:'+(window.innerWidth-rect.right)+'px;z-index:9999';
+  setTimeout(function(){
+    function dismiss(e){
+      if(!menu.contains(e.target)&&e.target!==btn){menu.remove();document.removeEventListener('click',dismiss);}
+    }
+    document.addEventListener('click',dismiss);
+    function onKey(e){if(e.key==='Escape'){menu.remove();document.removeEventListener('keydown',onKey);}}
+    document.addEventListener('keydown',onKey);
+  },0);
+}
+function renderDashboardWizardPage(){
+  hideFloatingTextBar(true);
+  var currentSet=(S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||null;
+  var hasSet=!!(currentSet&&currentSet.id);
+  S._wizardSetId=hasSet?currentSet.id:null;
+  var titleHtml=
+    '<div class="clHeadMeta">'+
+      '<div class="clHeadTitle">'+
+        '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="'+esc(hasSet?(currentSet.title||'Naamloze set'):'Nieuwe kaartenset')+'" readonly>'+
+        '<span class="clHeadThemeSep" id="editorThemeSep" style="display:inline-block"></span>'+
+        '<input id="editorThemeTitle" class="clHeadThemeInput is-static" type="text" value="Naam" readonly>'+
+      '</div>'+
+    '</div>';
+  var backHref=hasSet
+    ? (dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=edit')
+    : dashboardBaseUrl();
+  var viewHref=hasSet
+    ? (dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=view')
+    : '';
+  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+S._username+'/'+currentSet.slug):'';
+  var wizardModeBtns=
+    '<div class="edModeSwitcher">'+
+      (hasSet
+        ? '<a class="edModeBtn" href="'+esc(backHref)+'" title="Bewerken" aria-label="Bewerken">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+          '</a>'
+        : '<button class="edModeBtn is-disabled" type="button" disabled title="Bewerken" aria-label="Bewerken">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+          '</button>')+
+      (hasSet
+        ? '<a class="edModeBtn" href="'+esc(viewHref)+'" title="Bekijken" aria-label="Bekijken">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'+
+          '</a>'
+        : '<button class="edModeBtn is-disabled" type="button" disabled title="Bekijken" aria-label="Bekijken">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'+
+          '</button>')+
+      '<button class="edModeBtn active" type="button" title="Wizard" aria-label="Wizard" aria-current="page">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"/></svg>'+
+      '</button>'+
+    '</div>';
+  var quickActions=previewHref
+    ? '<div class="tbRActions"><a class="btnIcon" href="'+esc(previewHref)+'" target="_blank" rel="noopener" title="Publieke preview" aria-label="Publieke preview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></a></div>'
+    : '';
+  var headActions=
+    '<div class="tbRWrap tbRWrap-editor"><div class="tbR">'+
+      wizardModeBtns+
+      '<div class="tbRActions">'+
+        '<button class="btnIcon" id="wizardUndoBtn" type="button" onclick="wizardUndoAction()" disabled title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
+        '<button class="btnIcon" id="wizardRedoBtn" type="button" onclick="wizardRedoAction()" disabled title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
+        '<button class="btnIconDanger" id="wizardDeleteBtn" type="button" onclick="wizardDeleteAction()"'+(hasSet?'':' disabled')+' title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
+      '</div>'+
+      quickActions+
+      '<button class="btnIcon clMoreBtn" id="wizardMoreBtn" type="button" title="Meer opties" aria-label="Meer opties" onclick="openWizardMoreMenu(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg></button>'+
+    '</div></div>';
+  renderChromeShell(titleHtml,headActions,null,{keepPreparing:true});
+  var pw=g('pw');
+  if(pw){
+    pw.classList.add('wizardWorkspaceBody');
+    pw.classList.remove('is-preparing');
+    pw.innerHTML=
+      '<div class="wizardWorkspaceShell is-loading" id="wizardWorkspaceShell">'+
+        '<iframe id="wizardWorkspaceFrame" class="wizardWorkspaceFrame" src="'+esc(standaloneWizardIframeUrl(hasSet?currentSet.id:''))+'" title="Kaartenset wizard" loading="eager" onload="markDashboardWizardIframeLoaded()"></iframe>'+
+      '</div>';
+  }
+  syncEditorHeaderWidths();
 }
 function renderSpaceEditor(){
   hideFloatingTextBar(true);
-  var spaceName=esc((S.space&&S.space.name)||S.spaceSlug||'Home');
-  var profileMenu=buildTopProfileMenuHtml();
   var saveStatus=buildTopSaveStatusHtml();
-  var headTitle='<div class="clHeadTitle">'+
-    '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="Home" readonly>'+
+  var spaceUpdatedAt=(currentSpacePublicPage().updatedAt)||null;
+  var spaceLastEdited=spaceUpdatedAt?'<div class="clHeadSub">Laatst bewerkt: '+esc(_timeAgo(spaceUpdatedAt))+'</div>':'';
+  var headTitle='<div class="clHeadMeta">'+
+    '<div class="clHeadTitle">'+
+      '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="Home" readonly>'+
+    '</div>'+
+    spaceLastEdited+
   '</div>';
-  var headCenter='<div class="editorViewModeBtns">'+
-    '<button class="editorViewModeBtn"'+(S.mode==='edit'?' active':'')+'" type="button" title="Bewerk modus" onclick="S.mode=\'edit\';renderEditor()">Bewerk</button>'+
-    '<button class="editorViewModeBtn"'+(S.mode==='view'?' active':'')+'" type="button" title="Weergave modus" onclick="S.mode=\'view\';renderEditor()">Weergave</button>'+
-    '<button class="editorViewModeBtn"'+(S.mode==='settings'?' active':'')+'" type="button" title="Instellingen modus" onclick="S.mode=\'settings\';renderEditor()">Instellingen</button>'+
-  '</div>';
-  var headActions='<div class="tbRWrap"><div class="tbR">'+
+  var headActions='<div class="tbRWrap tbRWrap-editor"><div class="tbR">'+
     '<div class="tbRActions">'+
       '<button class="btnIcon" id="undoBtn" type="button" onclick="undoSetChanges()"'+(canUndo()?'':' disabled')+' title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
       '<button class="btnIcon" id="redoBtn" type="button" onclick="redoSetChanges()"'+(canRedo()?'':' disabled')+' title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
     '</div>'+
-    '<button class="btnIconDanger" type="button" onclick="toast(\'Nog niet actief in home-editor\',\'amber\')" title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
     saveStatus+
-    '<button class="btn tbRSaveBtn" id="saveSpaceBtn" type="button" onclick="saveSpaceSettings()"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>Opslaan</span></button>'+
-    profileMenu+
+    '<button class="btn tbRSaveBtn" id="saveSpaceBtn" type="button" onclick="saveSpaceSettings()">'+buildTopSaveBtnInnerHtml('Opslaan')+'</button>'+
+    '<button class="btnIcon clMoreBtn" type="button" title="Meer opties"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button>'+
   '</div></div>';
-  renderEditorShell(headTitle,headActions,headCenter);
+  renderEditorShell(headTitle,headActions);
 }
 function currentSpaceLayoutMode(){
   var publicPage=currentSpacePublicPage();
@@ -1509,14 +3317,14 @@ function openPlaceholderColorPicker(ph){
 }
 function heroPlaceholderCardHtml(ph){
   var bg=placeholderBg(ph);
-  return '<div class="stijlSlideCard homeSetSlideCard homeSetSlideCard-hero is-placeholder" data-home-pane="hero" data-home-set-id="'+esc(ph)+'" draggable="true" title="Lege kaart — klik om kleur te wijzigen" onclick="openPlaceholderColorPicker(\''+esc(ph)+'\')">'+
-    '<div class="stijlSlideThumb">'+
+  return '<div class="homeSetSlideCard homeSetSlideCard-hero is-placeholder" data-home-pane="hero" data-home-set-id="'+esc(ph)+'" draggable="true" title="Lege kaart — klik om kleur te wijzigen" onclick="openPlaceholderColorPicker(\''+esc(ph)+'\')">'+
+    '<div class="homeSetSlideThumb">'+
       '<div class="homeSetThumbFallback" style="--home-set-bg:'+esc(bg)+'"></div>'+
       '<button class="homeHeroToggleBtn is-sel" type="button" onclick="event.stopPropagation();removeHeroPlaceholder(\''+esc(ph)+'\')" title="Verwijderen uit Uitgelicht">'+
         '<span class="heroRemoveMinus" aria-hidden="true">−</span>'+
       '</button>'+
     '</div>'+
-    '<div class="stijlSlideBody"></div>'+
+    '<div class="homeSetSlideLabelWrap"></div>'+
   '</div>';
 }
 function resolvedHomeHeroSetIds(){
@@ -1717,11 +3525,9 @@ function spacePageBtnsHtml(active){
 }
 function editorSettingsToggleBtnHtml(){
   var active=S.opmPane==='inst';
-  return '<div class="paneModeSwitcher homeSliderModeWrap editorSettingsSwitch" aria-label="Instellingen">'+
-    '<button class="paneMode homeSliderPaneBtn has-icon'+(active?' sel':'')+'" type="button" onclick="toggleInlineSettingsPane()" title="Instellingen" aria-label="Instellingen">'+
-      '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'+
-    '</button>'+
-  '</div>';
+  return '<button class="stijlSliderActionBtn editorSettingsBtn'+(active?' is-active':'')+'" type="button" onclick="toggleInlineSettingsPane()" title="Instellingen" aria-label="Instellingen">'+
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'+
+  '</button>';
 }
 function openSettingsForSet(id){
   if(id&&id!==S.activeId){ reqLoad(id); }
@@ -1854,14 +3660,14 @@ function focusSetThemeSliderRail(showOrderHint){
   },60);
 }
 function setEditorThemeActionHtml(){
+  return '<button class="stijlSliderActionBtn stijlSliderActionPrimary" type="button" onclick="addThemeFromStyle()" title="Thema toevoegen"><span class="stijlSliderActionPlus">+</span><span>Thema</span></button>';
+}
+function setEditorThemeToggleHtml(){
   var expanded=!!S.setThemeExpanded;
   var chevron=expanded
     ?'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 6.5L5 3.5L8 6.5"/></svg>'
     :'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>';
-  return '<div class="setThemeSplitGroup">'+
-    '<button class="setThemeSplitMain'+(expanded?' sel':'')+'" type="button" onclick="addThemeFromStyle()" title="Thema toevoegen">+ Thema</button>'+
-    '<button class="setThemeSplitChevron'+(expanded?' sel':'')+'" type="button" onclick="toggleSetThemeExpanded()" title="Thema-overzicht in/uitklappen">'+chevron+'</button>'+
-  '</div>';
+  return '<button class="setThemeRailChevronBtn'+(expanded?' is-open':'')+'" type="button" onclick="toggleSetThemeExpanded()" title="Thema-overzicht in/uitklappen" aria-label="Thema-overzicht" aria-expanded="'+(expanded?'true':'false')+'">'+chevron+'</button>';
 }
 function setEditorActionsHtml(){
   var active=S.opmPane==='info'?'info':(S.opmPane==='inst'?'inst':'vragen');
@@ -1881,7 +3687,7 @@ function setEditorActionsHtml(){
   var settingsMode=S.opmPane==='inst';
   return '<div class="homeSliderHeaderControls">'+
     '<div class="homeSliderLeftControls">'+setEditorLayoutChipHtml()+editorSettingsToggleBtnHtml()+setEditorPageBtnsHtml(active)+'</div>'+
-    '<div class="homeSliderRightControls'+(settingsMode?' slider-controls-dimmed':'')+'"><span class="homeCardsSlideLabel">Kaarten</span>'+addBtn+dupBtn+sortMenu+'</div>'+
+    '<div class="homeSliderRightControls'+(settingsMode?' slider-controls-dimmed':'')+'">'+addBtn+dupBtn+sortMenu+'</div>'+
   '</div>';
 }
 function setEditorInfoOrderMenuHtml(){
@@ -1900,10 +3706,9 @@ function setEditorInfoOrderMenuHtml(){
 function setEditorInfoActionsHtml(){
   var addPageBtn='<button class="stijlSliderActionBtn stijlSliderActionPrimary" type="button" onclick="addInfoCustomPage()"><span class="stijlSliderActionPlus">+</span><span>Pagina</span></button>';
   var orderMenu=setEditorInfoOrderMenuHtml();
-  return '<div class="homeSliderHeaderControls">'+
+  return '<div class="homeSliderHeaderControls infoSliderHeaderControls">'+
     '<div class="homeSliderLeftControls">'+setEditorLayoutChipHtml()+editorSettingsToggleBtnHtml()+setEditorPageBtnsHtml('info')+'</div>'+
     '<div class="homeSliderRightControls">'+
-      '<span class="homeCardsSlideLabel">Pagina&apos;s</span>'+
       addPageBtn+
       orderMenu+
     '</div>'+
@@ -1950,7 +3755,7 @@ function homeSetSlideCardHtml(set,idx,opts){
   var bundle=spacePreviewSetBundle(set);
   var meta=(bundle&&bundle.meta)||{};
   var cssVars=meta.cssVars||{};
-  var cover=spacePreviewSetCoverDataUrl(set,bundle);
+  var cover=spacePreviewSliderThumbDataUrl(set,bundle);
   var bg=cardBgForKey(meta,'cover')||cssVars['--pk-set-card']||cssVars['--pk-set-bg']||'#d9ecef';
   var thumb=cover
     ?'<img src="'+esc(cover)+'" alt="">'
@@ -1962,15 +3767,18 @@ function homeSetSlideCardHtml(set,idx,opts){
         '<span class="heroRemoveMinus" aria-hidden="true">−</span>'+
       '</button>'
     :'';
-  return '<div class="stijlSlideCard homeSetSlideCard homeSetSlideCard-'+pane+(isSelected?' sel is-picked':'')+(idx===0&&pane==='sets'?' sel':'')+'" draggable="'+(draggable?'true':'false')+'" data-home-pane="'+esc(pane)+'" data-home-set-id="'+esc(set.id)+'" title="'+title+'">'+
-    '<div class="stijlSlideThumb">'+thumb+heroToggleBtn+'</div>'+
-    '<div class="stijlSlideBody"><div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Klik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();startHomeSetRename(\''+esc(set.id)+'\',this)">'+esc(set.title||set.id||'Naamloos')+'</div></div></div>'+
+  return '<div class="homeSetSlideCard homeSetSlideCard-'+pane+(isSelected?' sel is-picked':'')+(idx===0&&pane==='sets'?' sel':'')+'" draggable="'+(draggable?'true':'false')+'" data-home-pane="'+esc(pane)+'" data-home-set-id="'+esc(set.id)+'" title="'+title+'">'+
+    '<div class="homeSetSlideThumb">'+thumb+heroToggleBtn+'</div>'+
+    '<div class="homeSetSlideLabelWrap" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" ondragstart="event.preventDefault();event.stopPropagation()" ondblclick="event.stopPropagation();startHomeSetRename(\''+esc(set.id)+'\',this.querySelector(\'.homeSetSlideNameLabel\'))"><div class="homeSetSlideNameLabel" draggable="false" title="Dubbelklik om naam te wijzigen">'+esc(set.title||set.id||'Naamloos')+'</div></div>'+
   '</div>';
+}
+function spacePreviewSliderThumbDataUrl(set,bundle){
+  return svgDataUrlFromMarkup(spacePreviewSyntheticCoverSvg(bundle));
 }
 function homeSetSliderStripHtml(){
   var sets=sortedHomeSets();
   var empty=!sets.length?'<div class="homeSetSliderEmpty">Nog geen sets.</div>':'';
-  return '<div class="stijlSlideRail homeSetSlideRail">'+
+  return '<div class="homeSetSlideRail">'+
     (sets.length?sets.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'sets'});}).join(''):empty)+
   '</div>';
 }
@@ -2009,9 +3817,9 @@ var HOME_SJABLONEN=[
   {id:'s-5',bg:'#fde8e0'},{id:'s-6',bg:'#f5e8df'},{id:'s-7',bg:'#e8f0df'},{id:'s-8',bg:'#f0e8f5'},
 ];
 function sjabloonTileHtml(s,idx){
-  return '<button class="stijlSlideCard homeSetSlideCard homeSetSlideCard-hero sjabloonTile" type="button" onclick="addHeroPlaceholder(\''+esc(s.bg)+'\')" title="Lege kaart '+(idx+1)+' toevoegen">'+
-    '<div class="stijlSlideThumb"><div class="homeSetThumbFallback" style="--home-set-bg:'+esc(s.bg)+'"></div></div>'+
-    '<div class="stijlSlideBody"></div>'+
+  return '<button class="homeSetSlideCard homeSetSlideCard-hero sjabloonTile" type="button" onclick="addHeroPlaceholder(\''+esc(s.bg)+'\')" title="Lege kaart '+(idx+1)+' toevoegen">'+
+    '<div class="homeSetSlideThumb"><div class="homeSetThumbFallback" style="--home-set-bg:'+esc(s.bg)+'"></div></div>'+
+    '<div class="homeSetSlideLabelWrap"></div>'+
   '</button>';
 }
 function createSetFromSjabloon(id){
@@ -2071,7 +3879,7 @@ function homeHeroSliderStripHtml(){
     return '<div class="homeSliderExpandWrap homeHeroPickerOpen">'+
       '<div class="homeHeroPickerSection homeHeroUitgelichtTray">'+
         '<div class="homeHeroPickerLabel">Uitgelicht</div>'+
-        '<div class="stijlSlideRail homeSetSlideRail homeHeroPickerRail homeHeroTrayRail" data-hero-tray="true">'+uitgelichtHtml+'</div>'+
+        '<div class="homeSetSlideRail homeHeroPickerRail homeHeroTrayRail" data-hero-tray="true">'+uitgelichtHtml+'</div>'+
       '</div>'+
       '<div class="homeHeroPickerSection">'+
         '<div class="homeHeroPickerLabel">Eigen kaarten</div>'+
@@ -2084,7 +3892,7 @@ function homeHeroSliderStripHtml(){
     '</div>';
   }
 
-  var railClass='stijlSlideRail homeSetSlideRail homeHeroSlideRail';
+  var railClass='homeSetSlideRail homeHeroSlideRail';
   var empty=!sets.length?'<div class="homeSetSliderEmpty">Nog geen sets.</div>':'';
   return '<div class="homeSliderExpandWrap">'+
     '<div class="'+railClass+'">'+
@@ -2113,7 +3921,7 @@ function homeGridSliderStripHtml(){
     return '<div class="homeSliderExpandWrap homeGridPickerOpen">'+
       '<div class="homeGridPickerSection homeGridListTray">'+
         '<div class="homeGridPickerLabel">Lijst</div>'+
-        '<div class="stijlSlideRail homeSetSlideRail homeGridPickerRail homeGridTrayRail" data-grid-tray="true">'+lijstHtml+'</div>'+
+        '<div class="homeSetSlideRail homeGridPickerRail homeGridTrayRail" data-grid-tray="true">'+lijstHtml+'</div>'+
       '</div>'+
       '<div class="homeGridPickerSection">'+
         '<div class="homeGridPickerLabel">Eigen kaarten</div>'+
@@ -2127,7 +3935,7 @@ function homeGridSliderStripHtml(){
   }
 
   var sets=inList.concat(rest);
-  var railClass='stijlSlideRail homeSetSlideRail homeGridSlideRail';
+  var railClass='homeSetSlideRail homeGridSlideRail';
   var empty=!sets.length?'<div class="homeSetSliderEmpty">Nog geen sets.</div>':'';
   return '<div class="homeSliderExpandWrap">'+
     '<div class="'+railClass+'">'+
@@ -2374,8 +4182,25 @@ function spacePreviewShapeLayers(bundle,key){
   var cardShapes=(ui&&ui.cardShapes&&typeof ui.cardShapes==='object')?ui.cardShapes:{};
   return Array.isArray(cardShapes[key])?cardShapes[key]:[];
 }
+function previewThumbViewportForMeta(meta){
+  var fmt=getCardFormatObjForMeta(meta);
+  var width=100;
+  var height=100*(fmt.h/fmt.w);
+  return {width:width,height:height,scaleY:height/100};
+}
+function previewThumbY(value,viewport){
+  var y=Number(value);
+  if(!isFinite(y))y=50;
+  return y*((viewport&&viewport.scaleY)||1);
+}
+function previewThumbClampY(value,viewport,padding){
+  var pad=isFinite(Number(padding))?Number(padding):6;
+  var max=((viewport&&viewport.height)||100)-pad;
+  return Math.max(pad,Math.min(max,previewThumbY(value,viewport)));
+}
 function spacePreviewCoverTextSvg(block){
   if(!block||!String(block.text||'').trim())return '';
+  var viewport=arguments[1]||{height:100,scaleY:1};
   var lines=String(block.text||'').split(/\r?\n/).map(function(line){return String(line||'').trim();}).filter(Boolean);
   if(!lines.length)return '';
   var fontSize=Math.max(3,Math.min(15,Number(block.size||12)*0.24));
@@ -2383,7 +4208,7 @@ function spacePreviewCoverTextSvg(block){
   var anchor=block.align==='center'?'middle':(block.align==='right'?'end':'start');
   var baseline=block.valign==='top'?'hanging':(block.valign==='bottom'?'text-after-edge':'middle');
   var weight=block.weight==='bold'?'700':block.weight==='semibold'?'600':block.weight==='medium'?'500':'400';
-  var centerY=Math.max(6,Math.min(94,Number(block.y)||50));
+  var centerY=previewThumbClampY(block.y,viewport,6);
   var startY=baseline==='middle'?(centerY-((lines.length-1)*lineStep)/2):centerY;
   return '<text x="'+Math.max(6,Math.min(94,Number(block.x)||50))+'" y="'+startY.toFixed(2)+'" text-anchor="'+anchor+'" dominant-baseline="'+baseline+'" font-family="'+esc(block.font||'IBM Plex Sans')+'" font-size="'+fontSize.toFixed(2)+'" font-weight="'+weight+'" font-style="'+(block.italic?'italic':'normal')+'" text-decoration="'+(block.underline?'underline':'none')+'" fill="'+esc(block.color||'#1a1a2e')+'">'+
     lines.map(function(line,idx){
@@ -2393,13 +4218,14 @@ function spacePreviewCoverTextSvg(block){
 }
 function spacePreviewSyntheticCoverSvg(bundle){
   var meta=(bundle&&bundle.meta)||{};
+  var viewport=previewThumbViewportForMeta(meta);
   var cssVars=meta.cssVars||{};
   var cardBg=cardBgForKey(meta,'cover')||cssVars['--pk-set-card']||cssVars['--pk-set-bg']||DEFAULT_CARD_SURFACE;
   var coverShapes=spacePreviewShapeLayers(bundle,'cover').map(function(layer){
     if(isTextLayerItem(layer))return '';
     if(isGroupLayer(layer)){
       var gx=Number(layer.x);if(!isFinite(gx))gx=50;
-      var gy=Number(layer.y);if(!isFinite(gy))gy=50;
+      var gy=previewThumbY(layer.y,viewport);
       var gs=Math.max(1,Number(layer.size)||42);
       var gr=Number(layer.rotate)||0;
       return (Array.isArray(layer.groupChildren)?layer.groupChildren:[]).map(function(child){
@@ -2408,21 +4234,23 @@ function spacePreviewSyntheticCoverSvg(bundle){
         var cy=Number(child.y);if(!isFinite(cy))cy=50;
         var cs=Math.max(1,Number(child.size)||42);
         var tx=gx+(cx-50)*gs/100;
-        var ty=gy+(cy-50)*gs/100;
+        var ty=gy+((cy-50)*gs/100)*viewport.scaleY;
         var size=cs*gs/100;
+        var es=size*Math.min(1,viewport.scaleY||1);
         var rot=gr+(Number(child.rotate)||0);
-        return '<g transform="translate('+tx.toFixed(2)+' '+ty.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-size/2).toFixed(2)+' '+(-size/2).toFixed(2)+') scale('+(size/100).toFixed(4)+')">'+shapeLayerRenderMarkup(child,'preview')+'</g>';
+        return '<g transform="translate('+tx.toFixed(2)+' '+ty.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(child,'preview')+'</g>';
       }).join('');
     }
     var size=Math.max(1,Number(layer.size)||42);
+    var es=size*Math.min(1,viewport.scaleY||1);
     var x=Number(layer.x);if(!isFinite(x))x=50;
-    var y=Number(layer.y);if(!isFinite(y))y=50;
+    var y=previewThumbY(layer.y,viewport);
     var rot=Number(layer.rotate)||0;
-    return '<g transform="translate('+x.toFixed(2)+' '+y.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-size/2).toFixed(2)+' '+(-size/2).toFixed(2)+') scale('+(size/100).toFixed(4)+')">'+shapeLayerRenderMarkup(layer,'preview')+'</g>';
+    return '<g transform="translate('+x.toFixed(2)+' '+y.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(layer,'preview')+'</g>';
   }).join('');
-  var coverTexts=spacePreviewCoverTextBlocks(bundle).map(spacePreviewCoverTextSvg).join('');
-  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">'+
-    '<rect width="100" height="100" rx="7" fill="'+esc(cardBg)+'"/>'+
+  var coverTexts=spacePreviewCoverTextBlocks(bundle).map(function(block){return spacePreviewCoverTextSvg(block,viewport);}).join('');
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+viewport.width+' '+viewport.height.toFixed(3)+'" preserveAspectRatio="none" aria-hidden="true">'+
+    '<rect width="'+viewport.width+'" height="'+viewport.height.toFixed(3)+'" rx="3.5" fill="'+esc(cardBg)+'"/>'+
     coverShapes+
     coverTexts+
   '</svg>';
@@ -2477,6 +4305,38 @@ function previewCardsBaseFill(isNight){
   var meta=(S.d&&S.d.meta)||{};
   var cssVars=meta.cssVars||{};
   return normalizeHexInput(cssVars['--cardsPageBg'])||sharedPreviewBaseVar('--pk-cards-index-bg','#FAFAF8');
+}
+function focusPreviewSurfacePalette(isNight,key){
+  if(isNight){
+    return {
+      shell:previewCardsBaseFill(true),
+      canvas:previewCardsBaseFill(true),
+      window:'rgba(18,30,44,.78)',
+      border:'rgba(108,132,164,.16)'
+    };
+  }
+  var meta=(S.d&&S.d.meta)||{};
+  return {
+    shell:homeMainIndexBaseBg(meta),
+    canvas:previewCardsBaseFill(false),
+    window:'#FFFFFF',
+    border:'rgba(120,140,160,.08)'
+  };
+}
+function applyFocusPreviewSurfaceVars(palette){
+  var root=g('stijl-kaart');
+  if(!root)return;
+  if(!palette){
+    root.style.removeProperty('--focus-preview-shell-base');
+    root.style.removeProperty('--focus-preview-canvas-base');
+    root.style.removeProperty('--focus-preview-window-surface');
+    root.style.removeProperty('--focus-preview-border');
+    return;
+  }
+  root.style.setProperty('--focus-preview-shell-base',palette.shell||'#FBFBFC');
+  root.style.setProperty('--focus-preview-canvas-base',palette.canvas||'#FFFFFF');
+  root.style.setProperty('--focus-preview-window-surface',palette.window||'#FFFFFF');
+  root.style.setProperty('--focus-preview-border',palette.border||'rgba(120,140,160,.06)');
 }
 function sharedPreviewBaseVar(name,fallback){
   if(window.PK&&window.PK.previewBackground&&typeof window.PK.previewBackground.baseVar==='function'){
@@ -2557,6 +4417,7 @@ function spacePreviewMutedShapeLayer(layer,palette,depth){
 }
 function spacePreviewThemeImageDataUrl(set,bundle,key,file){
   var meta=(bundle&&bundle.meta)||{};
+  var viewport=previewThumbViewportForMeta(meta);
   var mode=cardBuildModeForKey(meta,key||'algemeen');
   if(mode!=='self'&&file){
     var hit=cachedCardAssetForFile(set.id,file);
@@ -2564,14 +4425,14 @@ function spacePreviewThemeImageDataUrl(set,bundle,key,file){
   }
   var palette=spacePreviewTilePalette(meta,key||'algemeen');
   return svgDataUrlFromMarkup(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">'+
-      '<rect width="100" height="100" rx="7" fill="'+esc(palette.paper)+'"/>'+
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+viewport.width+' '+viewport.height.toFixed(3)+'" preserveAspectRatio="none" aria-hidden="true">'+
+      '<rect width="'+viewport.width+'" height="'+viewport.height.toFixed(3)+'" fill="'+esc(palette.paper)+'"/>'+
       spacePreviewShapeLayers(bundle,key||'algemeen').map(function(layer){
         var muted=spacePreviewMutedShapeLayer(layer,palette,0);
         if(isTextLayerItem(layer))return '';
         if(isGroupLayer(muted)){
           var gx=Number(muted.x);if(!isFinite(gx))gx=50;
-          var gy=Number(muted.y);if(!isFinite(gy))gy=50;
+          var gy=previewThumbY(muted.y,viewport);
           var gs=Math.max(1,Number(muted.size)||42);
           var gr=Number(muted.rotate)||0;
           return (Array.isArray(muted.groupChildren)?muted.groupChildren:[]).map(function(child){
@@ -2580,17 +4441,61 @@ function spacePreviewThemeImageDataUrl(set,bundle,key,file){
             var cy=Number(child.y);if(!isFinite(cy))cy=50;
             var cs=Math.max(1,Number(child.size)||42);
             var tx=gx+(cx-50)*gs/100;
-            var ty=gy+(cy-50)*gs/100;
+            var ty=gy+((cy-50)*gs/100)*viewport.scaleY;
             var size=cs*gs/100;
+            var es=size*Math.min(1,viewport.scaleY||1);
             var rot=gr+(Number(child.rotate)||0);
-            return '<g transform="translate('+tx.toFixed(2)+' '+ty.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-size/2).toFixed(2)+' '+(-size/2).toFixed(2)+') scale('+(size/100).toFixed(4)+')">'+shapeLayerRenderMarkup(child,'preview')+'</g>';
+            return '<g transform="translate('+tx.toFixed(2)+' '+ty.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(child,'preview')+'</g>';
           }).join('');
         }
         var size=Math.max(1,Number(muted.size)||42);
+        var es=size*Math.min(1,viewport.scaleY||1);
         var x=Number(muted.x);if(!isFinite(x))x=50;
-        var y=Number(muted.y);if(!isFinite(y))y=50;
+        var y=previewThumbY(muted.y,viewport);
         var rot=Number(muted.rotate)||0;
-        return '<g transform="translate('+x.toFixed(2)+' '+y.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-size/2).toFixed(2)+' '+(-size/2).toFixed(2)+') scale('+(size/100).toFixed(4)+')">'+shapeLayerRenderMarkup(muted,'preview')+'</g>';
+        return '<g transform="translate('+x.toFixed(2)+' '+y.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(muted,'preview')+'</g>';
+      }).join('')+
+    '</svg>'
+  );
+}
+function styleThemeThumbDataUrl(bundle,key,file){
+  var meta=(bundle&&bundle.meta)||{};
+  var viewport=previewThumbViewportForMeta(meta);
+  var mode=cardBuildModeForKey(meta,key||'algemeen');
+  if(mode!=='self'&&S.activeId&&file){
+    var hit=cachedCardAssetForFile(S.activeId,file);
+    if(hit&&hit.asset&&hit.asset.dataUrl)return hit.asset.dataUrl;
+  }
+  var cardBg=cardBgForKey(meta,key||'algemeen')||((meta.cssVars||{})['--pk-set-card'])||((meta.cssVars||{})['--pk-set-bg'])||DEFAULT_CARD_SURFACE;
+  return svgDataUrlFromMarkup(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+viewport.width+' '+viewport.height.toFixed(3)+'" preserveAspectRatio="none" aria-hidden="true">'+
+      '<rect width="'+viewport.width+'" height="'+viewport.height.toFixed(3)+'" fill="'+esc(cardBg)+'"/>'+
+      spacePreviewShapeLayers(bundle,key||'algemeen').map(function(layer){
+        if(isTextLayerItem(layer))return '';
+        if(isGroupLayer(layer)){
+          var gx=Number(layer.x);if(!isFinite(gx))gx=50;
+          var gy=previewThumbY(layer.y,viewport);
+          var gs=Math.max(1,Number(layer.size)||42);
+          var gr=Number(layer.rotate)||0;
+          return (Array.isArray(layer.groupChildren)?layer.groupChildren:[]).map(function(child){
+            if(isTextLayerItem(child))return '';
+            var cx=Number(child.x);if(!isFinite(cx))cx=50;
+            var cy=Number(child.y);if(!isFinite(cy))cy=50;
+            var cs=Math.max(1,Number(child.size)||42);
+            var tx=gx+(cx-50)*gs/100;
+            var ty=gy+((cy-50)*gs/100)*viewport.scaleY;
+            var size=cs*gs/100;
+            var es=size*Math.min(1,viewport.scaleY||1);
+            var rot=gr+(Number(child.rotate)||0);
+            return '<g transform="translate('+tx.toFixed(2)+' '+ty.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(child,'preview')+'</g>';
+          }).join('');
+        }
+        var size=Math.max(1,Number(layer.size)||42);
+        var es=size*Math.min(1,viewport.scaleY||1);
+        var x=Number(layer.x);if(!isFinite(x))x=50;
+        var y=previewThumbY(layer.y,viewport);
+        var rot=Number(layer.rotate)||0;
+        return '<g transform="translate('+x.toFixed(2)+' '+y.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(layer,'preview')+'</g>';
       }).join('')+
     '</svg>'
   );
@@ -3019,8 +4924,8 @@ function spaceSitePreviewDocumentHtml(){
       '<script>'+previewScript+'</script>'+
     '</body></html>';
 }
-function renderEditorShell(headTitle,headActions,headCenter){
-  g('mc').innerHTML='<div class="clHead">'+headTitle+(headCenter?'<div class="clHeadCenter">'+headCenter+'</div>':'')+headActions+'</div><div class="clBody" id="pw"></div>';
+function renderEditorShell(headTitle,headActions,headCenter,opts){
+  renderChromeShell(headTitle,headActions,headCenter,opts);
   updateEditorHeaderTheme();
   renderClPanel();
   afterRender();
@@ -3028,7 +4933,7 @@ function renderEditorShell(headTitle,headActions,headCenter){
 
 function afterRender(){
   var id=S.clTab;
-  if(id==='opmaken'||id==='inst')setTimeout(loadCardPreviews,80);
+  if(id==='opmaken'||id==='inst')scheduleCardPreviewWarmup(120);
   if(id==='opmaken'){setTimeout(renderBgPreview,80);setTimeout(updateStijlPreview,120);}
 }
 function switchMode(){goChecklist();}
@@ -3136,6 +5041,25 @@ function buildStijlPreserveBg(target){
   }
   scheduleBg();
 }
+function animateEditorPaneSwitch(){
+  var targets=Array.prototype.slice.call(document.querySelectorAll(
+    '#stijl-kaart .stijlCanvasWindow, #stijl-kaart .stijlQuestionPaneOuter, #stijl-kaart .globalTipBlock, #stijl-kaart .infoPanelShell'
+  ));
+  if(!targets.length)return;
+  targets.forEach(function(el){
+    el.classList.remove('pane-switch-in');
+  });
+  requestAnimationFrame(function(){
+    targets.forEach(function(el){
+      el.classList.add('pane-switch-in');
+    });
+    setTimeout(function(){
+      targets.forEach(function(el){
+        el.classList.remove('pane-switch-in');
+      });
+    },220);
+  });
+}
 function selectSpaceSet(id){
   if(!id)return;
   S.activeId=id;
@@ -3152,12 +5076,15 @@ function setOpmakenPane(pane){
   var keepScrollTop=contentEl?contentEl.scrollTop:0;
   var keepScrollLeft=contentEl?contentEl.scrollLeft:0;
   var isSpace=S.activeKind==='space';
+  var prevScope=canvasZoomScopeKeyForPane(S.activeKind,S.opmPane);
+  rememberCanvasZoomForScope(prevScope,CANVAS_ZOOM_PCT);
   if(pane==='inst'){
     if(S.opmPane&&S.opmPane!=='inst')S._instBasePane=S.opmPane;
   }else{
     S._instBasePane=pane;
   }
   S.opmPane=(pane==='info')?'info':(pane==='inst'?'inst':(isSpace?'space':'vragen'));
+  CANVAS_ZOOM_PCT=restoreCanvasZoomForScope(canvasZoomScopeKeyForPane(S.activeKind,S.opmPane),100);
   if(S.homeSliderPane==='layout'){
     var _lsL=null;try{_lsL=localStorage.getItem('pk_layout_chosen');}catch(e){}
     if(currentSpacePublicPage().layoutChosen||S.spaceLayoutMode||_lsL){
@@ -3181,8 +5108,9 @@ function setOpmakenPane(pane){
     var slideWrap=document.querySelector('.homeCardsSlideWrap');
     var doRender=function(){
       buildStijlPreserveBg(g('pw'));
+      animateEditorPaneSwitch();
       updateEditorHeaderTheme();
-      setTimeout(loadCardPreviews,50);
+      scheduleCardPreviewWarmup(120);
       if(contentEl){
         requestAnimationFrame(function(){
           contentEl.scrollTop=keepScrollTop;
@@ -3210,16 +5138,10 @@ function inlineSettingsToggleHtml(id,label,checked,sub){
 }
 function buildInlineSettingsSliderHtml(spaceMode){
   if(spaceMode){
-    var publicPage=currentSpacePublicPage();
-    var infoFirst=!!publicPage.infoFirstVisit;
     var placeholders=currentHomePlaceholderCount();
     var menu=spacePreviewMenuSettings();
     return '<div class="homeSliderExpandWrap inlineSettingsExpand">'+
       '<div class="inlineSettingsGrid inlineSettingsGrid-space">'+
-        '<section class="inlineSettingsCard">'+
-          '<div class="inlineSettingsLabel">Infopagina</div>'+
-          inlineSettingsToggleHtml('inline_sp_info_first','Info bij eerste bezoek',infoFirst,'Toon de infopagina automatisch aan nieuwe bezoekers')+
-        '</section>'+
         '<section class="inlineSettingsCard">'+
           '<div class="inlineSettingsLabel">Home</div>'+
           '<div class="inlineSettingsRangeRow">'+
@@ -3312,8 +5234,6 @@ function buildInlineSettingsSliderHtml(spaceMode){
 }
 function wireInlineSettingsSlider(spaceMode){
   if(spaceMode){
-    var infoEl=g('inline_sp_info_first');
-    if(infoEl)infoEl.onchange=function(){setSpacePublicPageField('infoFirstVisit',!!this.checked);};
     var collEl=g('inline_sp_collections');
     if(collEl)collEl.onchange=function(){window.saveCollectionsOptOut&&window.saveCollectionsOptOut(!!this.checked);};
     var phEl=g('inline_sp_placeholders');
@@ -3476,6 +5396,28 @@ function buildSidePanelEmpty(message){
     contentHtml:'<div class="questionsEmptyState">'+message+'</div>'
   });
 }
+function buildSidePanelCoverState(){
+  var iconText='<svg class="coverTextGlyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>';
+  var panelOpen=storedOpenState(QUESTION_SIDE_PANEL_OPEN,'cover',true);
+  var metaHtml='<div class="questionsMetaText"><div class="questionsTheme">Cover</div></div>';
+  var actionsHtml=
+    '<div class="questionsHeadActions questionsHeadActions-compact">'+
+      '<button class="questionCollapseBtn" type="button" onclick="toggleQuestionSidePanel(\'cover\')" title="'+(panelOpen?'Inklappen':'Uitklappen')+'" aria-label="Cover" aria-expanded="'+(panelOpen?'true':'false')+'">'+buildSectionChevronSvg(panelOpen)+'</button>'+
+    '</div>';
+  return buildSidePanelShell({
+    shellClass:'coverDisabledShell'+(panelOpen?'':' questionPanelShellCollapsed'),
+    metaHtml:metaHtml,
+    actionsHtml:actionsHtml,
+    contentHtml:panelOpen?'<div class="coverQuestionsState">'+
+      '<div class="qListEmptyIcon">'+iconText+'</div>'+
+      '<p>Voeg tekst op de cover toe via de typografiebar bovenaan.</p>'+
+      '<div class="coverQuestionsGhost" aria-hidden="true">'+
+        '<div class="coverQuestionsGhostBtn">+ Vraag toevoegen</div>'+
+        '<div class="coverQuestionsGhostBtn coverQuestionsGhostBtnSecondary">Meerdere vragen importeren</div>'+
+      '</div>'+
+    '</div>':''
+  });
+}
 // ── Hero set helpers ──────────────────────────────────────────
 function currentHomeHeroSetIds(){
   var v=currentSpacePublicPage().heroSetIds;
@@ -3494,20 +5436,6 @@ function toggleHomeHeroSetId(id,checked){
 // ── Build Space Pane (rechter paneel Home-tab) ────────────────
 function buildSpacePane(target){
   var placeholders=currentHomePlaceholderCount();
-  var infoFirst=!!currentSpacePublicPage().infoFirstVisit;
-
-  // ── Toggles ──
-  var togHtml='<div class="spHeroGroup">'+
-    '<div class="togRow" style="margin-bottom:6px">'+
-      '<div>'+
-        '<label class="spHeroLabel" for="sp_info_first" style="cursor:pointer">Info bij eerste bezoek</label>'+
-        '<span class="togRowSub">Toon de infopagina automatisch aan nieuwe bezoekers</span>'+
-      '</div>'+
-      '<label class="tog"><input type="checkbox" id="sp_info_first"'+(infoFirst?' checked':'')+'>'+
-        '<span class="togSl"></span>'+
-      '</label>'+
-    '</div>'+
-  '</div>';
 
   // ── Placeholders slider ──
   var phHtml='<div class="spHeroGroup">'+
@@ -3517,11 +5445,8 @@ function buildSpacePane(target){
   '</div>';
 
   target.innerHTML=buildSidePanelShell({
-    contentHtml:'<div class="spacePane">'+togHtml+phHtml+'</div>'
+    contentHtml:'<div class="spacePane">'+phHtml+'</div>'
   });
-
-  var infoEl=g('sp_info_first');
-  if(infoEl)infoEl.onchange=function(){setSpacePublicPageField('infoFirstVisit',!!this.checked);};
 
   var phEl=g('sp_placeholders');
   var phVal=g('sp_ph_val');
@@ -3676,8 +5601,8 @@ function syncInfoPreviewExtent(){
   var needsBgRerender=false;
   document.querySelectorAll('.infoPreviewSingle').forEach(function(wrap){
     var slide=wrap.querySelector('.adminInfoSlide');
-    var text=wrap.querySelector('.adminInfoSlideText');
-    if(!slide||!text)return;
+    var text=wrap.querySelector('.adminInfoPreviewTextShell, .adminInfoSlideText');
+    if(!text)return;
     var measured=Math.ceil(text.offsetHeight||0);
     var baseline=Number(wrap.dataset.infoBaseHeight||0);
     if(!baseline||baseline<1){
@@ -3686,7 +5611,7 @@ function syncInfoPreviewExtent(){
     }
     var extra=Math.max(0,measured-baseline);
     wrap.style.setProperty('--info-preview-extra',extra+'px');
-    slide.style.setProperty('--info-preview-extra',extra+'px');
+    if(slide)slide.style.setProperty('--info-preview-extra',extra+'px');
     var win=wrap.closest('.stijlCanvasWindow.info-preview');
     if(win)win.style.setProperty('--info-preview-extra',extra+'px');
     var stage=wrap.closest('.stijlCanvasStage.info-preview-stage');
@@ -3710,6 +5635,9 @@ function buildInfoPane(target){
   var th=isCover?null:themes.find(function(t){return t.key===key;});
   var cp=(!isCover&&!th)?infoPages.find(function(p){return p.key===key;}):null;
   var label=isCover?'Cover':(th?esc(th.label||th.key):(cp?esc(cp.label||cp.key):''));
+  var subtitle=isCover
+    ?''
+    :(cp?'Extra infopagina':'Infotekst en kaarttitel');
   var fieldHtml='';
   var toggleHtml='';
   if(isCover){
@@ -3735,7 +5663,9 @@ function buildInfoPane(target){
   }
   target.innerHTML=buildSidePanelShell({
     shellClass:'infoPanelShell',
-    metaHtml:(label?'<div class="questionsTheme">'+label+'</div>':''),
+    metaHtml:
+      (label?'<div class="questionsTheme">'+label+'</div>':'')+
+      (subtitle?'<div class="questionsCount">'+subtitle+'</div>':''),
     bodyClass:'infoPanelBody',
     contentHtml:(toggleHtml?'<div class="infoToggleArea">'+toggleHtml+'</div>':'')+'<div class="infoContent">'+fieldHtml+'</div>'
   });
@@ -4151,7 +6081,7 @@ function moveLibraryFileToTarget(srcPath,destPath,successMsg){
       clearFolderCache(destPath);
       refreshLibGrid(S.activeId);
       refreshAdminPanel();
-      setTimeout(loadCardPreviews,50);
+      scheduleCardPreviewWarmup(120);
       toast(successMsg||'Bijgewerkt','green');
     });
   }).catch(function(err){toast('Fout: '+err.message,'red');});
@@ -4203,7 +6133,7 @@ function assignToTheme(ti,fname){
       markDirty();
       toast('Kaartafbeelding ingesteld: '+fname,'green');
       var pw=g('pw');if(pw)renderClPanel();
-      setTimeout(loadCardPreviews,50);
+      scheduleCardPreviewWarmup(120);
     }).catch(function(e){toast('Fout: '+e.message,'red');});
     return;
   }
@@ -4211,7 +6141,7 @@ function assignToTheme(ti,fname){
   t.card=fname;markDirty();
   cardBuildStore(S.d.meta||{})[t.key]='image';
   var pw=g('pw');if(pw)renderClPanel();
-  setTimeout(loadCardPreviews,50);toast('Gekoppeld: '+fname,'green');
+  scheduleCardPreviewWarmup(120);toast('Gekoppeld: '+fname,'green');
 }
 function assignCover(srcPath){
   // Copy file to voorkant.svg (or just reuse same name if already voorkant.svg)
@@ -4228,7 +6158,7 @@ function assignCover(srcPath){
     CC[destPath]={sha:(res.content||{}).sha,dataUrl:ca.dataUrl};
     toast('Cover bijgewerkt','green');
     var pw=g('pw');if(pw)renderClPanel();
-    setTimeout(loadCardPreviews,50);
+    scheduleCardPreviewWarmup(120);
   }).catch(function(e){toast('Fout: '+e.message,'red');});
 }
 function deleteGhFile(path,message){
@@ -4540,7 +6470,7 @@ function startLooseUpload(file,folderName){
         uploadDataUrlToPath(path,dataUrl,'Upload: '+fn,function(){
           refreshLibGrid(id);
           refreshAdminPanel();
-          setTimeout(loadCardPreviews,80);
+          scheduleCardPreviewWarmup(140);
         }).then(function(){
           resolve();
         }).catch(function(err){
@@ -4590,6 +6520,7 @@ function buildCTile(card,folder,path){
   '</div>';
 }
 function loadCardPreviews(){
+  if(S.activeKind!=='set'||!S.activeId||!S.d||!S.d.meta)return;
   var id=S.activeId,themes=S.d.meta.themes||[];
   var toLoad=stylePreviewCandidates(S.d.meta).reduce(function(list,file){
     cardAssetFolders().forEach(function(folder){
@@ -4950,7 +6881,7 @@ function confirmCrop(){
       renderSidebar();
       refreshLibGrid(S.activeId);
       refreshAdminPanel();
-      setTimeout(loadCardPreviews,50);
+      scheduleCardPreviewWarmup(120);
     }).catch(function(err){toast('Fout: '+err.message,'red');if(ldSvg.parentNode)ldSvg.remove();});
     return;
   }
@@ -4976,7 +6907,7 @@ function confirmCrop(){
         if(ld.parentNode)ld.remove();updateTile(path,dataUrl);toast('✓ Bijgesneden en geüpload','green');renderSidebar();
         refreshLibGrid(S.activeId);
         refreshAdminPanel();
-        setTimeout(loadCardPreviews,50);
+        scheduleCardPreviewWarmup(120);
       }).catch(function(err){toast('Fout: '+err.message,'red');if(ld.parentNode)ld.remove();});
     };
     reader.readAsBinaryString(blob);
@@ -5030,7 +6961,7 @@ function openLinkPopup(ev,ti,folder){
   });
   setTimeout(function(){document.addEventListener('click',closeLpOut);},10);
 }
-function linkCard(ti,folder,fn){var theme=S.d.meta.themes[ti];if(!theme)return;theme.card=fn;markDirty();closeLp();var pw=g('pw');if(pw)renderClPanel();setTimeout(loadCardPreviews,50);toast('Gekoppeld: '+fn);}
+function linkCard(ti,folder,fn){var theme=S.d.meta.themes[ti];if(!theme)return;theme.card=fn;markDirty();closeLp();var pw=g('pw');if(pw)renderClPanel();scheduleCardPreviewWarmup(120);toast('Gekoppeld: '+fn);}
 function uploadAndLink(input,ti,folder){
   var files=Array.from(input.files||[]);if(!files.length)return;
   closeLp();
@@ -5041,7 +6972,7 @@ function uploadAndLink(input,ti,folder){
     theme.card=last.name.replace(/[^a-zA-Z0-9._-]/g,'-');
     markDirty();
     refreshAdminPanel();
-    setTimeout(loadCardPreviews,50);
+    scheduleCardPreviewWarmup(120);
     toast('Bestanden toegevoegd — laatste upload gekoppeld','green');
   }
   input.value='';
@@ -5117,6 +7048,10 @@ var TIP_TIPS={
   kleur:[
     'De kaartkleur bepaalt de sfeer van je set. Kies kleuren die bij je merk of thema passen.',
     'Combineer een donkerdere kaartkleur met lichte vormen voor een rustig, stijlvol contrast.'
+  ],
+  cover:[
+    'Voeg tekst op de cover toe via de typografiebar bovenaan.',
+    'Houd de cover krachtig en rustig: een korte titel en genoeg witruimte werkt vaak het best.'
   ]
 };
 var TIP_INDEX={};
@@ -5185,8 +7120,8 @@ function buildVragen(target,opts){
   if(meta.useDefaultGroup){
     // No hint needed — default group behaviour is self-explanatory
   }
-  if(meta.isCover&&meta.hasThemes){
-    target.innerHTML=buildSidePanelEmpty('Kies een thema in de slider om de bijbehorende vragen te bewerken.');
+  if(meta.isCover){
+    target.innerHTML=buildSidePanelCoverState();
     return;
   }
   if(!theme){
@@ -5200,12 +7135,14 @@ function buildVragen(target,opts){
   var isBackOpen=!!QUESTION_EDITOR_BACK_OPEN[key];
   var showBacks=!!QUESTION_BACKS_EDITOR_OPEN[key];
   var bulkOpen=!!QUESTION_BULK_IMPORT_OPEN[key];
+  var panelOpen=storedOpenState(QUESTION_SIDE_PANEL_OPEN,key,true);
   var iconBulk='<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5v10"/><path d="M8.5 9 12 5.5 15.5 9"/><path d="M7 18.5h10"/></svg>';
   var iconBacks='<span style="font-size:14px;line-height:1;display:block;transform:scaleX(-1)" aria-hidden="true">↺</span>';
   var iconAdd='<svg viewBox="0 0 16 16"><path d="M8 2.5v11M2.5 8h11"/></svg>';
   var themeIdxQ=(S.d.meta.themes||[]).map(function(t){return t.key;}).indexOf(theme.key);
   var themeNameValue=themeIdxQ>=0?themeLabelForIndex(themeIdxQ,theme.label):(theme.key==='algemeen'?nextThemeLabel(S.d.meta||{}):(theme.label||theme.key));
   var themeNameHtml='<div class="questionsTheme">'+esc(themeNameValue)+'</div>';
+  var themeMetaHtml='<div class="questionsMetaText">'+themeNameHtml+'<div class="questionsCount">'+qs.length+' '+(qs.length===1?'vraag':'vragen')+'</div></div>';
   var questionsHeaderActions=
     '<div class="questionsHeadActions">'+
       '<button class="qHeadBtn qHeadBtnSecondary'+(showBacks?' sel':'')+'" type="button" onclick="toggleBacksEditor(\''+esc(key)+'\')" title="'+(showBacks?'Verberg achterkanttekst':'Toon achterkanttekst')+'" aria-label="'+(showBacks?'Verberg achterkanttekst':'Toon achterkanttekst')+'">'+iconBacks+'</button>'+
@@ -5214,6 +7151,7 @@ function buildVragen(target,opts){
         '<div class="questionsHeadActionsDivider" aria-hidden="true"></div>'+
         '<button class="qHeadBtn qHeadBtnPrimary qHeadBtnAdd" type="button" onclick="addQ(\''+esc(key)+'\')" title="Vraag toevoegen">'+iconAdd+'</button>'+
       '</div>'+
+      '<button class="questionCollapseBtn" type="button" onclick="toggleQuestionSidePanel(\''+esc(key)+'\')" title="'+(panelOpen?'Inklappen':'Uitklappen')+'" aria-label="'+esc(themeNameValue)+'" aria-expanded="'+(panelOpen?'true':'false')+'">'+buildSectionChevronSvg(panelOpen)+'</button>'+
     '</div>';
   var questionListHtml='<div class="questionListShell">';
   html+='<div class="questionList">';
@@ -5286,10 +7224,11 @@ function buildVragen(target,opts){
   }
   questionEditorHtml+='</div>';
   target.innerHTML=buildSidePanelShell({
-    metaHtml:themeNameHtml+'<div class="questionsCount">'+qs.length+' '+(qs.length===1?'vraag':'vragen')+'</div>',
+    shellClass:(panelOpen?'':'questionPanelShellCollapsed'),
+    metaHtml:themeMetaHtml,
     actionsHtml:questionsHeaderActions,
-    contentHtml:questionListHtml,
-    afterShellHtml:questionEditorHtml
+    contentHtml:panelOpen?questionListHtml:'',
+    afterShellHtml:panelOpen?questionEditorHtml:''
   });
   target.querySelectorAll('.questionListBack').forEach(function(t){setTimeout(function(){autoH(t);},0);});
   if(theme)syncSelectedQuestionPreview(theme.key);
@@ -5298,6 +7237,11 @@ function toggleBacksEditor(key){
   QUESTION_BACKS_EDITOR_OPEN[key]=!QUESTION_BACKS_EDITOR_OPEN[key];
   var sp=g('stijlSidePaneBody');
   if(sp)buildVragen(sp,{filterKey:key});
+}
+function toggleQuestionSidePanel(key){
+  key=String(key||'cover');
+  toggleStoredOpenState(QUESTION_SIDE_PANEL_OPEN,key,true);
+  rebuildVragen();
 }
 function saveBacksFromEditor(key,val){
   var lines=val.split('\n');
@@ -5424,10 +7368,37 @@ function cardBgForKey(meta,key){
 }
 function sharedCardPreviewHtml(opts){
   opts=opts||{};
+  var viewerOnlyPreview=!!opts.viewerOnlyPreview;
   var cached=opts.file?(((cachedCardAssetForFile(S.activeId,opts.file)||{}).asset)||null):null;
   var imgSrc=cached&&cached.dataUrl?cached.dataUrl:'';
   if(opts.forceNoImage)imgSrc='';
   var previewKey=opts.previewKey||'algemeen';
+  var sharedRenderer=window.PK&&window.PK.sharedCardRenderer&&typeof window.PK.sharedCardRenderer.render==='function'
+    ?window.PK.sharedCardRenderer
+    :null;
+  if(sharedRenderer&&!opts.infoRichCe&&previewKey!=='cover'){
+    return sharedRenderer.render({
+      meta:(S.d&&S.d.meta)||{},
+      wrapId:opts.wrapId||'',
+      wrapClass:opts.wrapClass||'cardPrevWrap',
+      wrapStyle:opts.wrapStyle||'',
+      faceId:opts.faceId||'',
+      frontId:opts.frontId||'',
+      backId:opts.backId||'',
+      imgSrc:imgSrc,
+      forceNoImage:!!opts.forceNoImage,
+      previewKey:previewKey,
+      themeKey:opts.themeKey||previewKey,
+      frontTxt:(opts.frontTxt!=null?opts.frontTxt:''),
+      backTxt:opts.backTxt||'',
+      flipped:!!opts.flipped,
+      cardBg:opts.cardBg,
+      emptyBg:opts.emptyBg,
+      backDesignKey:opts.backDesignKey||'',
+      label:opts.label||'',
+      suppressEmptyFrontHint:!!opts.suppressEmptyFrontHint
+    });
+  }
   var cv=styleCssVarsForKey(S.d.meta,previewKey);
   var font=cv['--pk-font']||'IBM Plex Sans';
   var fs=fontSizeCss(cv['--pk-font-size']||'12');
@@ -5486,24 +7457,28 @@ function sharedCardPreviewHtml(opts){
   // In infoRichCe mode we always render the richCe text area, even on the cover slide
   var isCover=!opts.infoRichCe&&opts.previewKey==='cover'&&!!opts.showCoverTexts;
   var isCoverPreview=!opts.infoRichCe&&opts.previewKey==='cover'&&!opts.showCoverTexts;
-  // Info mode: use a single sheet-like card on the same footprint as the question preview.
+  // Info mode: keep the original sheet-style layout where the card and text area
+  // belong to one preview object. The sheet may grow downward, but the card itself
+  // should start from the same visual line as the regular card preview.
   if(opts.infoRichCe){
     var previewLabel=opts.label||'Infopagina';
     var previewTitle=esc(previewLabel);
     var midTitleText=String(opts.infoMidTitleText!=null?opts.infoMidTitleText:(opts.label||'')).trim();
+    var midTitleStyle='font-family:\''+esc(font)+'\',sans-serif;color:'+esc(textColor)+';font-size:'+esc(titleFontSize)+';font-weight:700;';
+    if(!midTitleText)midTitleStyle+='display:none;';
     var mediaHtml=(imgSrc
       ?'<img class="adminInfoCardImg" src="'+imgSrc+'" alt="'+previewTitle+'">'
       :(isSpaceInfoCover?spaceInfoDefaultCoverHtml:'<div class="adminInfoCardFill" style="'+cardBgStyle(emptyBg)+'"></div>'))+
       '<div class="cpShapeLayer" data-shape-key="'+esc(opts.previewKey||'algemeen')+'">'+cardShapesLayerHtml(opts.previewKey||'algemeen')+'</div>'+
       (opts.showInfoMidTitle
-        ?'<div class="infoSlideMidTitle" contenteditable="true" spellcheck="false" data-info-mid-title-key="'+esc(opts.infoMidTitleKey||'')+'" oninput="infoMidTitleInput(this)" style="font-family:\''+esc(font)+'\',sans-serif;color:'+esc(textColor)+';font-size:'+esc(titleFontSize)+';font-weight:700">'+esc(midTitleText)+'</div>'
+        ?'<div class="infoSlideMidTitle" contenteditable="'+(viewerOnlyPreview?'false':'true')+'" spellcheck="false" data-info-mid-title-key="'+esc(opts.infoMidTitleKey||'')+'" oninput="infoMidTitleInput(this)" style="'+midTitleStyle+'">'+esc(midTitleText)+'</div>'
         :'');
     return '<div class="'+wrapCls+' infoPreviewSingle"'+(opts.wrapId?' id="'+esc(opts.wrapId)+'"':'')+(wrapStyle?' style="'+esc(wrapStyle)+'"':'')+'>'+
       '<div class="infoSlide adminInfoSlide adminInfoSlideSingle">'+
         '<div class="infoSlideInner adminInfoSlideInner">'+
-          '<div class="adminInfoSlideCard"'+(opts.faceId?' id="'+esc(opts.faceId)+'"':'')+' style="'+cardBgStyle(cardBg)+'">'+mediaHtml+'</div>'+
+          '<div class="infoSlideCard adminInfoSlideCard"'+(opts.faceId?' id="'+esc(opts.faceId)+'"':'')+' style="'+cardBgStyle(cardBg)+'">'+mediaHtml+'</div>'+
           '<div class="infoSlideText adminInfoSlideText adminInfoSlideTextEdit"'+(opts.frontId?' id="'+esc(opts.frontId)+'"':'')+'>'+
-            '<div class="richCe infoRichCe" contenteditable="true" data-rich-type="info" data-rich-key="'+esc(opts.infoRichCeKey||'')+'" data-placeholder="Typ hier je tekst om deze pagina te introduceren..." spellcheck="false" oninput="richCeInfoInput(this)" onfocus="activateRichCe(this)" onblur="deactivateRichCe()">'+(opts.frontTxt||'')+'</div>'+
+            '<div class="richCe infoRichCe" contenteditable="'+(viewerOnlyPreview?'false':'true')+'" data-rich-type="info" data-rich-key="'+esc(opts.infoRichCeKey||'')+'" data-placeholder="Typ hier je tekst om deze pagina te introduceren..." spellcheck="false" oninput="richCeInfoInput(this)" onfocus="activateRichCe(this)" onblur="deactivateRichCe()">'+(opts.frontTxt||'')+'</div>'+
           '</div>'+
         '</div>'+
       '</div>'+
@@ -5868,7 +7843,7 @@ function liveQ(key,qi,isFront,val){
   if((STYLE_PREVIEW_KEY||'cover')===key)syncSelectedQuestionPreview(key);
 }
 function updCC(el,max){var n=el.value.length,p=el.nextElementSibling;if(p&&p.classList.contains('charCount')){p.textContent=n+'/'+max;p.className='charCount'+(n>max?' over':n>max*.8?' warn':'');}}
-function rebuildVragen(){var pw=g('pw');if(pw)renderClPanel();setTimeout(loadCardPreviews,50);}
+function rebuildVragen(){var pw=g('pw');if(pw)renderClPanel();scheduleCardPreviewWarmup(120);}
 function autoH(el){el.style.height='auto';el.style.height=el.scrollHeight+'px';}
 function editorSkin(){
   var cv=(S.d&&S.d.meta&&S.d.meta.cssVars)||{};
@@ -6592,9 +8567,9 @@ function infoSlideCardHtml(opt,selectedKey){
   var actionsHtml='<div class="stijlSlideActions">'+uploadLbl+cropBtn+deleteBtn+toggleBtn+'</div>';
   // Tile body: editable name for themes and custom pages
   var nameHtml=isTheme
-    ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Klik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
+    ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Dubbelklik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" ondblclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
     :opt.isCustom
-      ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Klik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(customInputValue)+'" placeholder="Naam" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateInfoCustomPageLabel(\''+esc(opt.key)+'\',this.value)"></div>'
+      ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Dubbelklik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" ondblclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(customInputValue)+'" placeholder="Naam" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateInfoCustomPageLabel(\''+esc(opt.key)+'\',this.value)"></div>'
       :'<div class="stijlSlideName">'+esc(cardLabel)+'</div>';
   return '<div class="stijlSlideCard infoSlideCard'+(isSelected?' sel':'')+(opt.excluded?' info-excluded':'')+(hasText?' has-info':'')+'" data-info-key="'+esc(opt.key)+'"'
     +(isDraggable?' draggable="true"':'')
@@ -6832,7 +8807,7 @@ function applyCardPreset(presetId,key,baseHex,accentHex){
   STYLE_PREVIEW_KEY=previewKey;
   uploadDataUrlToPath(path,dataUrl,'Preset: '+preset,function(){
     setCardBuildMode(previewKey,'image');
-    setTimeout(function(){loadCardPreviews();},50);
+    scheduleCardPreviewWarmup(120);
   }).then(function(){
     toast('Preset toegevoegd','green');
   }).catch(function(err){
@@ -6847,6 +8822,40 @@ function updateStyleSetName(val){
   var titleEl=g('editorSetTitle');
   if(titleEl){if(titleEl.tagName==='INPUT')titleEl.value=val||S.activeId;else titleEl.textContent=val||S.activeId;}
   syncEditorHeaderWidths();
+}
+function startEditorSetTitleEdit(el){
+  if(!el||S.activeKind!=='set')return false;
+  el.dataset.beforeEdit=String(el.value||'');
+  el.readOnly=false;
+  el.classList.add('is-editing');
+  el.title='Druk op Enter om op te slaan';
+  syncEditorHeaderWidths();
+  setTimeout(function(){
+    try{el.focus();el.select();}catch(e){}
+  },0);
+  return false;
+}
+function finishEditorSetTitleEdit(el){
+  if(!el||S.activeKind!=='set')return;
+  el.readOnly=true;
+  el.classList.remove('is-editing');
+  el.title='Dubbelklik om naam te wijzigen';
+  syncEditorHeaderWidths();
+}
+function handleEditorSetTitleKey(event,el){
+  if(!el)return;
+  if(event.key==='Enter'){
+    event.preventDefault();
+    el.blur();
+    return;
+  }
+  if(event.key==='Escape'){
+    event.preventDefault();
+    var prev=Object.prototype.hasOwnProperty.call(el.dataset,'beforeEdit')?el.dataset.beforeEdit:String(el.value||'');
+    el.value=prev;
+    updateStyleSetName(prev);
+    el.blur();
+  }
 }
 function updateStyleThemeName(idx,val){
   if(idx<0)return;
@@ -7034,12 +9043,22 @@ function reorderStyleThemes(fromKey,toKey,before){
   markDirty();
   buildStijlPreserveBg(g('pw'));
 }
+function styleSlideThumbDataUrl(opt){
+  opt=opt||{};
+  var bundle=S.d||null;
+  if(!bundle||!S.activeId)return '';
+  if(opt.key==='cover'){
+    return spacePreviewSetCoverDataUrl({id:S.activeId,bundle:bundle},bundle)||'';
+  }
+  return styleThemeThumbDataUrl(bundle,opt.key||'algemeen',opt.file)||'';
+}
 function styleSlideCardHtml(opt,selectedKey){
   var path=styleCardPathForKey(opt.key);
   var sid=safeid(path);
   var hit=((cachedCardAssetForFile(S.activeId,opt.file)||{}).asset)||null;
   var mode=cardBuildModeForKey(S.d.meta||{},opt.key);
-  var thumbModeClass=!hit?(' is-empty-thumb'+(mode==='self'?' is-self-thumb':'')):'';
+  var thumbDataUrl=(hit&&hit.dataUrl)||styleSlideThumbDataUrl(opt);
+  var thumbModeClass=!thumbDataUrl?(' is-empty-thumb'+(mode==='self'?' is-self-thumb':'')):'';
   var isTheme=opt.key!=='cover'&&opt.key!=='algemeen';
   var isAlgemeen=opt.key==='algemeen';
   var infoMode=S.opmPane==='info';
@@ -7060,16 +9079,16 @@ function styleSlideCardHtml(opt,selectedKey){
   var actionsHtml='<div class="stijlSlideActions">'+uploadLbl+cropBtn+dupBtn+delBtn+'</div>';
   return '<div class="stijlSlideCard'+(opt.key===selectedKey?' sel':'')+(isTheme?' is-theme':'')+(isAlgemeen?' is-algemeen':'')+(infoMode?' info-mode':'')+(hasInfo?' has-info':'')+'" data-style-preview-key="'+esc(opt.key)+'" data-path="'+esc(path)+'" data-sid="'+sid+'"'+(isTheme?' draggable="true" data-theme-key="'+esc(opt.key)+'"':'')+(isAlgemeen?' data-theme-key="algemeen"':'')+' onclick="setStylePreviewKey(\''+esc(opt.key)+'\')">'+
     '<div class="stijlSlideThumb'+thumbModeClass+'">'+
-      (hit&&hit.dataUrl
-        ?'<img src="'+hit.dataUrl+'" alt="'+esc(cardLabel)+'">'
+      (thumbDataUrl
+        ?'<img src="'+thumbDataUrl+'" alt="'+esc(cardLabel)+'">'
         :'<div class="stijlSlidePlaceholder">'+pictureIcon+'<span>Achtergrond toevoegen</span></div>')+
       actionsHtml+
     '</div>'+
     '<div class="stijlSlideBody">'+
       (isTheme
-        ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Klik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.value=\''+esc(cardLabel)+'\';this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
+        ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Dubbelklik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" ondblclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.value=\''+esc(cardLabel)+'\';this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
         :isAlgemeen
-          ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Klik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\'algemeen\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="'+esc(cardLabel)+'" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="var _v=(this.value||\'\').trim();endStyleSlideNameEdit(this);if(_v){promoteAlgemeenToTheme(_v);}else{this.value=\''+esc(cardLabel)+'\';}" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.value=\''+esc(cardLabel)+'\';this.blur();}" oninput="event.stopPropagation()"></div>'
+          ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Dubbelklik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" ondblclick="event.stopPropagation();beginStyleSlideNameEdit(\'algemeen\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="'+esc(cardLabel)+'" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="var _v=(this.value||\'\').trim();endStyleSlideNameEdit(this);if(_v){promoteAlgemeenToTheme(_v);}else{this.value=\''+esc(cardLabel)+'\';}" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.value=\''+esc(cardLabel)+'\';this.blur();}" oninput="event.stopPropagation()"></div>'
           :'<div class="stijlSlideName">'+esc(cardLabel)+'</div>')+
       (infoMode?'<div class="stijlSlideInfoDot" title="'+(hasInfo?'Heeft infotekst':'Nog geen infotekst')+'"></div>':'')+
     '</div>'+
@@ -7976,7 +9995,8 @@ function setBackMode(mode){
     CANVAS_CARD_FLIPPED=true;
   }else{
     STYLE_BACK_EDIT_SURFACE='front';
-    CANVAS_CARD_FLIPPED=false;
+    // When choosing a back mode, show the back immediately so the effect is visible.
+    CANVAS_CARD_FLIPPED=true;
   }
   markDirty();
   buildStijlPreserveBg(g('pw'));
@@ -8063,10 +10083,7 @@ function buildCoverTextDropdownContent(){
   var trashSvg='<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg>';
   var addBtn='<button class="textToolbarMenuItem" type="button" onclick="addCoverTextBlock()"><span style="display:inline-flex;align-items:center;gap:6px"><span style="font-size:16px;line-height:1;font-weight:500">+</span><span>Tekstvak toevoegen</span></span></button>';
   var rows=!blocks.length
-    ?'<div style="display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:4px 0 2px">'+
-        addBtn+
-        '<div style="font-size:11.5px;line-height:1.4;color:var(--k3);text-align:center;padding:2px 4px 0">Nog geen tekstvak</div>'+
-      '</div>'
+    ?addBtn
     :blocks.map(function(item,idx){
       var active=idx===activeIdx;
       return '<div class="coverTextCard coverTextDropRow'+(active?' active':'')+'" data-cover-text-idx="'+idx+'">'+
@@ -8074,7 +10091,7 @@ function buildCoverTextDropdownContent(){
         '<button class="coverTextMiniBtn danger" type="button" onclick="event.preventDefault();event.stopPropagation();removeCoverTextBlock('+idx+')">'+trashSvg+'</button>'+
       '</div>';
     }).join('');
-  return '<div class="textToolbarMenuLabel">Tekstvakken</div>'+rows+
+  return rows+
     (blocks.length?'<div class="textToolbarMenuSep" style="margin:6px 0"></div>'+addBtn:'');
 }
 function refreshCoverTextDropdown(){
@@ -8769,6 +10786,26 @@ function previewNightMode(){
   meta.ui=meta.ui||{};
   return !!meta.ui.previewNight;
 }
+function previewNightToggleIconHtml(isNight){
+  return isNight
+    ? '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.9 1.8a5.8 5.8 0 1 0 3.3 10.7 6.2 6.2 0 1 1-3.3-10.7Z"></path></svg>'
+    : '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.4"></circle><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"></path></svg>';
+}
+function refreshPreviewNightUi(){
+  var isNight=previewNightMode()||adminNightMode();
+  Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasWindow')).forEach(function(win){
+    win.classList.toggle('night',isNight);
+  });
+  Array.prototype.slice.call(document.querySelectorAll('[data-preview-night-toggle="1"]')).forEach(function(btn){
+    var label=isNight?'Nachtmodus uitzetten':'Nachtmodus aanzetten';
+    btn.classList.toggle('sel',isNight);
+    btn.setAttribute('aria-label',label);
+    btn.setAttribute('title',label);
+    btn.innerHTML=previewNightToggleIconHtml(isNight);
+  });
+  if(isViewCardsFocusModeActive())refreshFocusPresentationHeadActions();
+  renderBgPreview();
+}
 function previewGridMode(){
   var meta=((S.d||{}).meta=S.d.meta||{});
   meta.ui=meta.ui||{};
@@ -8779,7 +10816,9 @@ function togglePreviewNight(){
   meta.ui=meta.ui||{};
   meta.ui.previewNight=!meta.ui.previewNight;
   markDirty();
-  if(S.clTab==='opmaken')buildStijlPreserveBg(g('pw'));
+  if(S.clTab==='opmaken'){
+    refreshPreviewNightUi();
+  }
 }
 function togglePreviewGrid(){
   var meta=((S.d||{}).meta=S.d.meta||{});
@@ -8790,8 +10829,160 @@ function togglePreviewGrid(){
 }
 var CANVAS_CARD_FLIPPED=false;
 var CANVAS_ZOOM_PCT=100;
+var CANVAS_ZOOM_MIN_PCT=40;
+var CANVAS_ZOOM_MAX_PCT=200;
+var CANVAS_ZOOM_SCOPE_VALUES={};
 var PHONE_CARD_W=340;
+function canvasZoomScopeKeyForPane(activeKind,pane){
+  var kind=activeKind==='space'?'space':'set';
+  var scopePane;
+  if(kind==='space'){
+    scopePane=(pane==='info')?'info':(pane==='inst'?'inst':'space');
+  }else{
+    scopePane=(pane==='inst')?'inst':'editor';
+  }
+  return kind+':'+scopePane;
+}
+function currentCanvasZoomScopeKey(){
+  return canvasZoomScopeKeyForPane(S.activeKind,S.opmPane);
+}
+function rememberCanvasZoomForScope(scopeKey,pct){
+  if(!scopeKey)return;
+  var value=Number(pct);
+  if(!isFinite(value)||value<=0)return;
+  CANVAS_ZOOM_SCOPE_VALUES[scopeKey]=value;
+}
+function restoreCanvasZoomForScope(scopeKey,fallback){
+  var value=scopeKey?Number(CANVAS_ZOOM_SCOPE_VALUES[scopeKey]):NaN;
+  if(isFinite(value)&&value>0)return value;
+  return fallback||100;
+}
+function previewWindowIsVisible(win){
+  if(!win||!win.getBoundingClientRect)return false;
+  var rect=win.getBoundingClientRect();
+  if(!(rect.width>0&&rect.height>0))return false;
+  var cs=window.getComputedStyle?window.getComputedStyle(win):null;
+  if(cs&&(cs.display==='none'||cs.visibility==='hidden'))return false;
+  return true;
+}
+function currentCanvasZoomBounds(){
+  var min=CANVAS_ZOOM_MIN_PCT;
+  var max=CANVAS_ZOOM_MAX_PCT;
+  var fitCaps=[];
+  document.querySelectorAll('.stijlCanvasWindow').forEach(function(win){
+    if(!previewWindowIsVisible(win))return;
+    if(!win||!win.getClientRects||!win.getClientRects().length)return;
+    if(win.classList.contains('site-preview-window')){
+      var siteAvailW=win.clientWidth||0;
+      var siteAvailH=win.clientHeight||0;
+      if(siteAvailW>0&&siteAvailH>0){
+        fitCaps.push(Math.min(siteAvailW/SPACE_PREVIEW_W,siteAvailH/SPACE_PREVIEW_H)*100);
+      }
+      return;
+    }
+    var wrap=win.querySelector('.stijlCardPrevWrap');
+    var visual=win.querySelector('.stijlCardPrevWrap .cardFaceOuter, .stijlCardPrevWrap .adminInfoSlide');
+    if(!wrap||!visual)return;
+    var availW=wrap.clientWidth||0;
+    var availH=wrap.clientHeight||0;
+    var rect=visual.getBoundingClientRect();
+    var appliedScale=parseFloat(visual.style.zoom||'')||1;
+    if(!(availW>0&&availH>0&&rect.width>0&&rect.height>0&&appliedScale>0))return;
+    var baseW=rect.width/appliedScale;
+    var baseH=rect.height/appliedScale;
+    if(!(baseW>0&&baseH>0))return;
+    if(win.classList.contains('info-preview')&&visual.classList.contains('adminInfoSlide')){
+      fitCaps.push((availW/baseW)*100);
+      return;
+    }
+    fitCaps.push(Math.min(availW/baseW,availH/baseH)*100);
+  });
+  if(fitCaps.length){
+    var autoMax=Math.floor(Math.min.apply(null,fitCaps)/5)*5;
+    if(autoMax>0)max=Math.min(max,autoMax);
+  }
+  max=Math.max(min,max);
+  return{min:min,max:max};
+}
+function baseCanvasPreviewShellHeight(){
+  // Mirrors the desktop preview shell clamp in CSS:
+  // clamp(360px, calc(100vh - var(--toolbar-h) - 154px), 468px)
+  var toolbarH=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-h'))||66;
+  return Math.max(360,Math.min(window.innerHeight-toolbarH-154,468));
+}
+function syncCanvasPreviewLayout(){
+  requestAnimationFrame(function(){
+    document.querySelectorAll('.stijlCanvasWindow:not(.site-preview-window)').forEach(function(win){
+      var inner=win.querySelector('.stijlCanvasWindowInner');
+      var card=win.querySelector('.stijlCardPrevWrap');
+      if(!inner||!card)return;
+      var winRect=win.getBoundingClientRect();
+      if(!winRect.width||!winRect.height)return;
+      var topbar=win.querySelector('.stijlCanvasTopbar');
+      var backbar=win.querySelector('.stijlCanvasBackbar');
+      var visual=card.querySelector('.cardFaceOuter, .adminInfoSlide');
+      var setBackbarReserve=34;
+      var sideInset=14;
+      var contentTop=34;
+      var contentBottom=70;
+      if(topbar){
+        var topbarRect=topbar.getBoundingClientRect();
+        sideInset=Math.max(8,Math.round(topbarRect.left-winRect.left));
+        contentTop=Math.max(0,Math.round(topbarRect.bottom-winRect.top)+8);
+      }
+      if(backbar){
+        var backbarRect=backbar.getBoundingClientRect();
+        contentBottom=Math.max(0,Math.round(winRect.bottom-backbarRect.top)-4);
+      }
+      var effectiveBottom=contentBottom;
+      win.style.setProperty('--preview-side-inset',sideInset+'px');
+      win.style.setProperty('--preview-content-top',contentTop+'px');
+      win.style.setProperty('--preview-content-bottom',effectiveBottom+'px');
+      if(win.classList.contains('info-preview')){
+        // The infosheet must start from the exact same visual card baseline as
+        // the regular set preview. Only the extra infosheet text may extend
+        // the preview downward. So we anchor to the shared shell height
+        // instead of the enlarged info-preview height.
+        var previewSide=win.closest('.stijlCanvasSide.preview');
+        var previewShellH=previewSide
+          ? parseFloat(getComputedStyle(previewSide).getPropertyValue('--preview-shell-max-h'))||0
+          : 0;
+        var basePreviewWindowH=previewShellH>0 ? previewShellH : baseCanvasPreviewShellHeight();
+        var infoAvailH=Math.max(0,basePreviewWindowH-contentTop-effectiveBottom);
+        var infoScale=parseFloat(visual&&visual.style.zoom||'')||1;
+        var infoCardFace=card.querySelector('.adminInfoSlideCard');
+        var infoCardFaceRect=infoCardFace&&infoCardFace.getBoundingClientRect?infoCardFace.getBoundingClientRect():null;
+        var infoCardH=(infoCardFaceRect&&infoCardFaceRect.height)?infoCardFaceRect.height:0;
+        if(!(infoCardH>0)){
+          var infoBaseCardW=parseFloat(getComputedStyle(card).getPropertyValue('--editor-preview-card-w'))||320;
+          infoCardH=Math.round((infoBaseCardW*(55/85))*infoScale);
+        }
+        var infoCardStart=contentTop+Math.max(0,Math.round((infoAvailH-infoCardH)/2));
+        card.style.top=infoCardStart+'px';
+        card.style.bottom='auto';
+        card.style.height='auto';
+        card.style.transform='none';
+        return;
+      }
+      card.style.top=contentTop+'px';
+      card.style.bottom=contentBottom+'px';
+      card.style.height='auto';
+      card.style.transform='none';
+    });
+  });
+}
+var CANVAS_VIEWPORT_SYNC_RAF=0;
+function scheduleCanvasViewportSync(){
+  if(CANVAS_VIEWPORT_SYNC_RAF)cancelAnimationFrame(CANVAS_VIEWPORT_SYNC_RAF);
+  CANVAS_VIEWPORT_SYNC_RAF=requestAnimationFrame(function(){
+    CANVAS_VIEWPORT_SYNC_RAF=0;
+    applyCanvasZoom();
+  });
+}
 function applyCanvasZoom(){
+  var bounds=currentCanvasZoomBounds();
+  CANVAS_ZOOM_PCT=Math.max(bounds.min,Math.min(bounds.max,CANVAS_ZOOM_PCT));
+  rememberCanvasZoomForScope(currentCanvasZoomScopeKey(),CANVAS_ZOOM_PCT);
   var scale=CANVAS_ZOOM_PCT/100;
   document.querySelectorAll('.stijlCanvasCardWrap .cardFaceOuter, .stijlCanvasCardWrap .adminInfoSlide').forEach(function(el){
     el.style.zoom=scale;
@@ -8801,6 +10992,7 @@ function applyCanvasZoom(){
     el.style.height=Math.round(SPACE_PREVIEW_H*scale)+'px';
   });
   document.querySelectorAll('.cvZoomPct').forEach(function(el){el.textContent=CANVAS_ZOOM_PCT+'%';});
+  syncCanvasPreviewLayout();
 }
 var SPACE_PREVIEW_REFRESH_TM=0;
 function refreshSpaceSitePreviewFrame(){
@@ -8819,7 +11011,9 @@ function scheduleSpaceSitePreviewRefresh(){
   },40);
 }
 function setCanvasZoom(pct){
-  CANVAS_ZOOM_PCT=Math.max(40,Math.min(300,Math.round(pct/25)*25));
+  var bounds=currentCanvasZoomBounds();
+  CANVAS_ZOOM_PCT=Math.max(bounds.min,Math.min(bounds.max,Math.round(pct/5)*5));
+  rememberCanvasZoomForScope(currentCanvasZoomScopeKey(),CANVAS_ZOOM_PCT);
   applyCanvasZoom();
 }
 function stepCanvasZoom(delta){
@@ -8835,8 +11029,9 @@ function toggleCanvasFlip(){
   CANVAS_CARD_FLIPPED=!CANVAS_CARD_FLIPPED;
   var inner=document.querySelector('.stijlCanvasWindow .cardFaceInner');
   if(inner)inner.classList.toggle('flipped',CANVAS_CARD_FLIPPED);
-  var btn=document.querySelector('.stijlCanvasFlipBtn');
-  if(btn)btn.classList.toggle('sel',CANVAS_CARD_FLIPPED);
+  document.querySelectorAll('.stijlCanvasFlipBtn').forEach(function(btn){
+    btn.classList.toggle('sel',CANVAS_CARD_FLIPPED);
+  });
 }
 function focusShapeEditor(key){
   var sel='.shapeEditor[data-shape-key="'+String(key||'').replace(/"/g,'&quot;')+'"]';
@@ -9097,7 +11292,7 @@ var SHAPE_PAL_ROWS=(function(){
 var STYLE_ICON_QUERY={};
 var STYLE_ICON_SELECTED={};
 var STYLE_ICON_OPEN={};
-var STIJL_SHAPES_OPEN={}; // collapsed per key; default open (undefined = open)
+var STIJL_SHAPES_OPEN={}; // open per key; default open
 var STYLE_ICON_RESULTS={};
 var STYLE_ICON_LOADING={};
 var STYLE_ICON_REQ={};
@@ -9227,7 +11422,6 @@ function fetchStyleIcons(key){
 function buildIconLibraryHtml(key){
   var items=filteredIconLibrary(key);
   var selected=STYLE_ICON_SELECTED[key]||'';
-  var isOpen=!!STYLE_ICON_OPEN[key];
   var q=String(STYLE_ICON_QUERY[key]||'').trim();
   var isLoading=!!STYLE_ICON_LOADING[key];
   var iconButtonHtml=function(item){
@@ -9237,27 +11431,25 @@ function buildIconLibraryHtml(key){
     return '<button class="iconChip'+(selected===item.id?' sel':'')+'" type="button" title="'+esc(item.label)+'" onclick="addStyleIconShape(\''+esc(key)+'\',\''+esc(item.id)+'\')">'+iconHtml+'</button>';
   };
   return '<div class="iconLibrary">'+
-    '<div class="iconLibraryHead"><div class="stijlSectionLabel">Iconen</div><button type="button" aria-label="Icoon toevoegen" title="'+(isOpen?'Sluiten':'Icoon toevoegen')+'" onclick="toggleStyleIconLibrary(\''+esc(key)+'\')" style="border:none;background:transparent;color:#5c8f9f;font:inherit;font-size:21px;font-weight:300;line-height:1;cursor:pointer;padding:0 1px;box-shadow:none;opacity:.88">'+(isOpen?'−':'+')+'</button></div>'+
-    (isOpen
-      ? '<div class="iconGridMini">'+ICON_LIBRARY.slice(0,STYLE_ICON_ROW_LIMIT).map(iconButtonHtml).join('')+'</div>'+
-        '<input class="iconSearch" type="search" value="'+esc(STYLE_ICON_QUERY[key]||'')+'" placeholder="Zoek in het Engels, bv. arrow of heart" oninput="setStyleIconQuery(\''+esc(key)+'\',this.value)">'+
-        (isLoading
-          ? '<div class="iconLoading">Iconen laden…</div>'
-          : q.length>=2
-          ? (items.length
-              ? '<div class="iconGridMini">'+items.slice(0,STYLE_ICON_ROW_LIMIT).map(iconButtonHtml).join('')+'</div>'
-              : '<div class="iconEmpty">Geen iconen gevonden.</div>')
-          : '')
+    '<div class="iconLibraryHead"><div class="shapeLibraryLabel">Iconen</div></div>'+
+    '<div class="iconGridMini">'+ICON_LIBRARY.slice(0,STYLE_ICON_ROW_LIMIT).map(iconButtonHtml).join('')+'</div>'+
+    '<input class="iconSearch" type="search" value="'+esc(STYLE_ICON_QUERY[key]||'')+'" placeholder="Zoek in het Engels, bv. arrow of heart" oninput="setStyleIconQuery(\''+esc(key)+'\',this.value)">'+
+    (isLoading
+      ? '<div class="iconLoading">Iconen laden…</div>'
+      : q.length>=2
+      ? (items.length
+          ? '<div class="iconGridMini">'+items.slice(0,STYLE_ICON_ROW_LIMIT).map(iconButtonHtml).join('')+'</div>'
+          : '<div class="iconEmpty">Geen iconen gevonden.</div>')
       : '')+
   '</div>';
 }
-function toggleStyleIconLibrary(key){
-  STYLE_ICON_OPEN[key]=!STYLE_ICON_OPEN[key];
+function toggleShapesSection(key){
+  toggleStoredOpenState(STIJL_SHAPES_OPEN,key,true);
   refreshShapeEditors(key);
 }
-function toggleShapesSection(key){
-  // undefined/false = open, true = collapsed
-  STIJL_SHAPES_OPEN[key]=STIJL_SHAPES_OPEN[key]===true?false:true;
+function toggleShapeAdjustSection(key){
+  key=key||activeStyleEditKey();
+  toggleStoredOpenState(STYLE_SHAPE_ADJUST_OPEN,key,true);
   refreshShapeEditors(key);
 }
 function setStyleIconQuery(key,val){
@@ -9442,6 +11634,16 @@ function setCardBgTone(val){
   markDirty();
   updateStijlPreview();
 }
+function toggleStyleColorCard(key){
+  key=key||activeStyleEditKey();
+  toggleStoredOpenState(STYLE_CARD_COLOR_OPEN,key,true);
+  buildStijlPreserveBg(g('pw'));
+}
+function toggleStyleBgCard(key){
+  key=key||activeStyleEditKey();
+  toggleStoredOpenState(STYLE_BG_CARD_OPEN,key,true);
+  buildStijlPreserveBg(g('pw'));
+}
 function shapeChipIconHtml(layer){
   if(isTextLayerItem(layer))return textIconSvg();
   if(layer&&layer.type==='imported'&&layer.importMarkup){
@@ -9475,10 +11677,68 @@ function buildShapeEditorHtml(key){
   var layers=getCardShapeLayers(key);
   var active=getShapeActiveIndex(key);
   var layer=layers[active];
+  var coverTextEditing=!!(key==='cover'&&((typeof currentCoverTextIdx==='function'&&currentCoverTextIdx()>=0)||COVER_ELEM_SEL));
+  if(layers.length&&!layer&&!coverTextEditing){
+    active=ensureShapeActiveIndex(key);
+    layer=layers[active];
+  }
   var target=ensureShapeColorTarget(key);
-  var shapesCollapsed=STIJL_SHAPES_OPEN[key]===true;
-  var shapeToggleBtn='<button type="button" aria-label="'+(shapesCollapsed?'Vormen tonen':'Vormen inklappen')+'" title="'+(shapesCollapsed?'Tonen':'Inklappen')+'" onclick="toggleShapesSection(\''+esc(key)+'\')" style="border:none;background:transparent;color:#5c8f9f;font:inherit;font-size:21px;font-weight:300;line-height:1;cursor:pointer;padding:0 1px;box-shadow:none;opacity:.88">'+(shapesCollapsed?'+':'−')+'</button>';
-  var sectionHead='<div class="stijlSectionLabel" style="display:flex;align-items:center;justify-content:space-between">Vormen'+shapeToggleBtn+'</div>';
+  var shapesOpen=storedOpenState(STIJL_SHAPES_OPEN,key,true);
+  var adjustOpen=storedOpenState(STYLE_SHAPE_ADJUST_OPEN,key,true);
+  var sectionHead=buildSectionCollapseToggleHtml({
+    className:'sectionCollapseBtn sectionCollapseBtnInline',
+    label:'Vormen',
+    onclick:'toggleShapesSection(\''+esc(key)+'\')',
+    open:shapesOpen,
+    ariaLabel:'Vormen'
+  });
+  function buildShapeSubsection(label,open,onclick,body,disabled){
+    return '<div class="shapeSubsection'+(open?'':' is-collapsed')+(disabled?' is-disabled':'')+'">'+
+      buildSectionCollapseToggleHtml({
+        className:'sectionCollapseBtn sectionCollapseBtnSub',
+        label:label,
+        onclick:onclick,
+        open:open,
+        ariaLabel:label
+      })+
+      (open?body:'')+
+    '</div>';
+  }
+  function buildEditBody(adjustMarkup,colorMarkup){
+    return '<div class="shapeEditCluster">'+
+      adjustMarkup+
+      '<div class="shapeStaticSection">'+
+        '<div class="shapeLibraryLabel">Kleur</div>'+
+        colorMarkup+
+      '</div>'+
+    '</div>';
+  }
+  var emptyAdjustBody=
+      '<div class="shapeGhost shapeGhostCompact">Selecteer eerst een vorm.</div>'+
+      '<div class="shapeSliderRow">'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Grootte</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:42%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Rotatie</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:56%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+      '</div>';
+  var emptyColorBody=
+      '<div class="shapePaintRow is-disabled">'+
+        '<div class="shapePaintTabs is-disabled">'+
+          '<button class="shapePaintBtn fill sel" type="button" tabindex="-1" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
+          '<button class="shapePaintBtn stroke" type="button" tabindex="-1" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="shapeSwRow shapeSwRowDisabled">'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#ffffff"></button>'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#CFE6DF"></button>'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#C9D8F7"></button>'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#DED8F3"></button>'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#F7E2CC"></button>'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#F4E099"></button>'+
+      '</div>'+
+      '<div class="shapeSliderRow">'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Kleurtoon</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:48%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Opacity</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:72%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+      '</div>';
+  var emptyEditSection=buildShapeSubsection('Bewerken',adjustOpen,'toggleShapeAdjustSection(\''+esc(key)+'\')',buildEditBody(emptyAdjustBody,emptyColorBody),true);
   if(!layers.length||!layer){
     var _textChips=buildCoverTextShapeChips(key);
     var _shapeChips=layers.map(function(item,i){var shape=shapeLayerLabel(item);return '<button class="shapeChip'+(i===active?' sel':'')+'" type="button" title="'+esc(shape+' '+(i+1))+'" aria-label="'+esc(shape+' '+(i+1))+'" onclick="setShapeLayerActive(\''+esc(key)+'\','+i+')">'+shapeChipIconHtml(item)+'</button>';}).join('');
@@ -9493,16 +11753,17 @@ function buildShapeEditorHtml(key){
       ?'<button class="shapeLayerDelete" type="button" title="Verwijderen" onclick="removeSelectedCoverElem()"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'
       :_selTextIdx.length?'<button class="shapeLayerDelete" type="button" title="'+((_selTextIdx.length>1)?'Geselecteerde tekstvakken verwijderen':'Tekstvak verwijderen')+'" onclick="removeSelectedShapeLayers(\''+esc(key)+'\')"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>':'');
     var emptyContent=
-      (_hasChips
-        ? '<div class="shapeActiveWrap">'+
-            '<div class="shapeActiveLabel">Actieve vormen</div>'+
-            '<div class="shapeLayerBar">'+_shapeChips+_textChips+_emptyDeleteBtn+'</div>'+
-          '</div>'
-        : '<div class="shapeGhost">Kies een vorm of tekst om te beginnen.</div>')+
+      '<div class="shapeActiveWrap">'+
+        '<div class="shapeActiveLabel">Actieve vormen</div>'+
+        (_hasChips
+          ? '<div class="shapeLayerBar">'+_shapeChips+_textChips+_emptyDeleteBtn+'</div>'
+          : '<div class="shapeGhost">Kies een vorm of tekst om te beginnen.</div>')+
+      '</div>'+
       _shapeTypeBar+
       buildIconLibraryHtml(key)+
+      emptyEditSection+
       '<div class="shapeEmptyState"></div>';
-    return '<div class="stijlShapes">'+sectionHead+(shapesCollapsed?'':emptyContent)+'</div>';
+    return '<div class="stijlShapes">'+sectionHead+(shapesOpen?emptyContent:'')+'</div>';
   }
   var fillColor=layer?(layer.fill||'#CFE6DF'):'#CFE6DF';
   var strokeColor=layer?(layer.stroke||'#ffffff'):'#ffffff';
@@ -9515,8 +11776,48 @@ function buildShapeEditorHtml(key){
   var selectedTextIndices=(key==='cover'?getCoverTextSelectedIndices():[]);
   var multiSelected=selectedIndices.length>1;
   var hasGroupSelection=selectedIndices.some(function(idx){return isGroupLayer(layers[idx]);});
-  var hasTextSelection=!!selectedTextIndices.length;
   var deleteBtn=layer?'<button class="shapeLayerDelete" type="button" title="'+(multiSelected?'Geselecteerde vormen verwijderen':'Vorm verwijderen')+'" aria-label="'+(multiSelected?'Geselecteerde vormen verwijderen':'Vorm verwijderen')+'" onclick="removeSelectedShapeLayers(\''+esc(key)+'\')"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>':'';
+  var groupAdjustBody=
+      '<div class="shapeGhost shapeGhostCompact">Pas dit aan na degroeperen.</div>'+
+      '<div class="shapeSliderRow">'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Grootte</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:42%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Rotatie</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:56%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+      '</div>';
+  var groupColorBody=
+      '<div class="shapeGhost shapeGhostCompact">Pas dit aan na degroeperen.</div>'+
+      emptyColorBody;
+  var adjustBody=
+      '<div class="shapeSliderRow">'+
+        '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Grootte</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(sizeValue,12,120)+'%" type="range" min="12" max="120" step="1" value="'+sizeValue+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'\');updateShapeField(\''+esc(key)+'\','+active+',\'size\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(sizeValue,'')+'</span></div>'+
+        '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Rotatie</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(rotateValue,-180,180)+'%" type="range" min="-180" max="180" step="1" value="'+rotateValue+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'°\');updateShapeField(\''+esc(key)+'\','+active+',\'rotate\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(rotateValue,'°')+'</span></div>'+
+      '</div>';
+  var colorBody=
+      '<div class="shapePaintRow" style="display:flex;align-items:center;gap:8px;margin-bottom:0">'+
+        '<div class="shapePaintTabs">'+
+          '<button class="shapePaintBtn fill'+(target==='fill'?' sel':'')+'" type="button" title="Vulling" aria-label="Vulling" onclick="setShapeColorTarget(\''+esc(key)+'\',\'fill\')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
+          '<button class="shapePaintBtn stroke'+(target==='stroke'?' sel':'')+'" type="button" title="Outline" aria-label="Outline" onclick="setShapeColorTarget(\''+esc(key)+'\',\'stroke\')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
+        '</div>'+
+        (target==='stroke'
+          ? '<select class="fontSizeSel shapeOutlineSel" aria-label="Dikte" onchange="updateShapeField(\''+esc(key)+'\','+active+',\'strokeWidth\',this.value)">'+
+              ['0','1','2','3','4','6','8'].map(function(v){return '<option value="'+v+'"'+(String(layer.strokeWidth||0)===v?' selected':'')+'>'+v+'px</option>';}).join('')+
+            '</select>'
+          : '')+
+      '</div>'+
+      shapeColorPaletteHtml(key,active,target,target==='stroke'?strokeColor:fillColor)+
+      '<div class="shapeSliderRow">'+
+        '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Kleurtoon</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(target==='stroke'?strokeTone:fillTone,-100,100)+'%" type="range" min="-100" max="100" step="1" value="'+(target==='stroke'?strokeTone:fillTone)+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml((this.value>0?\'+\':\'\')+this.value,\'\');setShapeColorTone(\''+esc(key)+'\','+active+',\''+target+'\',this.value,true)" onchange="setShapeColorTone(\''+esc(key)+'\','+active+',\''+target+'\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(((target==='stroke'?strokeTone:fillTone)>0?'+':'')+(target==='stroke'?strokeTone:fillTone),'')+'</span></div>'+
+        '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Opacity</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(currentOpacity,0,100)+'%" type="range" min="0" max="100" step="1" value="'+currentOpacity+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'%\');updateShapeField(\''+esc(key)+'\','+active+',\''+(target==='stroke'?'strokeOpacity':'fillOpacity')+'\',this.value/100)"><span class="shapeSliderValPill">'+sliderValueHtml(currentOpacity,'%')+'</span></div>'+
+      '</div>';
+  var editSection=buildShapeSubsection(
+    'Bewerken',
+    adjustOpen,
+    'toggleShapeAdjustSection(\''+esc(key)+'\')',
+    buildEditBody(
+      hasGroupSelection?groupAdjustBody:adjustBody,
+      hasGroupSelection?groupColorBody:colorBody
+    ),
+    hasGroupSelection
+  );
   var layerContent=
     '<div class="shapeActiveWrap">'+
       '<div class="shapeActiveLabel">Actieve vormen</div>'+
@@ -9545,29 +11846,10 @@ function buildShapeEditorHtml(key){
         SHAPE_TYPES.map(function(opt){return '<button class="shapeTypeBtn'+(layer&&opt.id===layer.type?' sel':'')+'" type="button" title="'+esc(opt.label)+'" aria-label="'+esc(opt.label)+'" onclick="selectShapeType(\''+esc(key)+'\','+active+',\''+opt.id+'\')">'+shapeIconSvg(opt.id)+'</button>';}).join('')+
         '<label class="shapeTypeImportBtn" title="SVG vorm toevoegen" aria-label="SVG vorm toevoegen"><span>+</span><input type="file" accept=".svg,image/svg+xml" onchange="importShapeSvgFile(\''+esc(key)+'\',this)"></label>'+
       '</div></div>'+
-      (layer&&!hasGroupSelection?
-        '<div class="shapePaintRow" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'+
-          '<div class="shapePaintTabs">'+
-            '<button class="shapePaintBtn fill'+(target==='fill'?' sel':'')+'" type="button" title="Vulling" aria-label="Vulling" onclick="setShapeColorTarget(\''+esc(key)+'\',\'fill\')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
-            '<button class="shapePaintBtn stroke'+(target==='stroke'?' sel':'')+'" type="button" title="Outline" aria-label="Outline" onclick="setShapeColorTarget(\''+esc(key)+'\',\'stroke\')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
-          '</div>'+
-          (target==='stroke'
-            ? '<select class="fontSizeSel shapeOutlineSel" aria-label="Dikte" onchange="updateShapeField(\''+esc(key)+'\','+active+',\'strokeWidth\',this.value)">'+
-                ['0','1','2','3','4','6','8'].map(function(v){return '<option value="'+v+'"'+(String(layer.strokeWidth||0)===v?' selected':'')+'>'+v+'px</option>';}).join('')+
-              '</select>'
-            : '')+
-        '</div>'+
-        shapeColorPaletteHtml(key,active,target,target==='stroke'?strokeColor:fillColor)+
-        '<div class="shapeSliderRow" style="margin-top:12px">'+
-          '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Kleurtoon</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(target==='stroke'?strokeTone:fillTone,-100,100)+'%" type="range" min="-100" max="100" step="1" value="'+(target==='stroke'?strokeTone:fillTone)+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml((this.value>0?\'+\':\'\')+this.value,\'\');setShapeColorTone(\''+esc(key)+'\','+active+',\''+target+'\',this.value,true)" onchange="setShapeColorTone(\''+esc(key)+'\','+active+',\''+target+'\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(((target==='stroke'?strokeTone:fillTone)>0?'+':'')+(target==='stroke'?strokeTone:fillTone),'')+'</span></div>'+
-          '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Opacity</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(currentOpacity,0,100)+'%" type="range" min="0" max="100" step="1" value="'+currentOpacity+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'%\');updateShapeField(\''+esc(key)+'\','+active+',\''+(target==='stroke'?'strokeOpacity':'fillOpacity')+'\',this.value/100)"><span class="shapeSliderValPill">'+sliderValueHtml(currentOpacity,'%')+'</span></div>'+
-          '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Grootte</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(sizeValue,12,120)+'%" type="range" min="12" max="120" step="1" value="'+sizeValue+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'\');updateShapeField(\''+esc(key)+'\','+active+',\'size\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(sizeValue,'')+'</span></div>'+
-          '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Rotatie</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(rotateValue,-180,180)+'%" type="range" min="-180" max="180" step="1" value="'+rotateValue+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'°\');updateShapeField(\''+esc(key)+'\','+active+',\'rotate\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(rotateValue,'°')+'</span></div>'+
-        '</div>'
-      :'')+
-    '</div>'+
-    buildIconLibraryHtml(key);
-  return '<div class="stijlShapes">'+sectionHead+(shapesCollapsed?'':layerContent)+'</div>';
+      buildIconLibraryHtml(key)+
+      editSection+
+    '</div>';
+  return '<div class="stijlShapes">'+sectionHead+(shapesOpen?layerContent:'')+'</div>';
 }
 function refreshShapeEditors(key){
   Array.prototype.slice.call(document.querySelectorAll('.shapeEditor[data-shape-key="'+key.replace(/"/g,'&quot;')+'"]')).forEach(function(el){
@@ -9647,14 +11929,12 @@ function setShapeLayerActive(key,idx,ev){
   startShapeSelTimer(key);
   if(key==='cover')patchCoverTextTargets();
   refreshShapeEditors(key);
-  setTimeout(function(){focusShapeEditor(key);},20);
 }
 function selectShapeType(key,idx,type){
   if(idx<0){addShapeLayer(key,type);return;}
   setShapeSelection(key,[Number(idx)],Number(idx));
   updateShapeField(key,idx,'type',type);
   syncShapeColorTargetForLayer(key,getCardShapeLayers(key)[Number(idx)]);
-  setTimeout(function(){focusShapeEditor(key);},20);
 }
 function moveSelectedShapeLayers(key,dir){
   key=key||activeStyleEditKey();
@@ -9691,7 +11971,6 @@ function moveSelectedShapeLayers(key,dir){
   markDirty();
   refreshShapeEditors(key);
   startShapeSelTimer(key);
-  setTimeout(function(){focusShapeEditor(key);},20);
 }
 var _shapeDrag=null;
 function dragShapeChip(ev,phase,key,idx){
@@ -9970,6 +12249,7 @@ function buildSharedCardEditor(opts){
   var previewKey=opts.previewKey||'algemeen';
   var designKey=opts.designKey||previewKey;
   var layoutMode=opts.layoutMode||'stack';
+  var viewerOnlyPreview=!!opts.viewerOnlyPreview;
   // Use a local copy so the while-loop fill never mutates the real store
   var coverBlocks=coverTextStore().slice();
   if(designKey==='cover'){
@@ -10040,81 +12320,200 @@ function buildSharedCardEditor(opts){
         showInfoMidTitle:!!opts.showInfoMidTitle,
         infoMidTitleKey:opts.infoMidTitleKey||'',
         infoMidTitleText:opts.infoMidTitleText!=null?opts.infoMidTitleText:'',
+        viewerOnlyPreview:viewerOnlyPreview,
         wrapStyle:opts.wrapStyle||''
       });
+  var sharedPreviewShell=window.PK&&window.PK.sharedPreviewShell;
+  var canUseSharedPreviewShell=!!(sharedPreviewShell
+    && typeof sharedPreviewShell.renderCanvasPreviewShell==='function'
+    && typeof sharedPreviewShell.buildTopbarHtml==='function'
+    && typeof sharedPreviewShell.buildBackbarHtml==='function'
+    && typeof sharedPreviewShell.buildZoomControlHtml==='function');
   var previewHintHtml=(opts.previewHint===false||isSpaceSitePreview?'':'<div class="stijlPreviewHint">'+esc(stylePreviewDisplayFile(opts.previewHint||opts.previewFile||'kaart.svg'))+'</div>');
   var nightMode=previewNightMode()||adminNightMode();
   var gridMode=previewGridMode();
-  var nightIcon=nightMode
-    ? '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.9 1.8a5.8 5.8 0 1 0 3.3 10.7 6.2 6.2 0 1 1-3.3-10.7Z"></path></svg>'
-    : '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.4"></circle><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"></path></svg>';
+  var nightIcon=previewNightToggleIconHtml(nightMode);
   var gridIcon='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 2.5v11M10.5 2.5v11M2.5 5.5h11M2.5 10.5h11"></path><rect x="2.5" y="2.5" width="11" height="11" rx="2"></rect></svg>';
   var flipIcon='<span class="flipGlyph" aria-hidden="true">↻</span>';
-  var zoomCtrl='<div class="cvZoomControl">'+
-    '<button class="cvZoomBtn" type="button" onclick="stepCanvasZoom(-25)" title="Uitzoomen">−</button>'+
-    '<button class="cvZoomPct" type="button" onclick="resetCanvasZoom()" title="Telefoon-formaat (100%)">'+CANVAS_ZOOM_PCT+'%</button>'+
-    '<button class="cvZoomBtn" type="button" onclick="stepCanvasZoom(25)" title="Inzoomen">+</button>'+
-  '</div>';
+  var zoomCtrl=canUseSharedPreviewShell
+    ? sharedPreviewShell.buildZoomControlHtml({
+        zoomPct:CANVAS_ZOOM_PCT,
+        zoomOutAttrText:' onclick="stepCanvasZoom(-25)"',
+        resetAttrText:' onclick="resetCanvasZoom()"',
+        zoomInAttrText:' onclick="stepCanvasZoom(25)"'
+      })
+    : buildCanvasZoomControlHtml();
   var backArrow='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>';
   var fwdArrow='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>';
   var homeIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>';
   // Shared nav pill: ← ⌂ →  no separators, clean pill
+  var isViewerFocusMode=viewerOnlyPreview&&getViewCardsBrowserMode()==='focus';
   var hasInfoNav=!!(opts.infoRichCe&&infoPreviewNavKeys().length>1);
-  var navBackFn=isSpaceSitePreview?'previewNavBack()':(opts.infoRichCe?'infoPreviewNavBack()':'cardPreviewNavBack()');
-  var navHomeFn=isSpaceSitePreview?'previewNavHome()':(opts.infoRichCe?'infoPreviewNavHome()':'cardPreviewNavHome()');
-  var navFwdFn=isSpaceSitePreview?'previewNavForward()':(opts.infoRichCe?'infoPreviewNavForward()':'cardPreviewNavForward()');
-  var navHomeTitle=isSpaceSitePreview?'Overzicht':(opts.infoRichCe?'Cover':'Eerste kaart');
-  var previewNavPillHtml=((!opts.infoRichCe||hasInfoNav)
+  var navBackFn=isViewerFocusMode?'viewPreviewNavBack()':(isSpaceSitePreview?'previewNavBack()':(opts.infoRichCe?'infoPreviewNavBack()':'cardPreviewNavBack()'));
+  var navHomeFn=isViewerFocusMode?'exitViewCardsFocusMode()':(isSpaceSitePreview?'previewNavHome()':(opts.infoRichCe?'infoPreviewNavHome()':'cardPreviewNavHome()'));
+  var navFwdFn=isViewerFocusMode?'viewPreviewNavForward()':(isSpaceSitePreview?'previewNavForward()':(opts.infoRichCe?'infoPreviewNavForward()':'cardPreviewNavForward()'));
+  var navHomeTitle=isViewerFocusMode?'Terug naar overzicht':(isSpaceSitePreview?'Overzicht':(opts.infoRichCe?'Cover':'Eerste kaart'));
+  var navCenterHtml;
+  if(isViewerFocusMode){
+    navCenterHtml='<button class="stijlCanvasNightBtn previewNavPosBtn" type="button" title="'+navHomeTitle+'" onclick="'+navHomeFn+'"><span class="previewNavPosText">Overzicht</span></button>';
+  }else if(!isSpaceSitePreview&&!opts.infoRichCe){
+    var _curKey=STYLE_PREVIEW_KEY||'cover';
+    if(_curKey==='cover'){
+      navCenterHtml='<button class="stijlCanvasNightBtn previewNavPosBtn" type="button" title="'+navHomeTitle+'" onclick="'+navHomeFn+'"><span class="previewNavPosText">Cover</span></button>';
+    }else{
+      var _qs=(S.d&&S.d.questions&&S.d.questions[_curKey])||[];
+      var _idx=selectedQuestionIndex(_curKey);
+      var _total=_qs.length||1;
+      var _pos=(Math.min(_idx,_total-1)+1)+' / '+_total;
+      navCenterHtml='<button class="stijlCanvasNightBtn previewNavPosBtn" type="button" title="'+navHomeTitle+'" onclick="'+navHomeFn+'"><span class="previewNavPosText">'+_pos+'</span></button>';
+    }
+  }else{
+    navCenterHtml='<button class="stijlCanvasNightBtn" type="button" title="'+navHomeTitle+'" onclick="'+navHomeFn+'">'+homeIcon+'</button>';
+  }
+  var previewNavPillHtml=(isViewerFocusMode?'':((!opts.infoRichCe||hasInfoNav)
     ?('<div class="previewTopPill previewNavPill">'+
         '<button class="stijlCanvasNightBtn" type="button" title="Vorige" onclick="'+navBackFn+'">'+backArrow+'</button>'+
-        '<button class="stijlCanvasNightBtn" type="button" title="'+navHomeTitle+'" onclick="'+navHomeFn+'">'+homeIcon+'</button>'+
+        navCenterHtml+
         '<button class="stijlCanvasNightBtn" type="button" title="Volgende" onclick="'+navFwdFn+'">'+fwdArrow+'</button>'+
       '</div>')
-    :'<div></div>');
+    :'<div></div>'));
+  var previewNightBtnHtml='<button class="stijlCanvasNightBtn'+(nightMode?' sel':'')+'" data-preview-night-toggle="1" type="button" aria-label="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" title="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" onclick="togglePreviewNight()">'+nightIcon+'</button>';
   var previewActionPillHtml='<div class="previewTopPill">'+
     (isSpaceSitePreview
-      ?('<button class="stijlCanvasNightBtn'+(nightMode?' sel':'')+'" type="button" aria-label="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" title="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" onclick="togglePreviewNight()">'+nightIcon+'</button>')
-      :(((backMode==='blank')?'':('<button class="stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" type="button" aria-label="Kaart omdraaien" title="Kaart omdraaien" onclick="toggleCanvasFlip()">'+flipIcon+'</button>'+
-        '<div class="previewTopPillSep"></div>'))+
-        '<button class="stijlCanvasGridBtn'+(gridMode?' sel':'')+'" type="button" aria-label="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" title="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" onclick="togglePreviewGrid()">'+gridIcon+'</button>'+
-        '<button class="stijlCanvasNightBtn'+(nightMode?' sel':'')+'" type="button" aria-label="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" title="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" onclick="togglePreviewNight()">'+nightIcon+'</button>'))+
+      ?previewNightBtnHtml
+      :(isViewerFocusMode
+        ?''
+        :(((backMode==='blank')?'':('<button class="stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" type="button" aria-label="Kaart omdraaien" title="Kaart omdraaien" onclick="toggleCanvasFlip()">'+flipIcon+'</button>'+
+          '<div class="previewTopPillSep"></div>'))+
+          '<button class="stijlCanvasGridBtn'+(gridMode?' sel':'')+'" type="button" aria-label="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" title="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" onclick="togglePreviewGrid()">'+gridIcon+'</button>'+
+          previewNightBtnHtml)))+
     '</div>';
-  var nightToggleHtml='<div class="stijlCanvasTopbar">'+
-    zoomCtrl+
-    previewNavPillHtml+
-    '<div class="stijlCanvasTopbarRight">'+previewActionPillHtml+'</div>'+
-  '</div>';
-  var previewBackToolbarHtml=(!isSpaceSitePreview&&!opts.infoRichCe&&doubleSided)
-    ?'<div class="stijlCanvasBackbar">'+
-        '<div class="stijlCanvasBackbarLabel">Achterkant</div>'+
-        '<div class="stijlCanvasBackbarGroup">'+
-          '<button class="stijlBackModeBtn'+(backMode==='mirror'?' sel':'')+'" type="button" onclick="setBackMode(\'mirror\')" title="Zelfde ontwerp">Zelfde</button>'+
-          '<button class="stijlBackModeBtn'+(backMode==='reflect'?' sel':'')+'" type="button" onclick="setBackMode(\'reflect\')" title="Zelfde ontwerp gespiegeld">Gespiegeld</button>'+
-          '<button class="stijlBackModeBtn'+(backMode==='blank'?' sel':'')+'" type="button" onclick="setBackMode(\'blank\')" title="Eigen achterkant">Eigen</button>'+
+  var nightToggleHtml=isViewerFocusMode
+    ?''
+    :('<div class="stijlCanvasTopbar">'+
+        zoomCtrl+
+        previewNavPillHtml+
+        '<div class="stijlCanvasTopbarRight">'+previewActionPillHtml+'</div>'+
+      '</div>');
+  if(canUseSharedPreviewShell){
+    nightToggleHtml=isViewerFocusMode
+      ?''
+      :sharedPreviewShell.buildTopbarHtml({
+          zoom:{
+            zoomPct:CANVAS_ZOOM_PCT,
+            zoomOutAttrText:' onclick="stepCanvasZoom(-25)"',
+            resetAttrText:' onclick="resetCanvasZoom()"',
+            zoomInAttrText:' onclick="stepCanvasZoom(25)"'
+          },
+          nav:isViewerFocusMode
+            ?{enabled:false}
+            :((!opts.infoRichCe||hasInfoNav)
+              ?{
+                  centerHtml:navCenterHtml,
+                  backAttrText:' onclick="'+navBackFn+'"',
+                  forwardAttrText:' onclick="'+navFwdFn+'"'
+                }
+              :{
+                  enabled:false,
+                  placeholderHtml:'<div></div>'
+                }),
+          actions:isSpaceSitePreview
+            ?{
+                showNight:true,
+                nightSelected:nightMode,
+                nightAttrText:' data-preview-night-toggle="1" onclick="togglePreviewNight()"'
+              }
+            :{
+                showFlip:!isViewerFocusMode&&backMode!=='blank',
+                flipSelected:CANVAS_CARD_FLIPPED,
+                flipAttrText:' onclick="toggleCanvasFlip()"',
+                showGrid:!isViewerFocusMode,
+                gridSelected:gridMode,
+                gridAttrText:' onclick="togglePreviewGrid()"',
+                showNight:true,
+                nightSelected:nightMode,
+                nightAttrText:' data-preview-night-toggle="1" onclick="togglePreviewNight()"'
+              }
+        });
+  }
+  var previewBackToolbarExtraHtml=(backMode==='blank'
+    ?('<div class="previewEditSurfaceStack">'+
+        '<div class="previewEditSurfacePill previewEditSurfacePill-surface">'+
+          '<button class="previewEditSurfaceBtn'+(!editingBackSurface?' sel':'')+'" type="button" title="Voorkant ontwerpen" onclick="setBackEditSurface(\'front\')">Voor</button>'+
+          '<button class="previewEditSurfaceBtn'+(editingBackSurface?' sel':'')+'" type="button" title="Achterkant ontwerpen" onclick="setBackEditSurface(\'back\')">Achter</button>'+
         '</div>'+
-        (backMode==='blank'
-          ?('<div class="previewEditSurfacePill previewEditSurfacePill-surface">'+
-              '<button class="previewEditSurfaceBtn'+(!editingBackSurface?' sel':'')+'" type="button" title="Voorkant ontwerpen" onclick="setBackEditSurface(\'front\')">Voor</button>'+
-              '<button class="previewEditSurfaceBtn'+(editingBackSurface?' sel':'')+'" type="button" title="Achterkant ontwerpen" onclick="setBackEditSurface(\'back\')">Achter</button>'+
-            '</div>'+
-            '<div class="previewEditSurfacePill previewEditSurfacePill-scope">'+
-              '<button class="previewEditSurfaceBtn'+(backScope!=='card'?' sel':'')+'" type="button" title="Pas het achterkantontwerp toe op de hele set" onclick="setBackDesignScope(\'set\')">Hele set</button>'+
-              '<button class="previewEditSurfaceBtn'+(backScope==='card'?' sel':'')+(canUseCardBackScope?'':' is-disabled')+'" type="button" title="'+(canUseCardBackScope?'Pas het achterkantontwerp alleen toe op deze kaart':'Beschikbaar zodra je een vraag selecteert')+'" onclick="'+(canUseCardBackScope?'setBackDesignScope(\'card\')':'return false')+'"'+(canUseCardBackScope?'':' aria-disabled="true" tabindex="-1"')+'>Deze kaart</button>'+
-            '</div>')
-          :'')+
-      '</div>'
+        '<div class="previewEditSurfacePill previewEditSurfacePill-scope">'+
+          '<button class="previewEditSurfaceBtn'+(backScope!=='card'?' sel':'')+'" type="button" title="Pas het achterkantontwerp toe op de hele set" onclick="setBackDesignScope(\'set\')">Hele set</button>'+
+          '<button class="previewEditSurfaceBtn'+(backScope==='card'?' sel':'')+(canUseCardBackScope?'':' is-disabled')+'" type="button" title="'+(canUseCardBackScope?'Pas het achterkantontwerp alleen toe op deze kaart':'Beschikbaar zodra je een vraag selecteert')+'" onclick="'+(canUseCardBackScope?'setBackDesignScope(\'card\')':'return false')+'"'+(canUseCardBackScope?'':' aria-disabled="true" tabindex="-1"')+'>Deze kaart</button>'+
+        '</div>'+
+      '</div>')
+    :'');
+  var previewBackToolbarHtml=(!viewerOnlyPreview&&!isSpaceSitePreview&&!opts.infoRichCe&&doubleSided)
+    ?(canUseSharedPreviewShell
+      ?sharedPreviewShell.buildBackbarHtml({
+          enabled:true,
+          label:'Achterkant',
+          modes:[
+            {
+              label:'Zelfde',
+              selected:backMode==='mirror',
+              title:'Zelfde ontwerp',
+              attrText:' onclick="setBackMode(\'mirror\')"'
+            },
+            {
+              label:'Gespiegeld',
+              selected:backMode==='reflect',
+              title:'Zelfde ontwerp gespiegeld',
+              attrText:' onclick="setBackMode(\'reflect\')"'
+            },
+            {
+              label:'Eigen',
+              selected:backMode==='blank',
+              title:'Eigen achterkant',
+              attrText:' onclick="setBackMode(\'blank\')"'
+            }
+          ],
+          extraHtml:previewBackToolbarExtraHtml
+        })
+      :'<div class="stijlCanvasBackbar">'+
+          '<div class="stijlCanvasBackbarLabel">Achterkant</div>'+
+          '<div class="stijlCanvasBackbarGroup">'+
+            '<button class="stijlBackModeBtn'+(backMode==='mirror'?' sel':'')+'" type="button" onclick="setBackMode(\'mirror\')" title="Zelfde ontwerp">Zelfde</button>'+
+            '<button class="stijlBackModeBtn'+(backMode==='reflect'?' sel':'')+'" type="button" onclick="setBackMode(\'reflect\')" title="Zelfde ontwerp gespiegeld">Gespiegeld</button>'+
+            '<button class="stijlBackModeBtn'+(backMode==='blank'?' sel':'')+'" type="button" onclick="setBackMode(\'blank\')" title="Eigen achterkant">Eigen</button>'+
+          '</div>'+
+          previewBackToolbarExtraHtml+
+        '</div>')
     :'';
-  var varianceHint=(!isSpaceSitePreview&&!opts.infoRichCe)?previewVarianceHint(previewKey):'';
+  var varianceHint=(!viewerOnlyPreview&&!isSpaceSitePreview&&!opts.infoRichCe)?previewVarianceHint(previewKey):'';
   var previewVarianceHtml=varianceHint
     ?'<div class="stijlCanvasVarianceHint" title="'+esc(varianceHint)+'">'+esc(varianceHint)+'</div>'
     :'';
+  var previewDropAttrs=viewerOnlyPreview?'':' data-style-drop-preview="1" data-style-preview-key="'+esc(designKey)+'"';
+  var canvasWindowClassName='stijlCanvasWindow'+(nightMode?' night':'')+(gridMode?' grid-on':'')+(opts.infoRichCe?' info-preview':'')+(isSpaceSitePreview?' site-preview-window':'')+(viewerOnlyPreview?' viewer-only-preview':'');
   var previewCol=(layoutMode==='canvas'
-      ?'<div class="stijlPreviewCol stijlCanvasCenter"><div class="stijlCanvasStage'+(opts.infoRichCe?' info-preview-stage':'')+'">'+
-        '<div class="stijlCanvasCardWrap">'+
-          (opts.selectorHtml?'<div class="stijlPreviewPick" style="width:100%">'+opts.selectorHtml+'</div>':'')+
-          '<div class="stijlCanvasWindow'+(nightMode?' night':'')+(gridMode?' grid-on':'')+(opts.infoRichCe?' info-preview':'')+(isSpaceSitePreview?' site-preview-window':'')+'" data-style-drop-preview="1" data-style-preview-key="'+esc(designKey)+'">'+nightToggleHtml+previewBackToolbarHtml+previewVarianceHtml+'<div class="bgCanvas" id="bgWrap"><canvas id="bgCanvas"></canvas></div><div class="stijlCanvasWindowInner'+(isSpaceSitePreview?' site-preview-inner':'')+'">'+previewCore+'</div></div>'+
-        '</div>'+
-      '</div></div>'
+      ?(canUseSharedPreviewShell
+        ?sharedPreviewShell.renderCanvasPreviewShell({
+            columnClassName:'stijlPreviewCol stijlCanvasCenter',
+            stageClassName:'stijlCanvasStage'+(opts.infoRichCe?' info-preview-stage':''),
+            cardWrapClassName:'stijlCanvasCardWrap',
+            selectorHtml:opts.selectorHtml||'',
+            windowClassName:canvasWindowClassName,
+            windowAttrText:previewDropAttrs,
+            topbarHtml:nightToggleHtml,
+            varianceHtml:previewVarianceHtml,
+            bgWrapId:'bgWrap',
+            bgCanvasId:'bgCanvas',
+            innerClassName:isSpaceSitePreview?'site-preview-inner':'',
+            previewCoreHtml:previewCore,
+            backbarHtml:previewBackToolbarHtml
+          })
+        :'<div class="stijlPreviewCol stijlCanvasCenter"><div class="stijlCanvasStage'+(opts.infoRichCe?' info-preview-stage':'')+'">'+
+          '<div class="stijlCanvasCardWrap">'+
+            (opts.selectorHtml?'<div class="stijlPreviewPick" style="width:100%">'+opts.selectorHtml+'</div>':'')+
+            '<div class="'+canvasWindowClassName+'"'+previewDropAttrs+'>'+nightToggleHtml+previewVarianceHtml+'<div class="bgCanvas" id="bgWrap"><canvas id="bgCanvas"></canvas></div><div class="stijlCanvasWindowInner'+(isSpaceSitePreview?' site-preview-inner':'')+'">'+previewCore+'</div>'+previewBackToolbarHtml+'</div>'+
+          '</div>'+
+        '</div></div>')
       :'<div class="stijlPreviewCol">'+
         (opts.selectorHtml?'<div class="stijlPreviewPick">'+opts.selectorHtml+'</div>':'')+
         previewCore+
@@ -10178,26 +12577,43 @@ function buildSharedCardEditor(opts){
             '</div>'+
           '</div>';
   var textCard=(designKey==='cover'?'<div class="stijlMiniCard tight" id="coverTextEditorCard">'+buildCoverTextEditorHtml()+'</div>':'');
-  var shapeCard='<div class="stijlMiniCard tight" data-tip="vormen">'+
+  var shapesCardOpen=storedOpenState(STIJL_SHAPES_OPEN,designKey,true);
+  var shapeCard='<div class="stijlMiniCard tight'+(shapesCardOpen?'':' is-collapsed')+'" data-tip="vormen">'+
             '<div class="shapeEditor" data-shape-key="'+esc(designKey)+'">'+buildShapeEditorHtml(designKey)+'</div>'+
           '</div>';
-  var colorCard='<div class="stijlMiniCard" data-tip="kleur">'+
-            '<div class="stijlMiniHead"><div><div class="stijlSectionLabel">Kaartkleur</div></div></div>'+
-            '<div class="stijlEditorSection">'+
-              '<div class="stijlColorStack">'+
-                '<div class="stijlColorLine">'+
-                  (layoutMode==='canvas'?'':'<div class="sLbl">Achtergrond</div>')+
-                  brandColorPaletteHtml('setcbg',editorCardBg,BRAND_FAM_BG)+
-                '</div>'+
-                '<div class="shapeSliderRow" style="margin-top:10px">'+
-                  '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Kleurtoon</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(cardBgToneValue(),-100,100)+'%" type="range" min="-100" max="100" step="1" value="'+cardBgToneValue()+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml((this.value>0?\'+\':\'\')+this.value,\'\');setCardBgTone(this.value)"><span class="shapeSliderValPill">'+sliderValueHtml((cardBgToneValue()>0?'+':'')+cardBgToneValue(),'')+'</span></div>'+
-                '</div>'+
-              '</div>'+
-            '</div>'+
+  var cardColorOpen=storedOpenState(STYLE_CARD_COLOR_OPEN,designKey,true);
+  var bgCardOpen=storedOpenState(STYLE_BG_CARD_OPEN,designKey,true);
+  var colorCard='<div class="stijlMiniCard'+(cardColorOpen?'':' is-collapsed')+'" data-tip="kleur">'+
+            '<div class="stijlMiniHead">'+buildSectionCollapseToggleHtml({
+              className:'sectionCollapseBtn sectionCollapseBtnCard',
+              label:'Kaartkleur',
+              onclick:'toggleStyleColorCard(\''+esc(designKey)+'\')',
+              open:cardColorOpen,
+              ariaLabel:'Kaartkleur'
+            })+'</div>'+
+            (cardColorOpen
+              ? '<div class="stijlEditorSection">'+
+                  '<div class="stijlColorStack">'+
+                    '<div class="stijlColorLine">'+
+                      (layoutMode==='canvas'?'':'<div class="sLbl">Achtergrond</div>')+
+                      brandColorPaletteHtml('setcbg',editorCardBg,BRAND_FAM_BG)+
+                    '</div>'+
+                    '<div class="shapeSliderRow" style="margin-top:6px">'+
+                      '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Kleurtoon</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(cardBgToneValue(),-100,100)+'%" type="range" min="-100" max="100" step="1" value="'+cardBgToneValue()+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml((this.value>0?\'+\':\'\')+this.value,\'\');setCardBgTone(this.value)"><span class="shapeSliderValPill">'+sliderValueHtml((cardBgToneValue()>0?'+':'')+cardBgToneValue(),'')+'</span></div>'+
+                    '</div>'+
+                  '</div>'+
+                '</div>'
+              : '')+
           '</div>';
-  var bgCard='<div class="stijlMiniCard tight" data-tip="achtergrond">'+
-            '<div class="stijlMiniHead"><div><div class="stijlSectionLabel">Achtergrond</div></div></div>'+
-            buildBgCtrls(bgCfg(),accentColor,'',true)+
+  var bgCard='<div class="stijlMiniCard tight'+(bgCardOpen?'':' is-collapsed')+'" data-tip="achtergrond">'+
+            '<div class="stijlMiniHead">'+buildSectionCollapseToggleHtml({
+              className:'sectionCollapseBtn sectionCollapseBtnCard',
+              label:'Achtergrond',
+              onclick:'toggleStyleBgCard(\''+esc(designKey)+'\')',
+              open:bgCardOpen,
+              ariaLabel:'Achtergrond'
+            })+'</div>'+
+            (bgCardOpen?buildBgCtrls(bgCfg(),accentColor,'',true):'')+
           '</div>';
   var toolbarRow='<div class="stijlCanvasToolbar'+(opts.disableToolbar?' is-disabled':'')+'">'+
     typoCard.replace(' span2','')+
@@ -10348,54 +12764,49 @@ function updateEditorHeaderTheme(){
   var key=(S.clTab==='opmaken'&&S.opmPane==='info')
     ?(INFO_SLIDE_KEY||'cover')
     :(STYLE_PREVIEW_KEY||'cover');
-  var isTheme=key&&key!=='cover'&&key!=='algemeen';
   var sep=g('editorThemeSep');
   var thEl=g('editorThemeTitle');
   if(!sep||!thEl)return;
-  if(S.clTab==='inst'){
+  function setThemeHeaderDisplay(label,editable){
+    var name=String(label||'').trim();
     if(thEl.tagName==='INPUT'){
-      thEl.value='Instellingen';
-      thEl.style.display='';
-      thEl.readOnly=true;
-      thEl.classList.add('is-static');
-    }else thEl.textContent='Instellingen';
-    sep.style.display='';
+      thEl.value=name;
+      thEl.style.display=name?'':'none';
+      thEl.readOnly=!editable;
+      thEl.classList.toggle('is-static',!editable);
+      thEl.title=name;
+    }else{
+      thEl.textContent=name;
+    }
+    sep.style.display=name?'':'none';
+  }
+  if(S.clTab==='inst'){
+    setThemeHeaderDisplay('Instellingen',false);
   } else if(S.clTab==='opmaken'&&S.opmPane==='info'&&key){
     var infoOpts=infoSlideOptions(S.d&&S.d.meta||{});
     var active=infoOpts.find(function(opt){return opt.key===key;});
     var activeName=active?(active.label||active.key):key;
     var editable=!!(active&&(active.isCustom||(!active.isCustom&&active.key!=='cover')));
-    if(thEl.tagName==='INPUT'){
-      thEl.value=activeName;
-      thEl.style.display='';
-      thEl.readOnly=!editable;
-      thEl.classList.toggle('is-static',!editable);
-    }else thEl.textContent=activeName;
-    sep.style.display='';
-  } else if(isTheme){
+    setThemeHeaderDisplay(activeName,editable);
+  } else if(S.clTab==='opmaken'&&key){
     var theme=(S.d&&S.d.meta&&S.d.meta.themes||[]).find(function(t){return t.key===key;});
-    var name=theme?(theme.label||theme.key):key;
-    if(thEl.tagName==='INPUT'){
-      thEl.value=name;
-      thEl.style.display='';
-      thEl.readOnly=false;
-      thEl.classList.remove('is-static');
-    }else thEl.textContent=name;
-    sep.style.display='';
+    var isEditableTheme=!!(theme&&key!=='cover'&&key!=='algemeen');
+    var name=theme
+      ?(theme.label||theme.key)
+      :(key==='cover'?'Cover':(key==='algemeen'?'Algemeen':key));
+    setThemeHeaderDisplay(name,isEditableTheme);
   } else {
-    if(thEl.tagName==='INPUT'){
-      thEl.value='';
-      thEl.style.display='none';
-      thEl.readOnly=false;
-      thEl.classList.remove('is-static');
-    }else thEl.textContent='';
-    sep.style.display='none';
+    setThemeHeaderDisplay('',false);
   }
   syncEditorHeaderWidths();
 }
 function syncEditorHeaderWidths(){
   var titleEl=g('editorSetTitle');
   var thEl=g('editorThemeTitle');
+  function cssNum(v){
+    var n=parseFloat(v||'0');
+    return isFinite(n)?n:0;
+  }
   function fitHeaderInput(el,minW,maxW){
     if(!el||el.tagName!=='INPUT')return;
     var text=String(el.value||el.placeholder||'');
@@ -10411,12 +12822,17 @@ function syncEditorHeaderWidths(){
     probe.style.letterSpacing=cs.letterSpacing;
     probe.style.textTransform=cs.textTransform;
     document.body.appendChild(probe);
-    var width=Math.ceil(probe.getBoundingClientRect().width)+8;
+    var horizontalChrome=
+      cssNum(cs.paddingLeft)+
+      cssNum(cs.paddingRight)+
+      cssNum(cs.borderLeftWidth)+
+      cssNum(cs.borderRightWidth)+2;
+    var width=Math.ceil(probe.getBoundingClientRect().width)+Math.ceil(horizontalChrome);
     probe.remove();
     el.style.width=Math.max(minW,Math.min(maxW,width))+'px';
   }
-  fitHeaderInput(titleEl,(titleEl&&titleEl.readOnly)?0:84,320);
-  fitHeaderInput(thEl,(thEl&&thEl.readOnly)?0:56,260);
+  fitHeaderInput(titleEl,(titleEl&&titleEl.readOnly)?36:84,420);
+  fitHeaderInput(thEl,(thEl&&thEl.readOnly)?28:56,280);
 }
 function activeStyleDeletePath(){
   var key=activeStyleEditKey();
@@ -10684,7 +13100,7 @@ function brandTextColorRowOpts(opts){
   return Object.assign(base,opts||{});
 }
 function brandColorRowOpts(opts){
-  var base={compact:true,kind:'shared',rowClass:'brandQuickRow-color'};
+  var base={compact:true,kind:'shared'};
   return Object.assign(base,opts||{});
 }
 function brandTextColorPaletteHtml(action,currentColor,rows,opts){
@@ -11007,43 +13423,15 @@ function buildStijl(target){
   }
   if(!isInfoMode&&!spaceMode&&!isInstMode){
     sliderActionHtml=setEditorActionsHtml();
-    if(SET_EDITOR_PANE==='format'){
+    if(S.editorMode==='view'){
+      sliderHtml=buildViewCardsBrowserHtml();
+    }else if(SET_EDITOR_PANE==='format'){
       var _fmtId=getCardFormatIdForMeta(S.d&&S.d.meta);
       sliderHtml='<div class="stijlSlideRail homeOptionSlideRail setFmtSlideRail">'+fmtStripHtml(_fmtId,'setCardFormatFromSlider')+'</div>';
     }else if(S.setThemeExpanded){
       var _selectedKey=previewState.selected.key;
-      var _themeOpts=previewState.options.filter(function(o){return o.key!=='cover';});
-      var _coverOpt=previewState.options.find(function(o){return o.key==='cover';});
-      // Helper: mini question cards for a theme
-      var _themeQCards=function(themeKey){
-        var qs=(S.d.questions&&S.d.questions[themeKey])||[];
-        if(!qs.length)return '<div class="setThemeQEmpty">Nog geen kaarten</div>';
-        return qs.map(function(q,qi){
-          var front=q.voorkant||q.q||'';
-          var back=q.achterkant||q.back||'';
-          return '<div class="stijlSlideCard setThemeQCard" onclick="setStylePreviewKey(\''+esc(themeKey)+'\')">'+
-            '<div class="stijlSlideThumb setThemeQThumb">'+
-              '<div class="setThemeQFront">'+esc(front||'—')+'</div>'+
-              (back?'<div class="setThemeQBack">'+esc(back)+'</div>':'')+
-            '</div>'+
-          '</div>';
-        }).join('');
-      };
-      var _coverSection=_coverOpt?'<div class="homeHeroPickerSection"><div class="homeHeroPickerLabel">Cover</div><div class="homeHeroPickerRail setThemePickerRail">'+styleSlideCardHtml(_coverOpt,_selectedKey)+'</div></div>':'';
-      var _themesSections=_themeOpts.length
-        ?_themeOpts.map(function(opt){
-            var label=opt.label||opt.key;
-            return '<div class="homeHeroPickerSection setThemeSection">'+
-              '<div class="homeHeroPickerLabel setThemeSectionLabel"><span>'+esc(label)+'</span></div>'+
-              '<div class="homeHeroPickerRail setThemePickerRail">'+
-                _themeQCards(opt.key)+
-              '</div>'+
-            '</div>';
-          }).join('')
-        :'<div class="homeSetSliderEmpty">Nog geen thema\'s.</div>';
       sliderHtml='<div class="homeSliderExpandWrap homeHeroPickerOpen setThemePickerOpen">'+
-        _coverSection+
-        _themesSections+
+        buildSetThemePickerSections(_selectedKey)+
       '</div>';
     }else{
       sliderHtml='<div class="stijlSlideRail">'+sliderHtml+'</div>';
@@ -11055,19 +13443,24 @@ function buildStijl(target){
       INFO_SLIDE_KEY=(infoPages[0]||{}).key||'cover';
     }
   }
+  var isViewMode=!isInfoMode&&!spaceMode&&!isInstMode&&S.editorMode==='view';
+  var viewBrowserMode=isViewMode?getViewCardsBrowserMode():'grid';
+  var isViewFocusMode=isViewMode&&viewBrowserMode==='focus';
   var panelModeClass=(spaceMode?' space-editor-mode':' set-editor-mode');
   var stickyCanvasClass=(layoutMode==='canvas'&&!(spaceMode&&!contentIsInfoMode)?' canvas-sticky-mode':'');
   var html='<div class="panel'+panelModeClass+stickyCanvasClass+'"><div class="stijlShell">'+
-    '<div id="stijl-kaart" class="stijlCardSection">'+
+    '<div id="stijl-kaart" class="stijlCardSection'+(isViewFocusMode?' view-focus':'')+'">'+
       ((spaceMode&&!isInfoMode)
         ?'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+sliderActionHtml+'</div>'
         :(isInfoMode&&spaceMode?'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+infoModeHeaderActionsHtml()+'</div>':(isInfoMode?'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+sliderActionHtml+'</div>':'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+sliderActionHtml+'</div>')))+
-      '<div class="stijlHeaderBar'+(isInfoMode?' info-mode':'')+(isInstMode?' inlineSettingsHeader':'')+(spaceMode&&!isInfoMode?' space-layout-header home-set-header':'')+'">'+
-        (spaceMode&&!isInfoMode
-          ? sliderHtml
-          : (isInfoMode?'<div class="stijlSlideRail">'+sliderHtml+'</div>':sliderHtml))+
-      '</div>'+
-      '<div class="stijlSectionTitle'+(spaceMode&&!contentIsInfoMode?' homeOpmakenTitle':'')+'">'+(spaceMode?'Pagina opmaken':(contentIsInfoMode?'Pagina opmaken':'Kaart opmaken'))+'</div>'+
+      (isViewMode
+        ? '<div class="evpViewerSidebar'+(isViewFocusMode?' is-hidden':'')+'">'+sliderHtml+'</div>'
+        : '<div class="stijlHeaderBar'+(isInfoMode?' info-mode':'')+(isInstMode?' inlineSettingsHeader':'')+(spaceMode&&!isInfoMode?' space-layout-header home-set-header':'')+((!isInfoMode&&!spaceMode&&!isInstMode)?' has-theme-rail-toggle':'')+((!isInfoMode&&!spaceMode&&!isInstMode&&S.setThemeExpanded)?' is-expanded-slider':'')+'">'+
+            ((!isInfoMode&&!spaceMode&&!isInstMode)?setEditorThemeToggleHtml():'')+
+            (spaceMode&&!isInfoMode
+              ? sliderHtml
+              : (isInfoMode?'<div class="stijlSlideRail">'+sliderHtml+'</div>':sliderHtml))+
+          '</div>')+
       buildSharedCardEditor({
         selectorHtml:'',
         wrapId:'stijlCardPrevWrap',
@@ -11091,6 +13484,7 @@ function buildStijl(target){
         showInfoMidTitle:contentIsInfoMode&&infoKey!=='cover'&&!!(((m.themes||[]).find(function(t){return t.key===infoKey;}))||((m.infoPages||[]).find(function(p){return p.key===infoKey;}))),
         infoMidTitleKey:contentIsInfoMode?infoKey:null,
         infoMidTitleText:contentIsInfoMode?infoMidTitleText(infoKey):'',
+        viewerOnlyPreview:isViewMode,
         layoutMode:layoutMode,
         hideToolbar:false,
         hideShapeCard:false,
@@ -11103,6 +13497,7 @@ function buildStijl(target){
         leftCardOrder:(spaceMode&&!contentIsInfoMode?['bg','shape','color']:['shape','color','bg']),
         sidePanelHtml:'<div class="stijlQuestionPaneOuter"><div class="stijlQuestionPane'+(contentIsInfoMode?' info-mode':'')+'">'+'<div id="stijlSidePaneBody"></div></div></div><div id="globalTipBlock" class="globalTipBlock"></div>'
       })+
+      (isViewFocusMode?buildViewFocusRailHtml():'')+
     '</div>'+
     (layoutMode==='canvas'?'':('<div id="stijl-bg" class="stijlCardSection" data-tip="achtergrond">'+
       '<div class="stijlSectionTitle">Achtergrond</div>'+
@@ -11128,14 +13523,17 @@ function buildStijl(target){
 
   var sidePane=g('stijlSidePaneBody');
   if(sidePane){
+    var tipPaneId=contentPane;
     if(spaceMode&&contentPane==='space'){
       buildSpacePane(sidePane);
     }else if(contentPane==='vragen'){
-      buildVragen(sidePane,{filterKey:STYLE_PREVIEW_KEY||'cover'});
+      var activeVraagKey=STYLE_PREVIEW_KEY||'cover';
+      buildVragen(sidePane,{filterKey:activeVraagKey});
+      if(activeVraagKey==='cover')tipPaneId='cover';
     }else{
       buildInfoPane(sidePane);
     }
-    renderGlobalTip(contentPane);
+    renderGlobalTip(tipPaneId);
     initTipHovers();
     setTimeout(focusOpmakenSideContent,30);
   }
@@ -11321,6 +13719,7 @@ function updateStijlPreview(){
     node.classList.toggle('hasBg',!!bgHex);
     node.style.setProperty('--cp-text-bg',bgHex||'transparent');
   });
+  syncCanvasPreviewLayout();
 }
 function setTextAlign(val){
   if(RT.richCeTarget&&RT.richCeTarget.dataset.richType!=='question'){var ac={left:'justifyLeft',center:'justifyCenter',right:'justifyRight'};if(ac[val])applyRichCeCmd(ac[val]);return;}
@@ -11606,11 +14005,22 @@ function deriveAutoBgSettings(){
     seedKey:themeKeys.join('|')+'__'+palette.join('|')+'__'+weightedShapes.join('|')
   };
 }
+function focusPreviewBgShapeScaleFactor(W,H){
+  var currentW=Math.max(1,Number(W)||0);
+  var currentH=Math.max(1,Number(H)||0);
+  var refW=Math.max(1,PREVIEW_BG_SCALE_REF.width||600);
+  var refH=Math.max(1,PREVIEW_BG_SCALE_REF.height||780);
+  var scaleX=currentW/refW;
+  var scaleY=currentH/refH;
+  var scale=Math.sqrt(scaleX*scaleY);
+  return Math.max(1,Math.min(3.2,scale));
+}
 
 function paintSharedPreviewBackground(ctx,W,H,opts){
   opts=opts||{};
   var bg=bgCfg();
   var isNight=!!opts.isNight;
+  var presentationMode=!!opts.presentationMode;
   var autoSettings=bg.autoMode!==false?deriveAutoBgSettings():null;
   var pal=autoSettings?autoSettings.palette:(Array.isArray(bg.palette)&&bg.palette.length?bg.palette:DEFAULT_INDEX_BG_PALETTE.slice(0,1));
   var darkPalette=(Array.isArray(bg.darkPalette)&&bg.darkPalette.length?bg.darkPalette:['#67C5BB','#74CEC4','#7FD1C8','#8AD8D0','#93DCD4']);
@@ -11623,6 +14033,11 @@ function paintSharedPreviewBackground(ctx,W,H,opts){
   var irr=autoSettings?autoSettings.irregularity:(typeof bg.blobIrregularity==='number'?bg.blobIrregularity:0.35);
   var shapeSource=autoSettings?(autoSettings.weightedShapes&&autoSettings.weightedShapes.length?autoSettings.weightedShapes:autoSettings.shapes):selectedBgShapes(bg);
   var seedShapes=autoSettings?(autoSettings.weightedShapes&&autoSettings.weightedShapes.length?autoSettings.weightedShapes:autoSettings.shapes):shapeSource;
+  var presentationScale=presentationMode
+    ?((typeof opts.presentationScale==='number'&&isFinite(opts.presentationScale)&&opts.presentationScale>0)
+      ?opts.presentationScale
+      :focusPreviewBgShapeScaleFactor(W,H))
+    :1;
   if(window.PK&&window.PK.previewBackground&&typeof window.PK.previewBackground.drawToCanvas==='function'){
     window.PK.previewBackground.drawToCanvas(ctx,{
       width:W,
@@ -11634,8 +14049,8 @@ function paintSharedPreviewBackground(ctx,W,H,opts){
       count:count,
       alphaBoost:alphaBoost,
       darkAlphaBoost:darkAlphaBoost,
-      sizeScale:sizeScale,
-      darkSizeScale:darkSizeScale,
+      sizeScale:sizeScale*presentationScale,
+      darkSizeScale:darkSizeScale*presentationScale,
       darkMix:darkMix,
       irregularity:irr,
       shapeSource:shapeSource,
@@ -11656,7 +14071,9 @@ function paintSharedPreviewBackground(ctx,W,H,opts){
   var pos=[];
   var aspect=W/Math.max(H,1);
   var phoneRef=780;
-  var baseDim=phoneRef*(aspect>1?0.8:1);
+  var maxDim=Math.max(W,H);
+  var scaleUp=Math.max(1,Math.pow(maxDim/phoneRef,0.3));
+  var baseDim=phoneRef*(aspect>1?0.8:1)*scaleUp;
   if(useGrid){
     var cols=Math.ceil(Math.sqrt(count)),rows=Math.ceil(count/cols);
     for(var i=0;i<count;i++){
@@ -11671,7 +14088,8 @@ function paintSharedPreviewBackground(ctx,W,H,opts){
     var warm=(hsl[0]>=0&&hsl[0]<=70)||(hsl[0]>=290&&hsl[0]<=360),amt=warm?.12:.1;
     if(hsl[2]>.75)amt=warm?.18:.14;
     var alpha=isNight?Math.min((0.22+rnd()*.10)*darkAlphaBoost,.6):Math.min(((warm?.19:.24)+rnd()*.1)*alphaBoost,.68);
-    var radius=(baseDim*(.19+rnd()*.16))*(isNight?darkSizeScale:sizeScale);
+    if(presentationMode)alpha*=isNight?0.92:0.86;
+    var radius=(baseDim*(.19+rnd()*.16))*(isNight?darkSizeScale:sizeScale)*presentationScale;
     var shapeType=drawShapes[k%drawShapes.length]||'organic';
     ctx.globalAlpha=alpha;
     ctx.fillStyle=isNight?mixHexAdmin(raw,'#1b1840',darkMix):mixW(raw,amt);
@@ -11693,6 +14111,9 @@ function paintSharedPreviewBackground(ctx,W,H,opts){
 }
 
 var PREVIEW_BG_RENDER_REF={windowW:0,logicalH:0};
+var PREVIEW_BG_SCALE_REF={width:0,height:0};
+var PREVIEW_BG_CARD_REF={logicalW:0,logicalH:0,cardX:0,cardY:0,cardW:0,cardH:0};
+var PREVIEW_BG_SNAPSHOT={canvas:null,width:0,height:0,cardX:0,cardY:0,cardW:0,cardH:0};
 function previewBgLogicalSize(wrap,W,H){
   var win=wrap&&typeof wrap.closest==='function'?wrap.closest('.stijlCanvasWindow'):null;
   if(!win)return {width:W,height:H};
@@ -11703,6 +14124,81 @@ function previewBgLogicalSize(wrap,W,H){
     PREVIEW_BG_RENDER_REF.logicalH=Math.max(PREVIEW_BG_RENDER_REF.logicalH||0,H);
   }
   return {width:W,height:PREVIEW_BG_RENDER_REF.logicalH||H};
+}
+function previewBgCardMetrics(wrap){
+  if(!wrap||!wrap.getBoundingClientRect)return null;
+  var card=wrap.querySelector('.cardFaceOuter, .adminInfoSlide');
+  if(!card||!card.getBoundingClientRect)return null;
+  var wrapRect=wrap.getBoundingClientRect();
+  var cardRect=card.getBoundingClientRect();
+  if(!(wrapRect.width>0&&wrapRect.height>0&&cardRect.width>0&&cardRect.height>0))return null;
+  return {
+    x:cardRect.left-wrapRect.left,
+    y:cardRect.top-wrapRect.top,
+    w:cardRect.width,
+    h:cardRect.height
+  };
+}
+function capturePreviewBackgroundReferenceMetrics(wrap){
+  if(!wrap||!wrap.getBoundingClientRect)return null;
+  var wrapRect=wrap.getBoundingClientRect();
+  if(!(wrapRect.width>0&&wrapRect.height>0))return null;
+  var logical=previewBgLogicalSize(wrap,Math.round(wrapRect.width),Math.round(wrapRect.height));
+  var cardMetrics=previewBgCardMetrics(wrap);
+  if(!cardMetrics)return null;
+  PREVIEW_BG_SCALE_REF.width=logical.width;
+  PREVIEW_BG_SCALE_REF.height=logical.height;
+  PREVIEW_BG_CARD_REF.logicalW=logical.width;
+  PREVIEW_BG_CARD_REF.logicalH=logical.height;
+  PREVIEW_BG_CARD_REF.cardX=cardMetrics.x;
+  PREVIEW_BG_CARD_REF.cardY=cardMetrics.y;
+  PREVIEW_BG_CARD_REF.cardW=cardMetrics.w;
+  PREVIEW_BG_CARD_REF.cardH=cardMetrics.h;
+  return {
+    logical:logical,
+    card:cardMetrics
+  };
+}
+function capturePreviewBackgroundSnapshot(wrap){
+  if(!wrap||!wrap.getBoundingClientRect)return null;
+  var srcCanvas=wrap.querySelector('canvas');
+  var wrapRect=wrap.getBoundingClientRect();
+  var cardMetrics=previewBgCardMetrics(wrap);
+  if(!srcCanvas||!cardMetrics||!(wrapRect.width>0&&wrapRect.height>0&&srcCanvas.width>0&&srcCanvas.height>0))return null;
+  var snap=document.createElement('canvas');
+  snap.width=srcCanvas.width;
+  snap.height=srcCanvas.height;
+  var snapCtx=snap.getContext('2d');
+  if(!snapCtx)return null;
+  snapCtx.drawImage(srcCanvas,0,0);
+  var scaleX=srcCanvas.width/wrapRect.width;
+  var scaleY=srcCanvas.height/wrapRect.height;
+  PREVIEW_BG_SNAPSHOT.canvas=snap;
+  PREVIEW_BG_SNAPSHOT.width=srcCanvas.width;
+  PREVIEW_BG_SNAPSHOT.height=snap.height;
+  PREVIEW_BG_SNAPSHOT.cardX=cardMetrics.x*scaleX;
+  PREVIEW_BG_SNAPSHOT.cardY=cardMetrics.y*scaleY;
+  PREVIEW_BG_SNAPSHOT.cardW=cardMetrics.w*scaleX;
+  PREVIEW_BG_SNAPSHOT.cardH=cardMetrics.h*scaleY;
+  return PREVIEW_BG_SNAPSHOT;
+}
+function drawPreviewSnapshotIntoCanvas(ctx,actualW,actualH,snap){
+  if(!ctx||!snap||!snap.canvas||!(snap.width>0&&snap.height>0))return false;
+  // The visible preview background is already a final cropped composition.
+  // Focus mode should enlarge that preview window itself, not re-anchor the
+  // composition on the card. Center-cover scaling keeps the same background
+  // feeling as the source preview, only at presentation size.
+  var scale=Math.max(
+    actualW/Math.max(1,snap.width),
+    actualH/Math.max(1,snap.height)
+  );
+  var drawW=snap.width*scale;
+  var drawH=snap.height*scale;
+  var dx=(actualW-drawW)/2;
+  var dy=(actualH-drawH)/2;
+  ctx.clearRect(0,0,actualW,actualH);
+  ctx.drawImage(snap.canvas,0,0,snap.width,snap.height,dx,dy,drawW,drawH);
+  return true;
 }
 function drawPreviewBackgroundIntoCanvas(ctx,actualW,actualH,logicalW,logicalH,opts){
   if(!ctx)return;
@@ -11720,7 +14216,26 @@ function drawPreviewBackgroundIntoCanvas(ctx,actualW,actualH,logicalW,logicalH,o
   }
   paintSharedPreviewBackground(offCtx,logicalW,logicalH,opts);
   ctx.clearRect(0,0,actualW,actualH);
-  ctx.drawImage(off,0,0,logicalW,actualH,0,0,actualW,actualH);
+  var refCard=opts&&opts.referenceCard;
+  var curCard=opts&&opts.currentCard;
+  var useCardAnchoredFit=!!(refCard&&curCard&&refCard.w>0&&refCard.h>0&&curCard.w>0&&curCard.h>0);
+  var scale,drawW,drawH,dx,dy;
+  if(useCardAnchoredFit){
+    var cardScaleX=curCard.w/refCard.w;
+    var cardScaleY=curCard.h/refCard.h;
+    scale=(cardScaleX+cardScaleY)/2;
+    drawW=logicalW*scale;
+    drawH=logicalH*scale;
+    dx=(curCard.x+(curCard.w/2)) - ((refCard.x+(refCard.w/2))*scale);
+    dy=(curCard.y+(curCard.h/2)) - ((refCard.y+(refCard.h/2))*scale);
+  }else{
+    scale=Math.max(actualW/Math.max(1,logicalW),actualH/Math.max(1,logicalH));
+    drawW=logicalW*scale;
+    drawH=logicalH*scale;
+    dx=(actualW-drawW)/2;
+    dy=(actualH-drawH)/2;
+  }
+  ctx.drawImage(off,0,0,logicalW,logicalH,dx,dy,drawW,drawH);
 }
 
 // Canvas BG preview follows the actual preview window ratio.
@@ -11735,8 +14250,47 @@ function renderBgPreview(){
     canvas.width=W2*2;canvas.height=H2*2;canvas.style.width=W2+'px';canvas.style.height=H2+'px';
     var ctx=canvas.getContext('2d');if(!ctx)return;
     var isNight=previewNightMode()||adminNightMode();
-    var logical=previewBgLogicalSize(wrap,W2,H2);
-    drawPreviewBackgroundIntoCanvas(ctx,W2*2,H2*2,logical.width*2,logical.height*2,{isNight:isNight,baseFill:previewCardsBaseFill(isNight)});
+    var presentationMode=isViewCardsFocusModeActive();
+    var focusSurface=focusPreviewSurfacePalette(isNight,STYLE_PREVIEW_KEY||'cover');
+    applyFocusPreviewSurfaceVars(presentationMode?focusSurface:null);
+    var currentCard=previewBgCardMetrics(wrap);
+    var logical=(presentationMode&&PREVIEW_BG_SCALE_REF.width&&PREVIEW_BG_SCALE_REF.height)
+      ?{width:PREVIEW_BG_SCALE_REF.width,height:PREVIEW_BG_SCALE_REF.height}
+      :previewBgLogicalSize(wrap,W2,H2);
+    if(presentationMode&&PREVIEW_BG_SNAPSHOT.canvas){
+      var usedSnapshot=drawPreviewSnapshotIntoCanvas(ctx,W2*2,H2*2,PREVIEW_BG_SNAPSHOT);
+      if(usedSnapshot)return;
+    }
+    if(!presentationMode&&currentCard){
+      PREVIEW_BG_SCALE_REF.width=logical.width;
+      PREVIEW_BG_SCALE_REF.height=logical.height;
+      PREVIEW_BG_CARD_REF.logicalW=logical.width;
+      PREVIEW_BG_CARD_REF.logicalH=logical.height;
+      PREVIEW_BG_CARD_REF.cardX=currentCard.x;
+      PREVIEW_BG_CARD_REF.cardY=currentCard.y;
+      PREVIEW_BG_CARD_REF.cardW=currentCard.w;
+      PREVIEW_BG_CARD_REF.cardH=currentCard.h;
+    }
+    var presentationScale=1;
+    drawPreviewBackgroundIntoCanvas(ctx,W2*2,H2*2,logical.width*2,logical.height*2,{
+      isNight:isNight,
+      presentationMode:presentationMode,
+      presentationScale:presentationScale,
+      baseFill:presentationMode?focusSurface.canvas:previewCardsBaseFill(isNight),
+      referenceCard:(presentationMode&&PREVIEW_BG_CARD_REF.cardW&&PREVIEW_BG_CARD_REF.cardH)?{
+        x:PREVIEW_BG_CARD_REF.cardX*2,
+        y:PREVIEW_BG_CARD_REF.cardY*2,
+        w:PREVIEW_BG_CARD_REF.cardW*2,
+        h:PREVIEW_BG_CARD_REF.cardH*2
+      }:null,
+      currentCard:(presentationMode&&currentCard)?{
+        x:currentCard.x*2,
+        y:currentCard.y*2,
+        w:currentCard.w*2,
+        h:currentCard.h*2
+      }:null
+    });
+    if(!presentationMode&&currentCard)capturePreviewBackgroundSnapshot(wrap);
   });
 }
 function prng(s){var a=s>>>0;return function(){a|=0;a=(a+0x6D2B79F5)|0;var t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
@@ -11873,11 +14427,11 @@ function saveSet(cb){
       resetHistory(S.d);
       syncDirtyFromSnapshot();
       lsDel('pk_draft_'+id);
-      if(btn){btn.disabled=false;btn.innerHTML=saveLabel;}
+      if(btn){btn.disabled=false;btn.innerHTML=buildTopSaveBtnInnerHtml(saveLabel);}
       setTopSaveStatus('saved','Opgeslagen',2600);
       renderSidebar();refreshChecklistChrome();toast('Opgeslagen ✓','green');if(typeof cb==='function')cb();
     }).catch(function(e){
-      if(btn){btn.disabled=false;btn.innerHTML=saveLabel;}
+      if(btn){btn.disabled=false;btn.innerHTML=buildTopSaveBtnInnerHtml(saveLabel);}
       setTopSaveStatus('error','Opslaan mislukt',3400);
       toast('Fout: '+e.message,'red');
     });
@@ -11885,7 +14439,7 @@ function saveSet(cb){
   Promise.all([refreshSetShas(id,d),refreshIndexSha()]).then(function(){
     return doSave();
   }).catch(function(e){
-    if(btn){btn.disabled=false;btn.innerHTML=saveLabel;}
+    if(btn){btn.disabled=false;btn.innerHTML=buildTopSaveBtnInnerHtml(saveLabel);}
     setTopSaveStatus('error','Opslaan mislukt',3400);
     toast('Fout: '+e.message,'red');
   });
@@ -11968,7 +14522,7 @@ function deleteCardFile(path,sid){
     });
     refreshLibGrid(S.activeId);
     refreshAdminPanel();
-    setTimeout(loadCardPreviews,50);
+    scheduleCardPreviewWarmup(120);
     toast('Verwijderd','green');
   }).catch(function(e){toast('Fout: '+e.message,'red');});
 }
@@ -11990,7 +14544,7 @@ function removeLibraryFile(path){
     });
     refreshLibGrid(S.activeId);
     refreshAdminPanel();
-    setTimeout(loadCardPreviews,50);
+    scheduleCardPreviewWarmup(120);
     toast('Verwijderd','green');
   }).catch(function(e){toast('Fout bij verwijderen: '+e.message,'red');});
 }
@@ -12002,7 +14556,7 @@ function deleteGhFolder(folderPath){  return api('/contents/'+folderPath).then(f
     }));
   }).catch(function(){});
 }
-function doDelete(){showModal('<h3>Set verwijderen?</h3><p>Verwijdert <strong>'+esc(S.d&&S.d.meta&&S.d.meta.title||S.activeId)+'</strong> en alle bijbehorende data permanent.</p><div class="mAct"><button class="mCa" onclick="closeModal()">Annuleren</button><button class="mDng" onclick="execDel()">Verwijderen</button></div>');}
+function doDelete(){showModal('<h3>Naar prullenbak?</h3><p>Zet <strong>'+esc(S.d&&S.d.meta&&S.d.meta.title||S.activeId)+'</strong> in de prullenbak. Je kunt hem binnen 30 dagen herstellen.</p><div class="mAct"><button class="mCa" onclick="closeModal()">Annuleren</button><button class="mDng" onclick="execDel()">Naar prullenbak</button></div>');}
 function execDel(){
   closeModal();var id=S.activeId;
   S.sets=S.sets.filter(function(s){return s.id!==id;});
@@ -12357,6 +14911,16 @@ document.addEventListener('drop',function(ev){
     return;
   }
 });
+function handleFocusPresentationFullscreenChange(){
+  var active=isFocusPresentationFullscreenActive();
+  var app=g('app');
+  if(app)app.classList.toggle('focus-presentation-active',active&&isViewCardsFocusModeActive());
+  if(!active&&isViewCardsFocusModeActive())exitViewCardsFocusMode();
+}
+document.addEventListener('fullscreenchange',handleFocusPresentationFullscreenChange);
+document.addEventListener('webkitfullscreenchange',handleFocusPresentationFullscreenChange);
+document.addEventListener('mozfullscreenchange',handleFocusPresentationFullscreenChange);
+document.addEventListener('MSFullscreenChange',handleFocusPresentationFullscreenChange);
 document.addEventListener('focusin',function(ev){
   if(isTextToolbarTarget(ev.target)) showFloatingTextBar(ev.target);
 });
@@ -12417,7 +14981,12 @@ window.addEventListener('scroll',function(){
 },true);
 window.addEventListener('resize',function(){
   if(RT.target) syncFloatingTextBar();
+  scheduleCanvasViewportSync();
 });
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',scheduleCanvasViewportSync);
+  window.visualViewport.addEventListener('scroll',scheduleCanvasViewportSync);
+}
 var floatingBar=getFloatingTextBar();
 if(floatingBar){
   floatingBar.addEventListener('mousedown',function(ev){ev.preventDefault();});
@@ -12440,7 +15009,24 @@ document.addEventListener('keydown',function(e){
     }
   }
   if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();if(S.activeId&&S.dirty)saveSet();return;}
-  if(e.key==='Escape'){closeModal();return;}
+  var aeNav=document.activeElement;
+  var tagNav=aeNav&&aeNav.tagName?aeNav.tagName.toLowerCase():'';
+  var typingNav=!!(aeNav&&(aeNav.isContentEditable||tagNav==='input'||tagNav==='textarea'||tagNav==='select'));
+  var focusPresentationMode=isViewCardsFocusModeActive()&&!typingNav&&!e.metaKey&&!e.ctrlKey&&!e.altKey;
+  var overlay=g('ovl');
+  var modalOpen=!!(overlay&&!overlay.classList.contains('hidden'));
+  if(e.key==='Escape'){
+    if(modalOpen){closeModal();return;}
+    if(focusPresentationMode){e.preventDefault();exitViewCardsFocusMode();return;}
+    closeModal();
+    return;
+  }
+  if(focusPresentationMode&&/^Arrow(Left|Right|Up|Down)$/.test(e.key)){
+    e.preventDefault();
+    if(e.key==='ArrowLeft'||e.key==='ArrowUp')viewPreviewNavBack();
+    else viewPreviewNavForward();
+    return;
+  }
   if(S.clTab==='opmaken'&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&/^Arrow(Left|Right|Up|Down)$/.test(e.key)){
     var aeMove=document.activeElement;
     var tagMove=aeMove&&aeMove.tagName?aeMove.tagName.toLowerCase():'';
@@ -12488,6 +15074,10 @@ window.addEventListener('beforeunload',function(e){if(S.dirty){e.preventDefault(
 window.addEventListener('message',function(e){
   if(!e.data||e.data.uitgesproken!==1)return;
   if(e.data.type==='openSet'&&e.data.id)openSpacePreviewCards(e.data.id);
+  if(e.data.type==='wizardHeaderSync'){
+    syncDashboardWizardHeader(e.data.payload||{});
+    return;
+  }
 });
 
 // ═══════════════════════════════════════════
@@ -12544,6 +15134,52 @@ function livePreviewUrl(){
     return '/'+encodeURIComponent(S.spaceSlug)+'/'+encodeURIComponent(activeSet.slug||activeSet.id)+'/';
   }
   return '../kaarten/?set='+encodeURIComponent(S.activeId||'');
+}
+function dashboardBaseUrl(){
+  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'').trim();
+  return spaceSlug?('/'+encodeURIComponent(spaceSlug)+'/dashboard/'):'/dashboard/';
+}
+function setWizardUrl(setRef){
+  var ref=String(setRef||'').trim();
+  var base=dashboardBaseUrl()+'wizard/';
+  return ref?base+'?set='+encodeURIComponent(ref):base;
+}
+function standaloneWizardIframeUrl(setRef){
+  var params=[];
+  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'').trim();
+  if(spaceSlug)params.push('space='+encodeURIComponent(spaceSlug));
+  var ref=String(setRef||'').trim();
+  if(ref)params.push('set='+encodeURIComponent(ref));
+  params.push('embedded=1');
+  return '/wizard/new'+(params.length?('?'+params.join('&')):'');
+}
+function newSetWizardUrl(){
+  return setWizardUrl('');
+}
+function navigateToWizardUrl(url){
+  var target=String(url||'').trim();
+  if(!target)return;
+  if(S.activeKind==='set'&&S.dirty&&S.activeId){
+    var activeName=((S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||{}).title||S.activeId;
+    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(activeName)+'</strong> voordat je naar de wizard gaat?</p>'+
+      '<div class="mAct">'+
+      '<button class="mCa" onclick="closeModal()">Annuleren</button>'+
+      '<button class="mCa" onclick="closeModal();location.href=\''+esc(target)+'\'">Niet opslaan</button>'+
+      '<button class="mOk" onclick="closeModal();saveSet(function(){location.href=\''+esc(target)+'\';})">Opslaan</button>'+
+      '</div>');
+    return;
+  }
+  location.href=target;
+}
+function openNewSetWizard(){
+  navigateToWizardUrl(newSetWizardUrl());
+}
+function openCurrentSetWizard(){
+  if(S.activeKind==='set'&&S.activeId){
+    navigateToWizardUrl(setWizardUrl(S.activeId));
+    return;
+  }
+  openNewSetWizard();
 }
 function showLivePreview(){
   if(!S.activeId){toast('Kies eerst een kaartenset','red');return;}
@@ -12650,29 +15286,34 @@ document.addEventListener('mouseup',function(ev){
   _stylePalDrag=null;
 });
 function initSliderScrollHints(){
-  document.querySelectorAll('.stijlHeaderBar .stijlSlideRail').forEach(function(rail){
+  document.querySelectorAll('.stijlHeaderBar .stijlSlideRail, .stijlHeaderBar .homeSetSlideRail').forEach(function(rail){
     var bar=rail.closest('.stijlHeaderBar');
     if(!bar)return;
     var noOverflow=rail.scrollWidth<=rail.clientWidth+4;
     var atEnd=noOverflow||(rail.scrollLeft+rail.clientWidth>=rail.scrollWidth-8);
+    bar.classList.toggle('has-scroll-overflow',!noOverflow);
     bar.classList.toggle('scroll-end',atEnd);
     rail.classList.toggle('overflows',!noOverflow);
   });
 }
 document.addEventListener('scroll',function(e){
   var rail=e.target;
-  if(rail&&rail.classList&&rail.classList.contains('stijlSlideRail')){
+  if(rail&&rail.classList&&(rail.classList.contains('stijlSlideRail')||rail.classList.contains('homeSetSlideRail'))){
     var bar=rail.closest('.stijlHeaderBar');
     if(bar){
+      var noOverflow=rail.scrollWidth<=rail.clientWidth+4;
       var atEnd=rail.scrollLeft+rail.clientWidth>=rail.scrollWidth-8;
+      bar.classList.toggle('has-scroll-overflow',!noOverflow);
       bar.classList.toggle('scroll-end',atEnd);
     }
   }
 },true);
 // ── Responsive swatch clamping ─────────────────────────────────────────────
-// Show only whole swatches in .brandSwsGroup; hides any that would be clipped.
+// Show only whole swatches in compact .brandSwsGroup rows; expanded/wrapping
+// palettes manage their own layout and should not be clamped.
 function clampSwatchGroup(g){
-  if(!g||!g.offsetParent)return; // not visible
+  if(!g||!g.offsetParent)return;
+  if(g.closest('.brandQuickRow-textcolor,.brandQuickRow-text,.brandQuickRow-shared,.brandQuickRow-toolbar,.brandQuickRow-panel'))return;
   var firstSw=g.querySelector('.brandSw');
   if(!firstSw)return;
   var styles=window.getComputedStyle(g);
@@ -12687,13 +15328,17 @@ function clampAllSwatchGroups(){
   document.querySelectorAll('.brandSwsGroup').forEach(clampSwatchGroup);
 }
 (function(){
-  // Re-clamp when any .brandSwsGroup is added or when the panel resizes
   new MutationObserver(function(muts){
     muts.forEach(function(m){
       m.addedNodes.forEach(function(nd){
         if(nd.nodeType!==1)return;
-        if(nd.classList&&nd.classList.contains('brandSwsGroup')){setTimeout(function(){clampSwatchGroup(nd);},0);}
-        else if(nd.querySelectorAll){nd.querySelectorAll('.brandSwsGroup').forEach(function(g){setTimeout(function(){clampSwatchGroup(g);},0);});}
+        if(nd.classList&&nd.classList.contains('brandSwsGroup')){
+          setTimeout(function(){clampSwatchGroup(nd);},0);
+        }else if(nd.querySelectorAll){
+          nd.querySelectorAll('.brandSwsGroup').forEach(function(g){
+            setTimeout(function(){clampSwatchGroup(g);},0);
+          });
+        }
       });
     });
   }).observe(document.body,{childList:true,subtree:true});

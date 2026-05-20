@@ -113,7 +113,9 @@
     var pos=[];
     var aspect=W/Math.max(H,1);
     var phoneRef=780;
-    var baseDim=phoneRef*(aspect>1?0.8:1);
+    var maxDim=Math.max(W,H);
+    var scaleUp=Math.max(1,Math.pow(maxDim/phoneRef,0.3));
+    var baseDim=phoneRef*(aspect>1?0.8:1)*scaleUp;
     if(useGrid){
       var cols=Math.ceil(Math.sqrt(count)),rows=Math.ceil(count/cols);
       for(var i=0;i<count;i++){

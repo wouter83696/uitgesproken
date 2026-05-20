@@ -54,13 +54,26 @@
     return '';
   }
 
+  function requestedDashboardSubview(){
+    var parts=String(location.pathname||'').replace(/^\/|\/$/g,'').split('/').filter(Boolean);
+    if(parts.length>=3 && parts[1]==='dashboard') return parts[2]||'';
+    if(parts.length>=2 && parts[0]==='dashboard') return parts[1]||'';
+    return '';
+  }
+
   function syncDashboardRoute(slug){
     var clean=String(slug||'').trim();
     if(!clean)return;
     var pathname=String(location.pathname||'');
-    var target='/'+clean+'/dashboard/';
+    var rest='';
+    if(pathname==='/dashboard' || pathname==='/dashboard/'){
+      rest='/';
+    }else if(pathname.indexOf('/dashboard/')===0){
+      rest=pathname.slice('/dashboard'.length) || '/';
+    }
+    var target='/'+clean+'/dashboard'+(rest||'/');
     if(pathname===target)return;
-    if(pathname==='/dashboard/' || pathname==='/dashboard'){
+    if(pathname==='/dashboard/' || pathname==='/dashboard' || pathname.indexOf('/dashboard/')===0){
       history.replaceState({space:clean},'',target+(location.search||'')+(location.hash||''));
     }
   }
@@ -81,6 +94,36 @@
     return slug;
   }
 
+  function requestedDashboardSet(){
+    try{
+      var params = new URLSearchParams(location.search || '');
+      return {
+        set: (params.get('set') || '').trim(),
+        mode: normalizeRequestedEditorMode(params.get('mode') || '')
+      };
+    }catch(_err){
+      return { set:'', mode:'' };
+    }
+  }
+
+  function normalizeRequestedEditorMode(value){
+    var mode = String(value || '').trim().toLowerCase();
+    if(mode==='view' || mode==='edit' || mode==='wizard') return mode;
+    return '';
+  }
+
+  function resolveRequestedSetId(){
+    var requested = requestedDashboardSet();
+    if(!requested.set) return { id:'', mode:requested.mode };
+    var hit = (S.sets || []).find(function(set){
+      return set && (set.id===requested.set || set.slug===requested.set);
+    });
+    return {
+      id: hit && hit.id ? hit.id : '',
+      mode: requested.mode
+    };
+  }
+
   // ── Space laden ─────────────────────────────────────────────
   async function getSpace(){
     var requested=requestedSpaceSlug();
@@ -99,6 +142,7 @@
   // ── loadIndex — overschrijft de GitHub-versie ───────────────
   window.loadIndex = async function(){
     try{
+      if(typeof setAppPreparing==='function') setAppPreparing(true);
       // Hard reset van oude client-state: gewone gebruikersadmin mag nooit
       // resten van demo/legacy sets blijven renderen.
       S.activeId = null;
@@ -136,6 +180,7 @@
           '<button class="btn full" onclick="createSpace()">Ruimte aanmaken</button>'+
           '</div>';
         if(g('sbRepo')) g('sbRepo').textContent = '—';
+        if(typeof setAppPreparing==='function') setAppPreparing(false);
         return;
       }
 
@@ -147,7 +192,7 @@
 
       show('app'); hide('setup');
       if(typeof window.drawSidebarBlobs==='function')requestAnimationFrame(window.drawSidebarBlobs);
-      if(g('sbRepo')) g('sbRepo').textContent = S._username ? '@' + S._username : space.name;
+      if(g('sbRepo')) g('sbRepo').textContent = S._username || space.name || '—';
 
       // Sets ophalen
       var r = await db.from('sets').select('id,slug,title,card_format,sort_order,is_public,status,visibility,bundle')
@@ -160,14 +205,51 @@
           isPublic:s.is_public!==false,
           status:s.status||'draft',
           visibility:s.visibility||'private',
-          bundle:s.bundle||null
+          bundle:null
         };
+      });
+      (r.data||[]).forEach(function(row){
+        if(!row||!row.id||!row.bundle)return;
+        var cached=cloneSetBundle({
+          meta:(row.bundle.meta||mkMeta(row.id,row.title||'')),
+          metaSha:null,
+          questions:row.bundle.questions||{},
+          questionsSha:null,
+          uitleg:row.bundle.uitleg||{},
+          uitlegSha:null,
+          intro:row.bundle.intro||{slides:[],hint:'← → swipe'},
+          introSha:null
+        });
+        if(row.card_format){
+          cached.meta=cached.meta||{};
+          cached.meta.cardFormat=row.card_format;
+        }
+        cacheSetBundle(row.id,cached);
       });
       renderSidebar();
 
+      var requestedSubview = requestedDashboardSubview();
+      if(requestedSubview==='wizard'){
+        var wizardSet = resolveRequestedSetId();
+        S.activeKind = 'space';
+        S._view = 'wizard';
+        S.activeId = wizardSet.id || null;
+        renderEditor();
+        return;
+      }
+
+      var requestedSet = resolveRequestedSetId();
+      if(requestedSet.id){
+        S.activeId = requestedSet.id;
+        S.activeKind = 'set';
+        if(requestedSet.mode) S.editorMode = requestedSet.mode;
+        loadSet(requestedSet.id, { silent:true });
+        return;
+      }
+
       S.activeId = ((S.sets[0]||{}).id)||null;
       S.activeKind = 'space';
-      loadSpaceEditor({silent:true});
+      loadSpaceEditor({silent:true,preserveView:true});
     } catch(e){
       lbFail();
       show('app'); hide('setup');
@@ -177,6 +259,7 @@
         '<p style="margin-bottom:20px;color:var(--k3)">Kon geen verbinding maken met de database.<br>Controleer je internetverbinding en probeer opnieuw.</p>'+
         '<button class="btn" onclick="loadIndex()">Opnieuw proberen</button>'+
         '</div>';
+      if(typeof setAppPreparing==='function') setAppPreparing(false);
       toast('Laden mislukt: '+e.message, 'red');
     }
   };
@@ -510,6 +593,7 @@
           '<p style="margin-bottom:20px;color:var(--k3)">We konden je profiel niet voorbereiden.<br>Vernieuw de pagina en probeer opnieuw.</p>'+
           '<button class="btn" onclick="location.reload()">Opnieuw proberen</button>'+
           '</div>';
+        if(typeof setAppPreparing==='function') setAppPreparing(false);
         toast('Profiel voorbereiden mislukt: '+ins.error.message, 'red');
         return;
       }
@@ -523,6 +607,7 @@
         '<p style="margin-bottom:20px;color:var(--k3)">We konden je profiel nu niet laden.<br>Vernieuw de pagina en probeer opnieuw.</p>'+
         '<button class="btn" onclick="location.reload()">Opnieuw proberen</button>'+
         '</div>';
+      if(typeof setAppPreparing==='function') setAppPreparing(false);
       toast('Profiel laden mislukt: '+pr.error.message, 'red');
       return;
     }
@@ -536,6 +621,7 @@
       return;
     }
 
+    if(typeof setAppPreparing==='function') setAppPreparing(true);
     lbStart();
     loadIndex();
   });
