@@ -7,6 +7,7 @@ var CC={},KF={},SC={},SIDEBAR_SET_THUMB_CACHE={},SIDEBAR_SET_THUMB_PENDING={},SI
 var _mySetsFilter='all',_mySetsSearch='',_mySetsView='list',_mySetsSearchTimer=null;
 var SAVE_UI={state:'idle',text:'',hideTimer:null};
 var _savedSpaceSig=null;
+var WIZARD_IFRAME_BUILD='20260530e';
 var SET_EDITOR_PANE='themes'; // 'themes' | 'format'
 var SPACE_PREVIEW_CARDS_MODE=false;
 var SPACE_PREVIEW_CURRENT_SET_ID='';
@@ -819,11 +820,31 @@ function loadIndex(){
       renderSelectSetWelcome();
       return Promise.resolve();
     }
-    var preferredId=(S.indexData&&S.indexData.default)||((S.sets[0]||{}).id)||null;
+    var startupIntent=dashboardStartupIntent();
+    var startupSet=dashboardFindSetByRef(startupIntent.setRef) || ((startupIntent.wizard||startupIntent.editor) ? dashboardFindSetByRef(rememberedWizardSetRef()) : null);
+    if(startupSet&&startupSet.id&&(startupIntent.setRef||startupIntent.editor||startupIntent.wizard))rememberWizardSetRef(startupSet.id);
+    var preferredId=(startupSet&&startupSet.id)||(S.indexData&&S.indexData.default)||((S.sets[0]||{}).id)||null;
+    if(startupIntent.mode==='view')S.editorMode='view';
+    else if(startupIntent.mode==='edit')S.editorMode='edit';
     return preloadAllSets()
       .catch(function(){ return null; })
       .then(function(){
         renderSidebar();
+        if(startupIntent.wizard){
+          S.activeKind='space';
+          S._view='wizard';
+          S._wizardSetId=startupSet?startupSet.id:null;
+          if(startupSet){
+            S.activeId=startupSet.id;
+            if(SC[startupSet.id]){
+              S.d=cloneSetBundle(SC[startupSet.id]);
+              normalizeLegacyCardSurfaceMeta(S.d.meta);
+            }
+          }
+          rememberWizardSetRef(startupSet?startupSet.id:'');
+          renderEditor();
+          return;
+        }
         if(preferredId&&S.sets.some(function(s){return s.id===preferredId;})){
           return loadSet(preferredId,{silent:true}).catch(function(){
             renderSidebar();
@@ -1382,7 +1403,7 @@ function loadSpaceEditor(opts){
   document.documentElement.classList.remove('card-fmt-narrow');
   if(!opts.silent){
     lbStart();
-    g('mc').innerHTML='<div class="welcome" style="opacity:.3"><p style="font-size:11.5px;color:var(--k3)">Ruimte aan het verkennen...</p></div>';
+    g('mc').innerHTML='<div class="welcome" style="opacity:.3"><p style="font-size:11.5px;color:var(--k3)">Ruimte aan het verkennen</p></div>';
   }
   if(!syncSidebarSelectionState())renderSidebar();
   var sid=(Array.isArray(S.sets)&&S.sets.length)
@@ -2325,6 +2346,7 @@ function renderEditor(){
   hideFloatingTextBar(true);
   var saveStatus=buildTopSaveStatusHtml();
   var currentSet=(S.sets||[]).find(function(s){return s.id===S.activeId;})||{};
+  cleanVisibleDashboardEditorUrl();
   var setTitle=esc((S.d&&S.d.meta&&S.d.meta.title)||S.activeId||'');
   var statusCls=_setStatusCls(currentSet);
   var statusLabel=_setStatusLabel(currentSet);
@@ -2904,6 +2926,10 @@ function renderChromeShell(headTitle,headActions,headCenter,opts){
   });
 }
 function markDashboardWizardReady(){
+  if(S._wizardReadyTimer){
+    clearTimeout(S._wizardReadyTimer);
+    S._wizardReadyTimer=null;
+  }
   var pw=g('pw');
   var shell=g('wizardWorkspaceShell');
   var frame=g('wizardWorkspaceFrame');
@@ -2922,6 +2948,9 @@ function dashboardWizardFrameHasRenderableContent(){
     var doc=frame.contentDocument;
     var appRoot=doc&&doc.getElementById('wizardApp');
     if(!appRoot)return false;
+    if(doc.querySelector('.wizardLoadingPanel,.wizardLoadingWindow,.wizardLoadingField,.wizardLoadingPreviewCard')) return false;
+    if(doc.querySelector('.appBoot.wizardBoot')) return false;
+    if(appRoot.querySelector&&appRoot.querySelector('.wizardShell,.wizardEmpty')) return true;
     if(appRoot.children&&appRoot.children.length)return true;
     return String(appRoot.innerHTML||'').trim().length>0;
   }catch(_err){
@@ -2934,7 +2963,7 @@ function queueDashboardWizardReadyCheck(attempt){
     markDashboardWizardReady();
     return;
   }
-  if((attempt||0)>=24){
+  if((attempt||0)>=35){
     markDashboardWizardReady();
     return;
   }
@@ -2952,6 +2981,30 @@ function postWizardFrameAction(action){
   try{
     frame.contentWindow.postMessage({uitgesproken:1,type:'wizardAction',action:String(action||'')},window.location.origin);
   }catch(_err){}
+}
+function currentDashboardWizardSet(){
+  var ref=resolveDashboardWizardSetRef();
+  return dashboardFindSetByRef(ref)||dashboardFindSetByRef(S.activeId)||null;
+}
+function dashboardSetModeUrl(setRef,mode){
+  var set=dashboardFindSetByRef(setRef)||null;
+  var ref=(set&&set.id)||String(setRef||'').trim();
+  var cleanMode=String(mode||'edit').trim().toLowerCase();
+  if(cleanMode!=='view'&&cleanMode!=='edit')cleanMode='edit';
+  if(cleanMode==='edit'){
+    if(ref)rememberWizardSetRef(ref);
+    return dashboardBaseUrl()+(ref?('?set='+encodeURIComponent(ref)+'&mode=edit'):'?mode=edit');
+  }
+  return dashboardBaseUrl()+(ref?('?set='+encodeURIComponent(ref)+'&mode='+encodeURIComponent(cleanMode)):('?mode='+encodeURIComponent(cleanMode)));
+}
+function openWizardSetMode(mode){
+  var currentSet=currentDashboardWizardSet();
+  var ref=(currentSet&&currentSet.id)||resolveDashboardWizardSetRef()||S.activeId||'';
+  if(currentSet&&currentSet.id){
+    S.activeId=currentSet.id;
+    rememberWizardSetRef(currentSet.id);
+  }
+  location.href=dashboardSetModeUrl(ref,mode);
 }
 function wizardUndoAction(){
   postWizardFrameAction('undo');
@@ -2975,7 +3028,11 @@ function syncDashboardWizardHeader(payload){
   var undoBtn=g('wizardUndoBtn');
   var redoBtn=g('wizardRedoBtn');
   var deleteBtn=g('wizardDeleteBtn');
-  if(data.setId)S._wizardSetId=String(data.setId);
+  if(data.setId){
+    S._wizardSetId=String(data.setId);
+    S.activeId=String(data.setId);
+    rememberWizardSetRef(S._wizardSetId);
+  }
   if(titleEl&&title)titleEl.value=title;
   if(stepEl)stepEl.value=stepLabel||'Wizard';
   if(sepEl)sepEl.style.display=stepLabel?'inline-block':'none';
@@ -2987,10 +3044,10 @@ function syncDashboardWizardHeader(payload){
 }
 function openWizardMoreMenu(btn){
   document.querySelectorAll('.clMoreMenu').forEach(function(m){m.remove();});
-  var currentSet=(S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||null;
+  var currentSet=currentDashboardWizardSet();
   var hasSet=!!(currentSet&&currentSet.id);
-  var editHref=hasSet?(dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=edit'):dashboardBaseUrl();
-  var viewHref=hasSet?(dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=view'):'';
+  var editHref=hasSet?dashboardSetModeUrl(currentSet.id,'edit'):dashboardBaseUrl();
+  var viewHref=hasSet?dashboardSetModeUrl(currentSet.id,'view'):'';
   var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+S._username+'/'+currentSet.slug):'';
   var restartHref=dashboardBaseUrl()+'wizard/';
   var editIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
@@ -3017,10 +3074,20 @@ function openWizardMoreMenu(btn){
   },0);
 }
 function renderDashboardWizardPage(){
+  cleanVisibleDashboardWizardUrl();
+  setAppPreparing(true);
   hideFloatingTextBar(true);
-  var currentSet=(S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||null;
+  var wizardSetRef=resolveDashboardWizardSetRef();
+  var currentSet=(S.sets||[]).find(function(set){
+    return set && wizardSetRef && (String(set.id||'')===wizardSetRef || String(set.slug||'')===wizardSetRef);
+  })||null;
   var hasSet=!!(currentSet&&currentSet.id);
   S._wizardSetId=hasSet?currentSet.id:null;
+  if(hasSet&&SC[currentSet.id]){
+    S.activeId=currentSet.id;
+    S.d=cloneSetBundle(SC[currentSet.id]);
+    normalizeLegacyCardSurfaceMeta(S.d.meta);
+  }
   var titleHtml=
     '<div class="clHeadMeta">'+
       '<div class="clHeadTitle">'+
@@ -3029,26 +3096,22 @@ function renderDashboardWizardPage(){
         '<input id="editorThemeTitle" class="clHeadThemeInput is-static" type="text" value="Naam" readonly>'+
       '</div>'+
     '</div>';
-  var backHref=hasSet
-    ? (dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=edit')
-    : dashboardBaseUrl();
-  var viewHref=hasSet
-    ? (dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=view')
-    : '';
+  var backHref=hasSet?dashboardSetModeUrl(currentSet.id,'edit'):dashboardBaseUrl();
+  var viewHref=hasSet?dashboardSetModeUrl(currentSet.id,'view'):'';
   var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+S._username+'/'+currentSet.slug):'';
   var wizardModeBtns=
     '<div class="edModeSwitcher">'+
       (hasSet
-        ? '<a class="edModeBtn" href="'+esc(backHref)+'" title="Bewerken" aria-label="Bewerken">'+
+        ? '<button class="edModeBtn" type="button" onclick="openWizardSetMode(\'edit\')" data-href="'+esc(backHref)+'" title="Bewerken" aria-label="Bewerken">'+
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
-          '</a>'
+          '</button>'
         : '<button class="edModeBtn is-disabled" type="button" disabled title="Bewerken" aria-label="Bewerken">'+
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
           '</button>')+
       (hasSet
-        ? '<a class="edModeBtn" href="'+esc(viewHref)+'" title="Bekijken" aria-label="Bekijken">'+
+        ? '<button class="edModeBtn" type="button" onclick="openWizardSetMode(\'view\')" data-href="'+esc(viewHref)+'" title="Bekijken" aria-label="Bekijken">'+
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'+
-          '</a>'
+          '</button>'
         : '<button class="edModeBtn is-disabled" type="button" disabled title="Bekijken" aria-label="Bekijken">'+
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'+
           '</button>')+
@@ -3070,17 +3133,52 @@ function renderDashboardWizardPage(){
       quickActions+
       '<button class="btnIcon clMoreBtn" id="wizardMoreBtn" type="button" title="Meer opties" aria-label="Meer opties" onclick="openWizardMoreMenu(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg></button>'+
     '</div></div>';
+  exposeDashboardWizardBridge();
   renderChromeShell(titleHtml,headActions,null,{keepPreparing:true});
   var pw=g('pw');
   if(pw){
+    var wizardFrameSrc=standaloneWizardIframeUrl(hasSet?currentSet.id:'');
     pw.classList.add('wizardWorkspaceBody');
     pw.classList.remove('is-preparing');
     pw.innerHTML=
       '<div class="wizardWorkspaceShell is-loading" id="wizardWorkspaceShell">'+
-        '<iframe id="wizardWorkspaceFrame" class="wizardWorkspaceFrame" src="'+esc(standaloneWizardIframeUrl(hasSet?currentSet.id:''))+'" title="Kaartenset wizard" loading="eager" onload="markDashboardWizardIframeLoaded()"></iframe>'+
+        '<iframe id="wizardWorkspaceFrame" class="wizardWorkspaceFrame" src="about:blank" title="Kaartenset wizard" loading="eager" onload="markDashboardWizardIframeLoaded()"></iframe>'+
       '</div>';
+    var wizardFrame=g('wizardWorkspaceFrame');
+    if(wizardFrame){
+      wizardFrame.dataset.src=wizardFrameSrc;
+      wizardFrame.srcdoc=dashboardWizardIframeSrcdoc(wizardFrameSrc,hasSet?currentSet.id:'');
+    }
   }
+  if(S._wizardReadyTimer)clearTimeout(S._wizardReadyTimer);
+  S._wizardReadyTimer=setTimeout(function(){
+    if(S._view==='wizard')markDashboardWizardReady();
+  },2800);
   syncEditorHeaderWidths();
+}
+function cleanVisibleDashboardWizardUrl(){
+  try{
+    if(!/\/dashboard\/wizard\/?$/.test(String(location.pathname||'')) || !location.search)return;
+    history.replaceState({space:S.spaceSlug||((S.space&&S.space.slug)||'')||''},'',location.pathname+(location.hash||''));
+  }catch(_err){}
+}
+function cleanVisibleDashboardEditorUrl(){
+  try{
+    if(S.activeKind!=='set'||!S.activeId||S.editorMode!=='edit')return;
+    rememberWizardSetRef(S.activeId);
+    var path=String(location.pathname||'');
+    var search=String(location.search||'');
+    var params=new URLSearchParams(search);
+    var isEditorPath=/\/dashboard\/editor\/?$/.test(path);
+    var isDashboardPath=/\/dashboard\/?$/.test(path);
+    var shouldClean=(isEditorPath&&!!search)||(isDashboardPath&&(params.has('set')||String(params.get('mode')||'').toLowerCase()==='edit'));
+    if(!shouldClean)return;
+    history.replaceState(
+      {space:S.spaceSlug||((S.space&&S.space.slug)||''),set:S.activeId,mode:'edit'},
+      '',
+      dashboardBaseUrl()+'editor/'+(location.hash||'')
+    );
+  }catch(_err){}
 }
 function renderSpaceEditor(){
   hideFloatingTextBar(true);
@@ -7376,7 +7474,7 @@ function sharedCardPreviewHtml(opts){
   var sharedRenderer=window.PK&&window.PK.sharedCardRenderer&&typeof window.PK.sharedCardRenderer.render==='function'
     ?window.PK.sharedCardRenderer
     :null;
-  if(sharedRenderer&&!opts.infoRichCe&&previewKey!=='cover'){
+  if(sharedRenderer&&!opts.infoRichCe){
     return sharedRenderer.render({
       meta:(S.d&&S.d.meta)||{},
       wrapId:opts.wrapId||'',
@@ -7396,6 +7494,8 @@ function sharedCardPreviewHtml(opts){
       emptyBg:opts.emptyBg,
       backDesignKey:opts.backDesignKey||'',
       label:opts.label||'',
+      showCoverTexts:!!opts.showCoverTexts,
+      coverTextsHtml:opts.showCoverTexts?coverTextLayerHtml():'',
       suppressEmptyFrontHint:!!opts.suppressEmptyFrontHint
     });
   }
@@ -10794,9 +10894,11 @@ function previewNightToggleIconHtml(isNight){
 function refreshPreviewNightUi(){
   var isNight=previewNightMode()||adminNightMode();
   Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasWindow')).forEach(function(win){
+    if(isWizardPreviewWindow(win))return;
     win.classList.toggle('night',isNight);
   });
   Array.prototype.slice.call(document.querySelectorAll('[data-preview-night-toggle="1"]')).forEach(function(btn){
+    if(isInsideWizardPreview(btn))return;
     var label=isNight?'Nachtmodus uitzetten':'Nachtmodus aanzetten';
     btn.classList.toggle('sel',isNight);
     btn.setAttribute('aria-label',label);
@@ -10865,11 +10967,18 @@ function previewWindowIsVisible(win){
   if(cs&&(cs.display==='none'||cs.visibility==='hidden'))return false;
   return true;
 }
+function isWizardPreviewWindow(win){
+  return !!(win&&win.getAttribute&&win.getAttribute('data-wizard-preview')==='1');
+}
+function isInsideWizardPreview(node){
+  return !!(node&&node.closest&&node.closest('.stijlCanvasWindow[data-wizard-preview="1"]'));
+}
 function currentCanvasZoomBounds(){
   var min=CANVAS_ZOOM_MIN_PCT;
   var max=CANVAS_ZOOM_MAX_PCT;
   var fitCaps=[];
   document.querySelectorAll('.stijlCanvasWindow').forEach(function(win){
+    if(isWizardPreviewWindow(win))return;
     if(!previewWindowIsVisible(win))return;
     if(!win||!win.getClientRects||!win.getClientRects().length)return;
     if(win.classList.contains('site-preview-window')){
@@ -10910,67 +11019,69 @@ function baseCanvasPreviewShellHeight(){
   var toolbarH=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-h'))||66;
   return Math.max(360,Math.min(window.innerHeight-toolbarH-154,468));
 }
+function syncSingleCanvasPreviewLayout(win){
+  if(!win||!win.querySelector)return;
+  var inner=win.querySelector('.stijlCanvasWindowInner');
+  var card=win.querySelector('.stijlCardPrevWrap');
+  if(!inner||!card)return;
+  var winRect=win.getBoundingClientRect();
+  if(!winRect.width||!winRect.height)return;
+  var topbar=win.querySelector('.stijlCanvasTopbar');
+  var backbar=win.querySelector('.stijlCanvasBackbar');
+  var visual=card.querySelector('.cardFaceOuter, .adminInfoSlide');
+  var sideInset=14;
+  var contentTop=34;
+  var contentBottom=70;
+  if(topbar){
+    var topbarRect=topbar.getBoundingClientRect();
+    sideInset=Math.max(8,Math.round(topbarRect.left-winRect.left));
+    contentTop=Math.max(0,Math.round(topbarRect.bottom-winRect.top)+8);
+  }
+  if(backbar){
+    var backbarRect=backbar.getBoundingClientRect();
+    contentBottom=Math.max(0,Math.round(winRect.bottom-backbarRect.top)-4);
+  }
+  var effectiveBottom=contentBottom;
+  win.style.setProperty('--preview-side-inset',sideInset+'px');
+  win.style.setProperty('--preview-content-top',contentTop+'px');
+  win.style.setProperty('--preview-content-bottom',effectiveBottom+'px');
+  if(win.classList.contains('info-preview')){
+    var previewSide=win.closest('.stijlCanvasSide.preview');
+    var previewShellH=previewSide
+      ? parseFloat(getComputedStyle(previewSide).getPropertyValue('--preview-shell-max-h'))||0
+      : 0;
+    var basePreviewWindowH=previewShellH>0 ? previewShellH : baseCanvasPreviewShellHeight();
+    var infoAvailH=Math.max(0,basePreviewWindowH-contentTop-effectiveBottom);
+    var infoScale=parseFloat(visual&&visual.style.zoom||'')||1;
+    var infoCardFace=card.querySelector('.adminInfoSlideCard');
+    var infoCardFaceRect=infoCardFace&&infoCardFace.getBoundingClientRect?infoCardFace.getBoundingClientRect():null;
+    var infoCardH=(infoCardFaceRect&&infoCardFaceRect.height)?infoCardFaceRect.height:0;
+    if(!(infoCardH>0)){
+      var infoBaseCardW=parseFloat(getComputedStyle(card).getPropertyValue('--editor-preview-card-w'))||320;
+      infoCardH=Math.round((infoBaseCardW*(55/85))*infoScale);
+    }
+    var infoCardStart=contentTop+Math.max(0,Math.round((infoAvailH-infoCardH)/2));
+    card.style.top=infoCardStart+'px';
+    card.style.bottom='auto';
+    card.style.height='auto';
+    card.style.transform='none';
+    return;
+  }
+  card.style.top=contentTop+'px';
+  card.style.bottom=contentBottom+'px';
+  card.style.height='auto';
+  card.style.transform='none';
+}
 function syncCanvasPreviewLayout(){
   requestAnimationFrame(function(){
     document.querySelectorAll('.stijlCanvasWindow:not(.site-preview-window)').forEach(function(win){
-      var inner=win.querySelector('.stijlCanvasWindowInner');
-      var card=win.querySelector('.stijlCardPrevWrap');
-      if(!inner||!card)return;
-      var winRect=win.getBoundingClientRect();
-      if(!winRect.width||!winRect.height)return;
-      var topbar=win.querySelector('.stijlCanvasTopbar');
-      var backbar=win.querySelector('.stijlCanvasBackbar');
-      var visual=card.querySelector('.cardFaceOuter, .adminInfoSlide');
-      var setBackbarReserve=34;
-      var sideInset=14;
-      var contentTop=34;
-      var contentBottom=70;
-      if(topbar){
-        var topbarRect=topbar.getBoundingClientRect();
-        sideInset=Math.max(8,Math.round(topbarRect.left-winRect.left));
-        contentTop=Math.max(0,Math.round(topbarRect.bottom-winRect.top)+8);
-      }
-      if(backbar){
-        var backbarRect=backbar.getBoundingClientRect();
-        contentBottom=Math.max(0,Math.round(winRect.bottom-backbarRect.top)-4);
-      }
-      var effectiveBottom=contentBottom;
-      win.style.setProperty('--preview-side-inset',sideInset+'px');
-      win.style.setProperty('--preview-content-top',contentTop+'px');
-      win.style.setProperty('--preview-content-bottom',effectiveBottom+'px');
-      if(win.classList.contains('info-preview')){
-        // The infosheet must start from the exact same visual card baseline as
-        // the regular set preview. Only the extra infosheet text may extend
-        // the preview downward. So we anchor to the shared shell height
-        // instead of the enlarged info-preview height.
-        var previewSide=win.closest('.stijlCanvasSide.preview');
-        var previewShellH=previewSide
-          ? parseFloat(getComputedStyle(previewSide).getPropertyValue('--preview-shell-max-h'))||0
-          : 0;
-        var basePreviewWindowH=previewShellH>0 ? previewShellH : baseCanvasPreviewShellHeight();
-        var infoAvailH=Math.max(0,basePreviewWindowH-contentTop-effectiveBottom);
-        var infoScale=parseFloat(visual&&visual.style.zoom||'')||1;
-        var infoCardFace=card.querySelector('.adminInfoSlideCard');
-        var infoCardFaceRect=infoCardFace&&infoCardFace.getBoundingClientRect?infoCardFace.getBoundingClientRect():null;
-        var infoCardH=(infoCardFaceRect&&infoCardFaceRect.height)?infoCardFaceRect.height:0;
-        if(!(infoCardH>0)){
-          var infoBaseCardW=parseFloat(getComputedStyle(card).getPropertyValue('--editor-preview-card-w'))||320;
-          infoCardH=Math.round((infoBaseCardW*(55/85))*infoScale);
-        }
-        var infoCardStart=contentTop+Math.max(0,Math.round((infoAvailH-infoCardH)/2));
-        card.style.top=infoCardStart+'px';
-        card.style.bottom='auto';
-        card.style.height='auto';
-        card.style.transform='none';
-        return;
-      }
-      card.style.top=contentTop+'px';
-      card.style.bottom=contentBottom+'px';
-      card.style.height='auto';
-      card.style.transform='none';
+      if(isWizardPreviewWindow(win))return;
+      syncSingleCanvasPreviewLayout(win);
     });
   });
 }
+window.PK=window.PK||{};
+window.PK.syncCanvasPreviewWindowLayout=syncSingleCanvasPreviewLayout;
 var CANVAS_VIEWPORT_SYNC_RAF=0;
 function scheduleCanvasViewportSync(){
   if(CANVAS_VIEWPORT_SYNC_RAF)cancelAnimationFrame(CANVAS_VIEWPORT_SYNC_RAF);
@@ -10985,13 +11096,17 @@ function applyCanvasZoom(){
   rememberCanvasZoomForScope(currentCanvasZoomScopeKey(),CANVAS_ZOOM_PCT);
   var scale=CANVAS_ZOOM_PCT/100;
   document.querySelectorAll('.stijlCanvasCardWrap .cardFaceOuter, .stijlCanvasCardWrap .adminInfoSlide').forEach(function(el){
+    if(isInsideWizardPreview(el))return;
     el.style.zoom=scale;
   });
   document.querySelectorAll('.spaceLiveFrameScale').forEach(function(el){
     el.style.setProperty('--preview-scale',scale);
     el.style.height=Math.round(SPACE_PREVIEW_H*scale)+'px';
   });
-  document.querySelectorAll('.cvZoomPct').forEach(function(el){el.textContent=CANVAS_ZOOM_PCT+'%';});
+  document.querySelectorAll('.cvZoomPct').forEach(function(el){
+    if(isInsideWizardPreview(el))return;
+    el.textContent=CANVAS_ZOOM_PCT+'%';
+  });
   syncCanvasPreviewLayout();
 }
 var SPACE_PREVIEW_REFRESH_TM=0;
@@ -11020,16 +11135,17 @@ function stepCanvasZoom(delta){
   var prev=CANVAS_ZOOM_PCT;
   setCanvasZoom(CANVAS_ZOOM_PCT+delta);
   if(CANVAS_ZOOM_PCT===prev){
-    var ctrl=document.querySelector('.cvZoomControl');
+    var ctrl=document.querySelector('.stijlCanvasWindow:not([data-wizard-preview="1"]) .cvZoomControl');
     if(ctrl){ctrl.classList.remove('at-limit');void ctrl.offsetWidth;ctrl.classList.add('at-limit');setTimeout(function(){ctrl.classList.remove('at-limit');},500);}
   }
 }
 function resetCanvasZoom(){setCanvasZoom(100);}
 function toggleCanvasFlip(){
   CANVAS_CARD_FLIPPED=!CANVAS_CARD_FLIPPED;
-  var inner=document.querySelector('.stijlCanvasWindow .cardFaceInner');
+  var inner=document.querySelector('.stijlCanvasWindow:not([data-wizard-preview="1"]) .cardFaceInner');
   if(inner)inner.classList.toggle('flipped',CANVAS_CARD_FLIPPED);
   document.querySelectorAll('.stijlCanvasFlipBtn').forEach(function(btn){
+    if(isInsideWizardPreview(btn))return;
     btn.classList.toggle('sel',CANVAS_CARD_FLIPPED);
   });
 }
@@ -12383,8 +12499,8 @@ function buildSharedCardEditor(opts){
       ?previewNightBtnHtml
       :(isViewerFocusMode
         ?''
-        :(((backMode==='blank')?'':('<button class="stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" type="button" aria-label="Kaart omdraaien" title="Kaart omdraaien" onclick="toggleCanvasFlip()">'+flipIcon+'</button>'+
-          '<div class="previewTopPillSep"></div>'))+
+        :((doubleSided?('<button class="stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" type="button" aria-label="Kaart omdraaien" title="Kaart omdraaien" onclick="toggleCanvasFlip()">'+flipIcon+'</button>'+
+          '<div class="previewTopPillSep"></div>'):'')+
           '<button class="stijlCanvasGridBtn'+(gridMode?' sel':'')+'" type="button" aria-label="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" title="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" onclick="togglePreviewGrid()">'+gridIcon+'</button>'+
           previewNightBtnHtml)))+
     '</div>';
@@ -12424,7 +12540,7 @@ function buildSharedCardEditor(opts){
                 nightAttrText:' data-preview-night-toggle="1" onclick="togglePreviewNight()"'
               }
             :{
-                showFlip:!isViewerFocusMode&&backMode!=='blank',
+                showFlip:!isViewerFocusMode&&doubleSided,
                 flipSelected:CANVAS_CARD_FLIPPED,
                 flipAttrText:' onclick="toggleCanvasFlip()"',
                 showGrid:!isViewerFocusMode,
@@ -15135,14 +15251,71 @@ function livePreviewUrl(){
   }
   return '../kaarten/?set='+encodeURIComponent(S.activeId||'');
 }
+function dashboardStartupIntent(){
+  var intent={setRef:'',mode:'',wizard:false,editor:false};
+  try{
+    var params=new URLSearchParams(location.search||'');
+    intent.setRef=String(params.get('set')||'').trim();
+    intent.mode=String(params.get('mode')||'').trim().toLowerCase();
+  }catch(_err){}
+  var path=String(location.pathname||'');
+  intent.wizard=/\/dashboard\/wizard\/?$/.test(path);
+  intent.editor=/\/dashboard\/editor\/?$/.test(path);
+  if(intent.editor)intent.mode='edit';
+  if(intent.mode!=='view'&&intent.mode!=='edit')intent.mode='';
+  return intent;
+}
+function dashboardFindSetByRef(ref){
+  var needle=String(ref||'').trim();
+  if(!needle)return null;
+  return (S.sets||[]).find(function(set){
+    return set && (String(set.id||'')===needle || String(set.slug||'')===needle);
+  })||null;
+}
 function dashboardBaseUrl(){
   var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'').trim();
   return spaceSlug?('/'+encodeURIComponent(spaceSlug)+'/dashboard/'):'/dashboard/';
 }
+function wizardSessionSetKey(){
+  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'default').trim()||'default';
+  return 'pk_dashboard_wizard_set_'+spaceSlug;
+}
+function wizardSessionFallbackSetKey(){
+  return 'pk_dashboard_wizard_set_active';
+}
+function rememberedWizardSetRef(){
+  try{
+    return String(sessionStorage.getItem(wizardSessionSetKey())||sessionStorage.getItem(wizardSessionFallbackSetKey())||'').trim();
+  }catch(_err){
+    return '';
+  }
+}
+function resolveDashboardWizardSetRef(){
+  var remembered=rememberedWizardSetRef();
+  if(remembered==='__new__')return '';
+  return String(
+    S._wizardSetId ||
+    remembered ||
+    ((S.activeId&&(S.sets||[]).some(function(set){return set&&set.id===S.activeId;})) ? S.activeId : '') ||
+    ''
+  ).trim();
+}
+function rememberWizardSetRef(setRef){
+  var ref=String(setRef||'').trim();
+  try{
+    if(ref){
+      sessionStorage.setItem(wizardSessionSetKey(),ref);
+      sessionStorage.setItem(wizardSessionFallbackSetKey(),ref);
+    }else{
+      sessionStorage.setItem(wizardSessionSetKey(),'__new__');
+      sessionStorage.setItem(wizardSessionFallbackSetKey(),'__new__');
+    }
+  }catch(_err){}
+}
 function setWizardUrl(setRef){
   var ref=String(setRef||'').trim();
-  var base=dashboardBaseUrl()+'wizard/';
-  return ref?base+'?set='+encodeURIComponent(ref):base;
+  rememberWizardSetRef(ref);
+  return dashboardBaseUrl()+'wizard/';
 }
 function standaloneWizardIframeUrl(setRef){
   var params=[];
@@ -15151,7 +15324,42 @@ function standaloneWizardIframeUrl(setRef){
   var ref=String(setRef||'').trim();
   if(ref)params.push('set='+encodeURIComponent(ref));
   params.push('embedded=1');
-  return '/wizard/new'+(params.length?('?'+params.join('&')):'');
+  params.push('v='+encodeURIComponent(WIZARD_IFRAME_BUILD));
+  return '/wizard/new/'+(params.length?('?'+params.join('&')):'');
+}
+function dashboardWizardIframeSrcdoc(src,setRef){
+  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'').trim();
+  var paramsJson=JSON.stringify({
+    embedded:true,
+    space:spaceSlug,
+    set:String(setRef||'').trim(),
+    src:String(src||'')
+  }).replace(/</g,'\\u003c');
+  return '<!doctype html>'+
+    '<html lang="nl"><head>'+
+      '<meta charset="utf-8">'+
+      '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'+
+      '<meta name="theme-color" content="#f7f6f2">'+
+      '<base href="/"> '+
+      '<title>Nieuwe kaartenset wizard - Uitgesproken</title>'+
+      '<link rel="preconnect" href="https://fonts.googleapis.com">'+
+      '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'+
+      '<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Fraunces:opsz,wght@9..144,400;9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&family=Merriweather:wght@400;700&family=Playfair+Display:wght@400;600&display=swap" rel="stylesheet">'+
+      '<link rel="stylesheet" href="/css/cards.css?v=20260517a">'+
+      '<link rel="stylesheet" href="/admin/admin.css?v='+esc(WIZARD_IFRAME_BUILD)+'">'+
+      '<link rel="stylesheet" href="/css/wizard.css?v='+esc(WIZARD_IFRAME_BUILD)+'">'+
+    '</head><body class="wizardPage">'+
+      '<div id="wizardApp" class="wizardApp"></div>'+
+      '<script>window.WIZARD_EMBEDDED_PARAMS='+paramsJson+';'+
+      '(function(){function showWizardBootError(message){var root=document.getElementById("wizardApp");if(!root||root.children.length)return;root.innerHTML="<div class=\\"appBoot wizardBoot\\"><div class=\\"appBootInner\\"><div class=\\"appBootWordmark\\">Wizard kon niet laden</div><div class=\\"appBootSub\\">"+String(message||"Onbekende fout")+"</div></div></div>";}'+
+      'window.addEventListener("error",function(event){var where=(event&&event.filename)?(" in "+event.filename.split("/").pop()+":"+event.lineno+":"+event.colno):"";showWizardBootError(((event&&event.message)||"Script kon niet starten")+where);});'+
+      'window.addEventListener("unhandledrejection",function(event){var reason=event&&event.reason;showWizardBootError((reason&&reason.message)||String(reason||"Promise fout"));});'+
+      'setTimeout(function(){var root=document.getElementById("wizardApp");if(root&&!root.children.length)showWizardBootError("Startscript reageert niet");},2200);})();<\/script>'+
+      '<script src="/js/shared-background-preview.js?v=20260517a"><\/script>'+
+      '<script src="/js/shared-card-renderer.js?v=20260519v"><\/script>'+
+      '<script src="/js/shared-preview-shell.js?v=20260530c"><\/script>'+
+      '<script type="module" src="/js/wizard.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
+    '</body></html>';
 }
 function newSetWizardUrl(){
   return setWizardUrl('');
@@ -15180,6 +15388,13 @@ function openCurrentSetWizard(){
     return;
   }
   openNewSetWizard();
+}
+function exposeDashboardWizardBridge(){
+  try{
+    window.UITGESPROKEN_DASHBOARD_STATE=S;
+    window.UITGESPROKEN_DASHBOARD_CACHE=SC;
+    window.UITGESPROKEN_DASHBOARD_SUPABASE=window._supa||null;
+  }catch(_err){}
 }
 function showLivePreview(){
   if(!S.activeId){toast('Kies eerst een kaartenset','red');return;}
