@@ -59,8 +59,8 @@ function rewritePrettyDashboard(pathname) {
   return '/dashboard' + rest;
 }
 
-function rewriteWizardPath(pathname) {
-  if (/^\/dashboard\/wizard(?:\/.*)?$/.test(pathname)) {
+function rewriteDashboardAppPath(pathname) {
+  if (/^\/dashboard\/(?:wizard|editor)(?:\/.*)?$/.test(pathname)) {
     return '/dashboard/index.html';
   }
   return pathname;
@@ -85,7 +85,7 @@ function rewritePrettyPublic(pathname) {
 
 function resolveFilePath(requestPath) {
   let pathname = rewritePrettyDashboard(normalizeUrlPath(requestPath));
-  pathname = rewriteWizardPath(pathname);
+  pathname = rewriteDashboardAppPath(pathname);
   pathname = rewritePrettyPublic(pathname);
 
   if (pathname === '/') {
