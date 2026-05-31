@@ -18,7 +18,9 @@
       "Bash(grep -E \"\\\\.html$|\\\\.js$|package\")",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(node --input-type=module)",
+      "Bash(node --check /Users/wouter/Desktop/uitgesproken/js/wizard.js)"
     ]
   }
 }

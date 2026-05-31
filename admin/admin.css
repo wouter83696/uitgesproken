@@ -760,12 +760,12 @@ html.admin-night .cropModal{background:rgba(3,8,14,.7)}
 #loadBar.on{opacity:1}
 .appBoot{position:fixed;inset:0;z-index:998;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#fcfcfd 0%,#f7fafb 100%);opacity:1;visibility:visible;transition:opacity .18s ease,visibility .18s ease}
 .appBoot.is-hidden{opacity:0;visibility:hidden;pointer-events:none}
-.appBootInner{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px}
-.appBootLogo{width:72px;height:72px;display:flex;align-items:center;justify-content:center}
+.appBootInner{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:24px}
+.appBootLogo{width:72px;height:72px;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
 .appBootLogo img{width:72px;height:72px;display:block}
-.appBootWordmark{font-size:22px;font-weight:700;letter-spacing:-.03em;color:#334455}
-.appBootSub{font-size:12.5px;color:var(--k2)}
-.appBootBar{width:188px;height:8px;border-radius:999px;background:rgba(79,142,158,.14);overflow:hidden;box-shadow:inset 0 0 0 1px rgba(79,142,158,.08)}
+.appBootWordmark{font-size:22px;font-weight:700;letter-spacing:-.03em;line-height:1;color:#334455}
+.appBootSub{font-size:12.5px;margin-top:8px;color:var(--k2)}
+.appBootBar{width:188px;height:8px;margin-top:12px;border-radius:999px;background:rgba(79,142,158,.14);overflow:hidden;box-shadow:inset 0 0 0 1px rgba(79,142,158,.08)}
 .appBootBarFill{width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,#6fb0bc 0%,#4f95a3 100%);transition:width .18s cubic-bezier(.33,1,.68,1)}
 /* ── MAIN ── */
 #app{display:flex;height:100vh;overflow:hidden;background:#fbfbfc;opacity:1;visibility:visible;transition:opacity .16s ease}
@@ -1483,7 +1483,16 @@ html.admin-night .cropModal{background:rgba(3,8,14,.7)}
 .clHead .tbR .focusHeadBtn{width:28px;height:28px;border-radius:10px;box-shadow:none;background:transparent!important;border:none!important}
 .clHead .tbR .focusHeadBtn:hover{background:rgba(79,142,158,.08)!important;border:none!important}
 .clHead .tbR .focusHeadBtn svg{width:14px;height:14px}
-.clHead .tbR .focusHeadBtn .flipGlyph{display:inline-block;font-size:14px;line-height:1;transform:translateY(-.5px)}
+.clHead .tbR .focusHeadBtn .flipGlyph{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:11px;
+  height:11px;
+  font-size:11px;
+  line-height:11px;
+  transform:none;
+}
 .focusHeadZoom .cvZoomBtn{width:28px;height:28px;font-size:15px}
 .focusHeadZoom .cvZoomPct{min-width:42px;height:28px;font-size:11px;line-height:28px}
 @media (hover:hover){
@@ -1980,9 +1989,26 @@ html.admin-night .wizardWorkspaceShell{
 .cardFaceOuter{perspective:1200px}
 .cardFaceInner{position:relative;width:100%;height:100%;transform-style:preserve-3d;-webkit-transform-style:preserve-3d;transition:transform 520ms cubic-bezier(.4,0,.2,1)}
 .cardFaceInner.flipped{transform:rotateY(180deg)}
+.cardFaceInner.back-swap-turn{transition:none;animation:cardFaceBackSwapTurn 380ms cubic-bezier(.34,.84,.36,1) both}
 .cardFaceFront,.cardFaceBack{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;border-radius:9px;overflow:hidden;box-shadow:none}
 .cardFaceBack{transform:rotateY(180deg) translateZ(0);display:flex;align-items:center;justify-content:center;padding:12px;text-align:center;font-weight:600;line-height:1.4;word-break:break-word;overflow:hidden}
 .cardFaceBack .cpBg.is-reflect,.cardFaceBack .cpShapeLayer.is-reflect{transform:scaleX(-1)}
+.cardFaceBack.is-refreshing{will-change:opacity,transform,filter}
+.cardFaceBack.is-refreshing-out{animation:backFaceRefreshOut .16s cubic-bezier(.55,.06,.68,.19) forwards}
+.cardFaceBack.is-refreshing-in{animation:backFaceRefreshIn .24s cubic-bezier(.22,1,.36,1) forwards}
+@keyframes cardFaceBackSwapTurn{
+  0%{transform:rotateY(180deg)}
+  50%{transform:rotateY(270deg)}
+  100%{transform:rotateY(180deg)}
+}
+@keyframes backFaceRefreshOut{
+  0%{opacity:1;filter:none;transform:rotateY(180deg) translateZ(0)}
+  100%{opacity:.12;filter:saturate(.88);transform:rotateY(270deg) translateZ(0)}
+}
+@keyframes backFaceRefreshIn{
+  0%{opacity:.12;filter:saturate(.88);transform:rotateY(90deg) translateZ(0)}
+  100%{opacity:1;filter:none;transform:rotateY(180deg) translateZ(0)}
+}
 /* ── CROP MODAL ── */
 .cropModal{position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center}
 .cropBox{background:white;border-radius:12px;padding:18px;max-width:480px;width:90vw;box-shadow:0 12px 40px rgba(0,0,0,.25)}
@@ -2822,25 +2848,29 @@ html.card-fmt-narrow .stijlSlideUpload svg,html.card-fmt-narrow .stijlSlideMiniB
 .previewTopPill .stijlCanvasNightBtn.sel{border:none;background:rgba(24,18,60,.88);box-shadow:none}
 .previewTopPillSep{width:1px;height:12px;background:rgba(79,142,158,.18);flex-shrink:0;margin:0 2px;align-self:center}
 .stijlCanvasTopbarRight{display:flex;align-items:center;gap:5px}
-.stijlCanvasBackbar{position:static;z-index:5;display:grid;grid-template-columns:auto auto minmax(0,1fr);column-gap:10px;row-gap:6px;align-items:center;align-content:center;width:100%;max-width:100%;min-height:28px;box-sizing:border-box;align-self:stretch;margin:8px 0 0;padding:0}
+.stijlCanvasBackbar{position:relative;z-index:5;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;grid-template-rows:auto auto;column-gap:10px;row-gap:4px;align-items:end;align-content:end;width:100%;max-width:100%;min-height:50px;box-sizing:border-box;align-self:stretch;margin:8px 0 0;padding:0}
 .stijlCanvasVarianceHint{position:absolute;left:14px;bottom:48px;z-index:5;display:inline-flex;align-items:center;max-width:220px;height:20px;padding:0 8px;border-radius:999px;border:1px solid var(--preview-menu-border);border-top-color:var(--preview-menu-top-border);background:rgba(var(--preview-menu-surface),var(--preview-menu-alpha));backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);-webkit-backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);font-size:9px;font-weight:600;color:#7b8998;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
-.stijlCanvasBackbarLabel{grid-column:1;grid-row:1;font-size:9px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:#8d9aa8;padding:0;white-space:nowrap;text-align:left;justify-self:start;align-self:center}
-.stijlCanvasBackbarGroup{grid-column:2;grid-row:1;display:inline-flex;align-items:center;gap:1px;height:24px;padding:0 2px;border:1px solid var(--preview-menu-border);border-top-color:var(--preview-menu-top-border);border-radius:999px;background:rgba(var(--preview-menu-surface),var(--preview-menu-alpha));backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);-webkit-backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);box-shadow:none;justify-self:start}
-.previewEditSurfaceStack{grid-column:3;grid-row:1;display:inline-flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:6px;flex-shrink:0;align-self:center;justify-self:end}
+.stijlCanvasBackbarLabel{grid-column:1;grid-row:2;font-size:9px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:#8d9aa8;padding:0;white-space:nowrap;text-align:left;justify-self:start;align-self:center}
+.stijlCanvasBackbarGroup{grid-column:2;grid-row:2;display:inline-flex;align-items:center;gap:1px;height:24px;padding:0 2px;border:1px solid var(--preview-menu-border);border-top-color:var(--preview-menu-top-border);border-radius:999px;background:rgba(var(--preview-menu-surface),var(--preview-menu-alpha));backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);-webkit-backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);box-shadow:none;justify-self:start}
+.previewEditSurfaceStack{grid-column:4;grid-row:1 / span 2;display:grid;grid-template-rows:auto auto;justify-items:start;align-content:end;row-gap:4px;padding:5px 6px;border:1px solid rgba(230,236,239,.96);border-top-color:rgba(255,255,255,.98);border-radius:16px;background:rgba(255,255,255,.72);backdrop-filter:blur(10px) saturate(1);-webkit-backdrop-filter:blur(10px) saturate(1);box-shadow:0 4px 14px rgba(20,30,40,.04);opacity:1;visibility:visible;transform:translateY(0);transition:opacity .16s ease,transform .16s ease,border-color .16s ease,background .16s ease;will-change:opacity,transform;z-index:2}
+.previewEditSurfaceStack.is-hidden{opacity:0;visibility:hidden;pointer-events:none;transform:translateY(2px)}
+.previewEditSurfaceStack.is-visible{opacity:1;visibility:visible;pointer-events:auto;transform:translateY(0)}
 .previewEditSurfacePill{display:inline-flex;align-items:center;gap:1px;height:24px;padding:0 2px;border:1px solid var(--preview-menu-border);border-top-color:var(--preview-menu-top-border);border-radius:999px;background:rgba(var(--preview-menu-surface),var(--preview-menu-alpha));backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);-webkit-backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);box-shadow:none;flex-shrink:0}
-.previewEditSurfacePill-surface,.previewEditSurfacePill-scope{align-self:flex-start}
+.previewEditSurfacePill-surface,.previewEditSurfacePill-scope{justify-self:start}
 .previewEditSurfaceBtn{height:18px;padding:0 8px;border:none;border-radius:999px;background:transparent;color:#6f7f92;font:inherit;font-size:9px;font-weight:700;cursor:pointer;transition:background .12s,color .12s;white-space:nowrap}
 .previewEditSurfaceBtn:hover{background:rgba(79,142,158,.065);color:#5f8190}
 .previewEditSurfaceBtn.sel{background:var(--tlp);color:var(--tld)}
 .previewEditSurfaceBtn.is-disabled{opacity:.42;cursor:default;pointer-events:none}
+.stijlCanvasWindow.night .previewEditSurfaceStack,
+html.admin-night .stijlCanvasWindow .previewEditSurfaceStack{border-color:rgba(255,255,255,.10);border-top-color:rgba(255,255,255,.14);background:rgba(28,24,68,.72);box-shadow:none}
 /* Micro polish 4: icon button system final polish */
 .stijlCanvasNightBtn{width:22px;height:22px;padding:0;border:1px solid var(--preview-menu-border);border-top-color:var(--preview-menu-top-border);border-radius:999px;background:rgba(var(--preview-menu-surface),var(--preview-menu-alpha));color:#6F8797;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:border-color .12s,background .12s,color .12s,box-shadow .12s;backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);-webkit-backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);box-shadow:none}
 .stijlCanvasNightBtn svg,
 .stijlCanvasGridBtn svg,
 .stijlCanvasFlipBtn svg{width:11px;height:11px;display:block;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .stijlCanvasNightBtn:hover{border-color:rgba(79,142,158,.38);background:rgba(77,144,162,.18);color:#3d6a78}
-.previewNavPosBtn{width:auto!important;min-width:38px;padding:0 8px!important}
-.previewNavPosText{font-size:11px;font-weight:500;color:#6F8797;letter-spacing:.01em;line-height:1;white-space:nowrap}
+.previewNavPosBtn{width:auto!important;min-width:38px;padding:0 8px!important;justify-content:center}
+.previewNavPosText{display:block;font-size:11px;font-weight:500;color:#6F8797;letter-spacing:.01em;line-height:1;white-space:nowrap;text-align:center;font-variant-numeric:tabular-nums}
 .previewNavPosBtn:hover .previewNavPosText{color:#3d6a78}
 .stijlCanvasNightBtn.sel{border-color:rgba(255,255,255,.18);background:rgba(24,18,60,.94);color:#eef2f5;box-shadow:0 8px 22px rgba(15,23,42,.12)}
 .stijlCanvasGridBtn{width:22px;height:22px;padding:0;border:1px solid var(--preview-menu-border);border-top-color:var(--preview-menu-top-border);border-radius:999px;background:rgba(var(--preview-menu-surface),var(--preview-menu-alpha));color:#6F8797;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:border-color .12s,background .12s,color .12s;backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);-webkit-backdrop-filter:blur(var(--preview-menu-blur)) saturate(1);box-shadow:none}
@@ -3046,7 +3076,7 @@ html.admin-night .stijlCanvasWindow .stijlBackModeBtn.sel{
   animation:none;
 }
 .stijlCanvasSide.preview{grid-area:preview;position:sticky;top:var(--toolbar-h);align-self:start;padding-top:0}
-.stijlCanvasSide.right{grid-area:right;align-self:start;display:flex;flex-direction:column;position:sticky;top:var(--toolbar-h);max-height:calc(100vh - var(--toolbar-h) - 16px);overflow-y:auto;padding-top:0;padding-right:12px}
+.stijlCanvasSide.right{grid-area:right;align-self:start;display:flex;flex-direction:column;position:sticky;top:var(--toolbar-h);max-height:calc(100vh - var(--toolbar-h) - 16px);overflow-y:auto;padding-top:0;padding-right:2px;box-sizing:border-box;scrollbar-gutter:stable}
 .stijlCanvasSide.right{scroll-behavior:smooth}
 .canvas-sticky-mode .stijlCanvasSide.preview,
 .canvas-sticky-mode .stijlCanvasSide.right{top:calc(var(--toolbar-h) + 10px)}
@@ -3054,7 +3084,8 @@ html.admin-night .stijlCanvasWindow .stijlBackModeBtn.sel{
 .stijlCanvasSide.right.home-static-side{position:relative;top:auto;max-height:none;overflow:visible}
 .stijlCanvasSide.right.home-static-side .globalTipBlock{position:relative;bottom:auto;margin-top:8px}
 .stijlCanvasSide.right .stijlQuestionPane{flex:none}
-.stijlCanvasSide.right .stijlQuestionPaneOuter{flex:none}
+.stijlCanvasSide.right .stijlQuestionPaneOuter,
+.stijlCanvasSide.right .globalTipBlock{flex:none;width:100%;align-self:stretch;box-sizing:border-box}
 @media(min-width:901px){
 .stijlCanvasSide.preview{--preview-shell-max-h:clamp(360px,calc(100vh - var(--toolbar-h) - 154px),468px)}
 .stijlCanvasStage{min-height:var(--preview-shell-max-h);height:var(--preview-shell-max-h);max-height:var(--preview-shell-max-h)}
@@ -3396,8 +3427,16 @@ html.admin-night .stijlCanvasWindow .stijlBackModeBtn.sel{
 .qHeadBtn.sel{background:var(--tlp);color:var(--tld);box-shadow:inset 0 0 0 1px rgba(79,142,158,.16)}
 .qHeadBtn svg,.qHeadBtnSecondary svg{width:13px;height:13px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .qHeadBtn svg.flipIconStd,.qHeadBtnSecondary svg.flipIconStd{width:14px;height:14px;stroke-width:1.3}
-.flipGlyph{display:block;font-size:15px;line-height:1;transform:translateY(-.5px)}
-.stijlCanvasFlipBtn .flipGlyph{font-size:16px;transform:translateY(-1px)}
+.flipGlyph{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:11px;
+  height:11px;
+  font-size:11px;
+  line-height:11px;
+  transform:none;
+}
 .qHeadBtnPrimary{width:22px;height:22px;padding:0;border:none;border-radius:6px;background:transparent!important;color:#7c9eab;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:none;flex-shrink:0;transition:background .12s,color .12s}
 .qHeadBtnPrimary:hover{border:none!important;background:rgba(79,142,158,.10)!important;color:#5f8190}
 .qHeadBtnPrimary.sel{border:none!important;background:rgba(79,142,158,.14)!important;color:#365d6c}
@@ -4537,8 +4576,11 @@ html.admin-night .clHead .tbR .btnIcon.clMoreBtn:hover{
   height:12px;
 }
 .stijlCanvasWindow .stijlCanvasFlipBtn .flipGlyph{
-  font-size:12px;
-  transform:translateY(-.5px);
+  width:11px;
+  height:11px;
+  font-size:11px;
+  line-height:11px;
+  transform:none;
 }
 .stijlCanvasWindow.viewer-only-preview .cardFaceOuter,
 .stijlCanvasWindow.viewer-only-preview .adminInfoSlide,
