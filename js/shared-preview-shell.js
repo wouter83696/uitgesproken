@@ -146,6 +146,69 @@
     );
   }
 
+  function syncCanvasPreviewWindowLayout(win){
+    if (!win || !win.getBoundingClientRect) return;
+    var card = win.querySelector('.stijlCardPrevWrap');
+    var visual = card && card.querySelector('.cardFaceOuter, .adminInfoSlide');
+    if (!card) return;
+    var winRect = win.getBoundingClientRect();
+    if (!(winRect.width > 0 && winRect.height > 0)) return;
+    var sideInset = 14;
+    var contentTop = 34;
+    var contentBottom = 70;
+    var topbar = win.querySelector('.stijlCanvasTopbar');
+    var backbar = win.querySelector('.stijlCanvasBackbar');
+    if (topbar) {
+      var topbarRect = topbar.getBoundingClientRect();
+      sideInset = Math.max(8, Math.round(topbarRect.left - winRect.left));
+      contentTop = Math.max(0, Math.round(topbarRect.bottom - winRect.top) + 8);
+    }
+    if (backbar) {
+      var backbarRect = backbar.getBoundingClientRect();
+      contentBottom = Math.max(0, Math.round(winRect.bottom - backbarRect.top) - 4);
+    }
+    var backbarExtra = win.querySelector('.previewEditSurfaceStack');
+    if (backbarExtra && typeof backbarExtra.getBoundingClientRect === 'function') {
+      var backbarExtraRect = backbarExtra.getBoundingClientRect();
+      if (backbarExtraRect.width > 0 && backbarExtraRect.height > 0) {
+        var reserveTop = backbarExtraRect.top;
+        if (backbar && typeof backbar.getBoundingClientRect === 'function') {
+          reserveTop = Math.min(reserveTop, backbar.getBoundingClientRect().top);
+        }
+        contentBottom = Math.max(contentBottom, Math.max(0, Math.round(winRect.bottom - reserveTop) - 4));
+      }
+    }
+    win.style.setProperty('--preview-side-inset', sideInset + 'px');
+    win.style.setProperty('--preview-content-top', contentTop + 'px');
+    win.style.setProperty('--preview-content-bottom', contentBottom + 'px');
+    if (win.classList.contains('info-preview')) {
+      var previewSide = win.closest('.stijlCanvasSide.preview');
+      var previewShellH = previewSide
+        ? parseFloat(getComputedStyle(previewSide).getPropertyValue('--preview-shell-max-h')) || 0
+        : 0;
+      var basePreviewWindowH = previewShellH > 0 ? previewShellH : 720;
+      var infoAvailH = Math.max(0, basePreviewWindowH - contentTop - contentBottom);
+      var infoScale = parseFloat((visual && visual.style.zoom) || '') || 1;
+      var infoCardFace = card.querySelector('.adminInfoSlideCard');
+      var infoCardFaceRect = infoCardFace && infoCardFace.getBoundingClientRect ? infoCardFace.getBoundingClientRect() : null;
+      var infoCardH = (infoCardFaceRect && infoCardFaceRect.height) ? infoCardFaceRect.height : 0;
+      if (!(infoCardH > 0)) {
+        var infoBaseCardW = parseFloat(getComputedStyle(card).getPropertyValue('--editor-preview-card-w')) || 320;
+        infoCardH = Math.round((infoBaseCardW * (55 / 85)) * infoScale);
+      }
+      var infoCardStart = contentTop + Math.max(0, Math.round((infoAvailH - infoCardH) / 2));
+      card.style.top = infoCardStart + 'px';
+      card.style.bottom = 'auto';
+      card.style.height = 'auto';
+      card.style.transform = 'none';
+      return;
+    }
+    card.style.top = contentTop + 'px';
+    card.style.bottom = contentBottom + 'px';
+    card.style.height = 'auto';
+    card.style.transform = 'none';
+  }
+
   function renderCanvasPreviewShell(options){
     options = options || {};
     var selectorHtml = options.selectorHtml
@@ -177,6 +240,7 @@
     buildZoomControlHtml: buildZoomControlHtml,
     buildTopbarHtml: buildTopbarHtml,
     buildBackbarHtml: buildBackbarHtml,
+    syncCanvasPreviewWindowLayout: syncCanvasPreviewWindowLayout,
     renderCanvasPreviewShell: renderCanvasPreviewShell,
     icons: {
       backArrow: backArrowIconHtml,
@@ -187,4 +251,5 @@
       flip: flipGlyphHtml
     }
   };
+  PK.syncCanvasPreviewWindowLayout = PK.syncCanvasPreviewWindowLayout || syncCanvasPreviewWindowLayout;
 })(window);

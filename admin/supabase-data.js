@@ -54,6 +54,10 @@
     return '';
   }
 
+  function currentDashboardSpaceSlug(){
+    return requestedSpaceSlug() || String(S.spaceSlug || ((S.space&&S.space.slug)||'') || '').trim();
+  }
+
   function requestedDashboardSubview(){
     var parts=String(location.pathname||'').replace(/^\/|\/$/g,'').split('/').filter(Boolean);
     if(parts.length>=3 && parts[1]==='dashboard') return parts[2]||'';
@@ -97,13 +101,23 @@
   function requestedDashboardSet(){
     try{
       var params = new URLSearchParams(location.search || '');
+      var spaceSlug = currentDashboardSpaceSlug() || 'default';
+      var stored = '';
+      try{ stored = sessionStorage.getItem('pk_dashboard_wizard_set_'+spaceSlug) || ''; }catch(_err){}
       return {
-        set: (params.get('set') || '').trim(),
+        set: (params.get('set') || stored || '').trim(),
         mode: normalizeRequestedEditorMode(params.get('mode') || '')
       };
     }catch(_err){
       return { set:'', mode:'' };
     }
+  }
+
+  function cleanDashboardWizardRoute(){
+    try{
+      if(requestedDashboardSubview()!=='wizard' || !location.search)return;
+      history.replaceState({space:currentDashboardSpaceSlug()||''},'',location.pathname+(location.hash||''));
+    }catch(_err){}
   }
 
   function normalizeRequestedEditorMode(value){
@@ -231,6 +245,7 @@
       var requestedSubview = requestedDashboardSubview();
       if(requestedSubview==='wizard'){
         var wizardSet = resolveRequestedSetId();
+        cleanDashboardWizardRoute();
         S.activeKind = 'space';
         S._view = 'wizard';
         S.activeId = wizardSet.id || null;
