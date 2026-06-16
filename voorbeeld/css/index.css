@@ -2,15 +2,12 @@
    v3.7.2 – index vervangen door centrale carrousel
 */
 
-.page{
-  min-height: 100vh;
-}
 
 /* Zorg dat iOS/Safari "buiten de pagina" (rubber-band / UI chrome) NIET mee kleurt.
    We zetten daarom de echte document-achtergrond vast.
    Light: vrijwel wit. Dark: vaste indigo nachtbasis. */
 html, body{
-  background: var(--bg-base-color, var(--cardsPageBg, #FAFAF8));
+  background: var(--cardsPageBg, #FAFAF8);
   height: 100%;
   min-height: 100dvh;
 }
@@ -22,40 +19,89 @@ html[data-contrast="dark"] body{
 /* IP-variant: vaste nachtbasis (indigo/paarsblauw) */
 :root{
   --darkBaseRgb: 24, 18, 60; /* indigo: geen zwart/grijs */
+  --cardsTopBarInset: 16px;
+  --cardsTopBarHeight: 64px;
+  --cardsTopBarGap: 14px;
 }
 
-.pkBuildStamp{
-  position: fixed;
-  right: 10px;
-  bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-  z-index: 20000;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(11,18,32,0.10);
-  background: rgba(255,255,255,0.72);
-  color: rgba(11,18,32,0.62);
-  font: 500 11px/1 "IBM Plex Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-  letter-spacing: 0.02em;
-  pointer-events: none;
-  user-select: none;
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+/* Kaartenindex: topbar moet boven info-sheet/overlay blijven voor directe klik op menu/logo. */
+body[data-page="kaarten"] .topBar{
+  z-index: calc(var(--z-menu, 50) + 3);
 }
-@media (max-width: 900px){
-  .pkBuildStamp{
-    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+
+/* Kaartenindex: menu mag tijdens sheet-close boven de sheet verschijnen. */
+body[data-page="kaarten"] .themeMenu{
+  z-index: calc(var(--z-menu, 50) + 2);
+}
+
+/* Kaartenindex: kruisje op uitleg-sheet verbergen. */
+body[data-page="kaarten"] #infoClose{
+  display: none !important;
+}
+
+/* Kaartenindex: gebruik dezelfde sheet-shell als de main index. */
+body[data-page="kaarten"] .infoSheet{
+  top: calc(env(safe-area-inset-top, 0px) + var(--topBarInset, 16px) + var(--topBarHeight, 64px) + 8px);
+  bottom: 0;
+  --sheetMaxH: 100%;
+  --sheetCompactH: 100%;
+  --sheetCurH: 100%;
+  --helpShift: 0px;
+}
+
+body[data-page="kaarten"] .infoCard{
+  height: 100%;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+body[data-page="kaarten"] .sheetViewport{
+  height: 100%;
+  max-height: none;
+}
+
+body[data-page="kaarten"] .sheetStack,
+body[data-page="kaarten"] .sheetPage{
+  min-height: 100%;
+}
+
+/* Kaartenindex: zelfde ruimte tussen handle en uitlegkaart als main index. */
+body[data-page="kaarten"] .infoCarousel{
+  padding-top: 10px;
+  padding-left: 14px;
+  padding-right: 14px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
+  scroll-padding-left: 14px;
+  scroll-padding-right: 14px;
+}
+
+/* Kaartenindex: exact dezelfde peek-verhouding als de hoofdcarrousel. */
+body[data-page="kaarten"] .infoSlide{
+  flex: 0 0 95%;
+  width: auto;
+  padding: 0 10px 10px;
+}
+
+body[data-page="kaarten"] .infoSlideInner{
+  width: 100%;
+  margin: 0 auto;
+}
+
+@media (min-width: 720px){
+  body[data-page="kaarten"] .infoSlide{
+    flex-basis: 92%;
   }
 }
 
-html[data-contrast="dark"] .pkBuildStamp{
-  border-color: rgba(245,250,255,0.16);
-  background: rgba(24,18,60,0.56);
-  color: rgba(245,250,255,0.84);
+@media (min-width: 980px){
+  body[data-page="kaarten"] .infoSlide{
+    flex-basis: 88%;
+  }
 }
 
 
 /* Dynamische achtergrond – alleen achter de index grid */
 .page{
+  min-height: 100vh;
   position: relative;
   overflow: hidden;
 }
@@ -69,7 +115,8 @@ html[data-contrast="dark"] .pkBuildStamp{
   position: fixed;
   inset: 0;
   width: 100vw;
-  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
   /* Blobs-laag (canvas) komt BOVEN de meekleurende ondertoon */
   z-index: 1;
   pointer-events: none;
@@ -121,7 +168,15 @@ html[data-contrast="dark"] .indexTint{
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 84px 0 44px; /* ruimte voor topbar + klein beetje onder */
+  padding: calc(env(safe-area-inset-top, 0px) + var(--cardsTopBarInset) + var(--cardsTopBarHeight) + var(--cardsTopBarGap)) 0 44px;
+}
+
+@media (max-width: 680px){
+  :root{
+    --cardsTopBarInset: 16px;
+    --cardsTopBarHeight: 56px;
+    --cardsTopBarGap: 10px;
+  }
 }
 
 /* Geen extra waas/vlek achter de kaart.
@@ -143,6 +198,31 @@ html[data-contrast="dark"] .carouselStage::before{ display: none; }
   max-width: 920px;
   padding: 0 14px;
   scroll-snap-type: x mandatory;
+}
+
+@keyframes pkCardsPageIn{
+  0%{
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.993);
+  }
+  62%{
+    opacity: 1;
+    transform: translate3d(0, -2px, 0) scale(1.001);
+  }
+  100%{
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+body[data-page="kaarten"].pkCardsIntro .carouselStage{
+  animation: pkCardsPageIn 520ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce){
+  body[data-page="kaarten"].pkCardsIntro .carouselStage{
+    animation: none !important;
+  }
 }
 
 .mainCarousel .cardsSlide{
@@ -181,10 +261,22 @@ body[data-page="kaarten"] .indexBgSvg{
   display: none !important;
 }
 
-/* Kaartenindex: alleen blobs, geen volledige viewport tint-lagen */
-body[data-page="kaarten"] .indexTint,
+/* Kaartenindex: houd een vaste onderlaag zichtbaar zoals in stable-1107.
+   Daardoor blijft de basis stabiel tijdens contrastwissels en zie je geen
+   wit/paars tussenscherm achter de transparante kaart-opbouw. */
+body[data-page="kaarten"] .indexTint{
+  display: block !important;
+  transition: none !important;
+}
+html[data-contrast="light"] body[data-page="kaarten"] .indexTint{
+  background: var(--cardsPageBg, #FAFAF8) !important;
+}
+html[data-contrast="dark"] body[data-page="kaarten"] .indexTint{
+  background: rgb(var(--darkBaseRgb)) !important;
+}
 body[data-page="kaarten"] .indexSoftBlob{
-  display: none !important;
+  display: block !important;
+  transition: none !important;
 }
 
 
@@ -205,7 +297,6 @@ body[data-page="kaarten"] .indexSoftBlob{
 .card-index .title {
   display: none !important;
 }
-
 
 
 /* ===== Revision: kaarten opaak, achtergrond hiërarchie strak ===== */
@@ -242,6 +333,13 @@ body[data-page="kaarten"] .indexSoftBlob{
 /* Light mode: geen extra waas-veld */
 html[data-contrast="light"] .indexSoftBlob{
   background: transparent !important;
+}
+html[data-contrast="light"] body[data-page="kaarten"] .indexSoftBlob{
+  background: radial-gradient(
+    circle at 35% 35%,
+    rgba(var(--activeHueRgb, 120, 160, 190), 0.022) 0%,
+    rgba(var(--activeHueRgb, 120, 160, 190), 0) 66%
+  ) !important;
 }
 
 html[data-contrast="dark"] .indexSoftBlob{
@@ -377,44 +475,4 @@ html[data-contrast="dark"] .indexSoftBlob{
     object-fit: cover;
     display: block;
   }
-}
-
-
-
-
-
-
-/* --- Release fix: menu thumbnails match index cards (full-bleed, same aspect) --- */
-.menuItemThumb,
-.menu-thumb,
-.menuThumb,
-.menu-item-thumb {
-  width: 64px;
-  aspect-ratio: 85 / 55;
-  border-radius: 12px;
-  overflow: hidden;
-  background: transparent;
-}
-
-.menuItemThumb img,
-.menu-thumb img,
-.menuThumb img,
-.menu-item-thumb img,
-.menuItemThumb svg,
-.menu-thumb svg,
-.menuThumb svg,
-.menu-item-thumb svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-}
-/* If thumbnails are set as background-image on a div */
-.menuItemThumb,
-.menu-thumb,
-.menuThumb,
-.menu-item-thumb {
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
 }

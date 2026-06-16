@@ -62,7 +62,7 @@ body.uitlegPage.embed .wrap{
     We laten PK.applyDominantTint alleen CSS-variabelen zetten,
     zodat dark/light altijd consistent omschakelt.
   */
-  background-color: var(--pkTextBg, #F9FAF9);
+  background-color: var(--pkTextBg, rgba(255,255,255,0.975));
   border-radius: var(--radius);
   /* Bovenhoeken verdwijnen onder de kaart → geen "dubbele" ronding */
   border-top-left-radius: 0;
@@ -88,6 +88,43 @@ body.uitlegPage.embed .wrap{
   overflow-wrap: anywhere;
 }
 
+.uitlegPage .desc p{
+  margin: 0 0 12px;
+}
+
+.uitlegPage .desc p:last-child{
+  margin-bottom: 0;
+}
+
+.uitlegPage .desc .infoTextIntro{
+  color: rgba(11, 18, 32, 0.88);
+}
+
+.uitlegPage .desc .infoTextSubhead{
+  margin-top: 2px;
+  font-weight: 500;
+  color: rgba(11, 18, 32, 0.68);
+}
+
+.uitlegPage .desc .infoTextHeading{
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: rgba(11, 18, 32, 0.68);
+}
+
+.uitlegPage .desc strong{
+  font-weight: 500;
+}
+
+.uitlegPage .desc .infoTextList{
+  margin: 6px 0 14px 20px;
+  padding: 0;
+}
+
+.uitlegPage .desc .infoTextList li{
+  margin: 5px 0;
+}
+
 /* Thema-titel op de uitleg-kaartjes: exact dezelfde blauw als index-kaarten */
 .kaartThema{
   color: var(--textBlue);
@@ -96,6 +133,23 @@ body.uitlegPage.embed .wrap{
 /* Nachtmodus: koeler grijs, zelfde familie als menu (niet te fel) */
 html[data-contrast="dark"] .uitlegPage .desc{
   color: rgba(232, 235, 240, 0.78);
+}
+
+html[data-contrast="dark"] .uitlegPage .desc .infoTextIntro{
+  color: rgba(244, 246, 250, 0.95);
+}
+
+html[data-contrast="dark"] .uitlegPage .desc .infoTextSubhead{
+  font-weight: 500;
+  color: rgba(244, 246, 250, 0.76);
+}
+
+html[data-contrast="dark"] .uitlegPage .desc .infoTextHeading{
+  color: rgba(244, 246, 250, 0.76);
+}
+
+html[data-contrast="dark"] .uitlegPage .desc strong{
+  font-weight: 500;
 }
 
 /* (Onderbalk verwijderd) */
@@ -140,49 +194,10 @@ html[data-contrast="dark"] .uitlegPage .uitlegText{
     Dark mode gebruikt altijd een vaste basis (geen dominante-kleur tint),
     zodat het tekstvak 100% mee omschakelt.
   */
-  background-color: rgba(23, 22, 50, 0.78);
+  background-color: rgba(23, 22, 50, 0.86);
   border-color: rgba(255, 255, 255, 0.08);
   box-shadow: none;
 }
-
-
-
-/* --- Release fix: menu thumbnails match index cards (full-bleed, same aspect) --- */
-.menuItemThumb,
-.menu-thumb,
-.menuThumb,
-.menu-item-thumb {
-  width: var(--menuThumbSize, 56px);
-  aspect-ratio: 85 / 55;
-  border-radius: var(--menuThumbRadius, 12px);
-  overflow: hidden;
-  background: var(--menuThumbBg, transparent);
-}
-
-.menuItemThumb img,
-.menu-thumb img,
-.menuThumb img,
-.menu-item-thumb img,
-.menuItemThumb svg,
-.menu-thumb svg,
-.menuThumb svg,
-.menu-item-thumb svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-  object-position: var(--menuThumbImgPos, center);
-}
-/* If thumbnails are set as background-image on a div */
-.menuItemThumb,
-.menu-thumb,
-.menuThumb,
-.menu-item-thumb {
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-}
-
 
 
 /* ---- landing tuning (v2) ---- */

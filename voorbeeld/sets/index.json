@@ -4,6 +4,22 @@
     {
       "id": "samenwerken",
       "title": "Samen onderzoeken"
+    },
+    {
+      "id": "dummy1",
+      "title": "Dummy 1"
+    },
+    {
+      "id": "dummy2",
+      "title": "Dummy 2"
+    },
+    {
+      "id": "dummy3",
+      "title": "Dummy 3"
+    },
+    {
+      "id": "dummy4",
+      "title": "Dummy 4"
     }
   ],
   "available": [

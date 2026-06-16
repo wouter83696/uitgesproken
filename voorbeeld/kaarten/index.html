@@ -6,40 +6,59 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <script>
+    (function(){
+      try{
+        var m = sessionStorage.getItem('pk_contrast_session');
+        var dark = (m === 'dark');
+        var mode = dark ? 'dark' : 'light';
+        var themeColor = dark ? '#18123c' : '#f7f7f6';
+        document.documentElement.setAttribute('data-contrast', mode);
+        document.documentElement.classList.toggle('dark', dark);
+        document.documentElement.classList.toggle('light', !dark);
+        document.documentElement.style.setProperty('--pkStatusBg', themeColor);
+        document.documentElement.style.backgroundColor = themeColor;
+        document.write('<meta name="apple-mobile-web-app-status-bar-style" content="' + (dark ? 'black-translucent' : 'default') + '">');
+        document.write('<meta name="theme-color" content="' + themeColor + '">');
+      }catch(_e){
+        document.documentElement.setAttribute('data-contrast','light');
+        document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
+        document.write('<meta name="apple-mobile-web-app-status-bar-style" content="default">');
+        document.write('<meta name="theme-color" content="#f7f7f6">');
+      }
+    })();
+  </script>
   <title>Uitgesproken</title>
-  <link rel="icon" type="image/png" sizes="512x512" href="../assets/logo-icons/browser/browser-icon-512.png?v=flat-2">
-  <link rel="icon" type="image/png" sizes="256x256" href="../assets/logo-icons/browser/browser-icon-256.png?v=flat-2">
-  <link rel="shortcut icon" href="../assets/logo-icons/browser/browser-icon-256.png?v=flat-2">
+  <link rel="icon" type="image/png" href="../assets/logo-icons/favicon/favicon-tab-32x32.png?v=icon-36">
+  <link rel="icon" type="image/png" sizes="16x16" href="../assets/logo-icons/favicon/favicon-squircle-16x16.png?v=icon-36">
+  <link rel="icon" type="image/png" sizes="32x32" href="../assets/logo-icons/favicon/favicon-squircle-32x32.png?v=icon-36">
+  <link rel="icon" type="image/png" sizes="48x48" href="../assets/logo-icons/favicon/favicon-squircle-48x48.png?v=icon-36">
+  <link rel="icon" type="image/png" sizes="192x192" href="../assets/logo-icons/app/android-chrome-192x192.png?v=icon-36">
+  <link rel="icon" type="image/png" sizes="512x512" href="../assets/logo-icons/app/android-chrome-512x512.png?v=icon-36">
+  <link rel="shortcut icon" type="image/png" href="../assets/logo-icons/favicon/favicon-tab-32x32.png?v=icon-36">
+  <link rel="icon" href="../assets/logo-icons/favicon/favicon.ico">
   <meta name="apple-mobile-web-app-title" content="Uitgesproken">
   <meta name="application-name" content="Uitgesproken">
-  <link rel="apple-touch-icon" sizes="120x120" href="../assets/logo-icons/app/apple-touch-icon-120.png?v=ios-1">
-  <link rel="apple-touch-icon" sizes="152x152" href="../assets/logo-icons/app/apple-touch-icon-152.png?v=ios-1">
-  <link rel="apple-touch-icon" sizes="167x167" href="../assets/logo-icons/app/apple-touch-icon-167.png?v=ios-1">
-  <link rel="apple-touch-icon" href="../assets/logo-icons/app/apple-touch-icon.png?v=ios-1">
+  <link rel="apple-touch-icon" sizes="120x120" href="../assets/logo-icons/app/apple-touch-icon-120.png?v=ios-15">
+  <link rel="apple-touch-icon" sizes="152x152" href="../assets/logo-icons/app/apple-touch-icon-152.png?v=ios-15">
+  <link rel="apple-touch-icon" sizes="167x167" href="../assets/logo-icons/app/apple-touch-icon-167.png?v=ios-15">
+  <link rel="apple-touch-icon" href="../assets/logo-icons/app/apple-touch-icon.png?v=ios-15">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../css/shell.css?v=4.0.31">
-  <link rel="stylesheet" href="../css/index.css?v=3.7.1.153">
-  <link rel="stylesheet" href="../templates/ui-base.css?v=3.7.1.15">
-  <link rel="stylesheet" href="../templates/cards-index.css?v=3.7.1.8">
+  <link rel="stylesheet" href="../css/shell.css?v=4.0.71">
+  <link rel="stylesheet" href="../css/index.css?v=3.7.1.163">
+  <link rel="stylesheet" href="../templates/ui-base.css?v=3.7.1.16">
+  <link rel="stylesheet" href="../templates/cards-index.css?v=3.7.1.9">
 
 <!-- Zet contrast-modus vroeg (SESSION), om flash te voorkomen.
      Default is altijd LIGHT bij een nieuwe sessie. -->
-<script>
-  (function(){
-    try{
-      var m = sessionStorage.getItem('pk_contrast_session');
-      if(m === 'dark') document.documentElement.setAttribute('data-contrast','dark');
-      else document.documentElement.setAttribute('data-contrast','light');
-    }catch(_e){
-      document.documentElement.setAttribute('data-contrast','light');
-    }
-  })();
-</script>
-  
 </head>
 <body data-page="kaarten" data-brand-icon="1">
+<a href="#mainCarousel" class="skipLink srOnly">Ga naar kaarten</a>
 
 <div id="appRoot">
 
@@ -98,9 +117,19 @@
 
 
 <header class="topBar" aria-label="Bovenbalk">
-  <button id="themePill" class="themePill" type="button" aria-haspopup="dialog" aria-expanded="false">
-    <span class="setCoverWrap" aria-hidden="true">
-        <img id="setCoverIcon" class="setCoverIcon" src="../assets/logo-icons/app/apple-touch-icon.png" alt="">
+  <button id="themePill" class="themePill glassSurface" type="button" aria-haspopup="dialog" aria-expanded="false">
+    <span class="themePillMain" aria-hidden="true">
+      <span class="setCoverWrap">
+        <img id="setCoverIcon" class="setCoverIcon" src="../assets/logo-icons/masters/logo-ballon-vlak.svg" alt="">
+      </span>
+      <span class="themePillBrand">Uitgesproken</span>
+    </span>
+    <span class="themePillMenuIcon" aria-hidden="true">
+      <svg class="gmIcon" viewBox="0 0 24 24">
+        <path d="M4 7h16"></path>
+        <path d="M4 12h16"></path>
+        <path d="M4 17h16"></path>
+      </svg>
     </span>
     <span id="themePillText" class="srOnly">samenwerken</span>
   </button>
@@ -108,9 +137,8 @@
 
 <div id="themeMenuOverlay" class="menuOverlay" hidden></div>
 <section id="themeMenu" class="themeMenu" role="dialog" aria-label="Menu" hidden>
-  <div class="menuCard">
+  <div class="menuCard glassSurface">
     <div class="menuHeaderRow">
-      <div id="menuSetTitle" class="menuHeader">Samen onderzoeken</div>
       <div class="menuHeaderTools" aria-label="Acties">
         <!-- Contrast: 2 standen (licht/donker) – icon-only, minimaal -->
         <button id="menuContrastToggle" class="menuMiniBtn" type="button" aria-label="Contrastmodus" aria-pressed="false">
@@ -140,6 +168,14 @@
         </button>
       </div>
     </div>
+    <button id="menuSetButton" class="menuItem menuCurrentSet" type="button" aria-label="Ga naar het begin van deze kaartenset">
+      <span id="menuSetTitle" class="miLabel">Samen onderzoeken</span>
+      <span class="miThumbRight" aria-hidden="true">
+        <span class="menuThumbCard menuCurrentThumb">
+          <img id="menuSetThumbImg" class="bg" src="../sets/samenwerken/cards_rect/voorkant.svg" alt="">
+        </span>
+      </span>
+    </button>
     <div id="menuList" class="menuList">
       <!-- Wordt dynamisch gevuld -->
     </div>
@@ -154,6 +190,11 @@
 <section id="infoSheet" class="infoSheet" role="dialog" aria-label="Kaarten & uitleg" hidden>
   <div class="infoCard" data-top="help">
     <div class="sheetHandle" aria-hidden="true"></div>
+    <button id="infoClose" class="infoClose menuMiniBtn" type="button" aria-label="Sluiten">
+      <svg class="gmIcon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M18 6 6 18"/><path d="M6 6l12 12"/>
+      </svg>
+    </button>
 
     <!-- Sheet: alleen UITLEG (kaart-carrousel staat nu centraal op de pagina) -->
     <div class="sheetViewport" aria-hidden="false">
@@ -175,80 +216,7 @@
   </div>
 </main>
 
-<script src="../js/main.js?v=0.56" defer></script>
-
-<!-- Fallback: subtiele achtergrond-tint mee laten kleuren met actieve kaart.
-     (Als de hoofd-implementatie al bestaat, doet dit niets.) -->
-<script>
-(function(){
-  'use strict';
-  const root = document.documentElement;
-  // Als er al een systeem is dat dit zet, blijven we eraf.
-  const alreadyManaged = () => root.style.getPropertyValue('--activeTintRgb')?.trim();
-
-  const THEME_RGB = {
-    verkennen: [170, 195, 123],   // groen
-    duiden: [120, 170, 150],      // teal
-    verbinden: [150, 205, 195],   // mint
-    verhelderen: [ 48,  96, 136], // blauw
-    vertragen: [120, 200, 205],   // lichtblauw
-    bewegen: [242, 153,  74]      // oranje
-  };
-
-  function guessThemeFromEl(el){
-    if(!el) return null;
-    const ds = el.dataset && (el.dataset.theme || el.dataset.set || el.dataset.id);
-    if(ds){
-      const t = String(ds).toLowerCase();
-      for(const k of Object.keys(THEME_RGB)) if(t.includes(k)) return k;
-    }
-    const img = el.querySelector ? el.querySelector('img') : null;
-    const src = img ? (img.getAttribute('src') || '') : '';
-    for(const k of Object.keys(THEME_RGB)) if(src.includes('/' + k)) return k;
-    return null;
-  }
-
-  function setTint(theme){
-    if(!theme || !THEME_RGB[theme]) return;
-    const [r,g,b] = THEME_RGB[theme];
-    root.style.setProperty('--activeTintRgb', `${r}, ${g}, ${b}`);
-    root.style.setProperty('--activeTintA', '0.07');
-  }
-
-  function nearestSlide(){
-    const car = document.getElementById('mainCarousel');
-    if(!car) return null;
-    const slides = Array.from(car.children || []).filter(n => n.nodeType === 1);
-    if(!slides.length) return null;
-    const cx = window.innerWidth / 2;
-    let best = slides[0];
-    let bestDist = Infinity;
-    for(const s of slides){
-      const r = s.getBoundingClientRect();
-      const mx = r.left + r.width/2;
-      const d = Math.abs(mx - cx);
-      if(d < bestDist){ bestDist = d; best = s; }
-    }
-    return best;
-  }
-
-  function tick(){
-    if(alreadyManaged()) return;
-    const slide = nearestSlide();
-    const theme = guessThemeFromEl(slide);
-    if(theme) setTint(theme);
-  }
-
-  window.addEventListener('scroll', tick, {passive:true});
-  window.addEventListener('resize', tick, {passive:true});
-  document.addEventListener('DOMContentLoaded', () => {
-    // kleine delay zodat carousel eerst kan renderen
-    setTimeout(tick, 60);
-    const car = document.getElementById('mainCarousel');
-    car && car.addEventListener('scroll', tick, {passive:true});
-  });
-})();
-</script>
+  <script type="module" src="../js/main.js?v=1.99"></script>
 
 </div><!-- /#appRoot -->
 
