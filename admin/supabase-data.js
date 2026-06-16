@@ -59,6 +59,10 @@
   }
 
   function requestedDashboardSubview(){
+    try{
+      var queryView = String(new URLSearchParams(location.search || '').get('view') || '').trim().toLowerCase();
+      if(queryView==='wizard' || queryView==='editor') return queryView;
+    }catch(_err){}
     var parts=String(location.pathname||'').replace(/^\/|\/$/g,'').split('/').filter(Boolean);
     if(parts.length>=3 && parts[1]==='dashboard') return parts[2]||'';
     if(parts.length>=2 && parts[0]==='dashboard') return parts[1]||'';
@@ -66,20 +70,8 @@
   }
 
   function syncDashboardRoute(slug){
-    var clean=String(slug||'').trim();
-    if(!clean)return;
-    var pathname=String(location.pathname||'');
-    var rest='';
-    if(pathname==='/dashboard' || pathname==='/dashboard/'){
-      rest='/';
-    }else if(pathname.indexOf('/dashboard/')===0){
-      rest=pathname.slice('/dashboard'.length) || '/';
-    }
-    var target='/'+clean+'/dashboard'+(rest||'/');
-    if(pathname===target)return;
-    if(pathname==='/dashboard/' || pathname==='/dashboard' || pathname.indexOf('/dashboard/')===0){
-      history.replaceState({space:clean},'',target+(location.search||'')+(location.hash||''));
-    }
+    // GitHub Pages has no dynamic /{space}/dashboard rewrite. Keep dashboard
+    // routes canonical at /dashboard/ and carry intent through query params.
   }
 
   function slugify(str){
@@ -115,7 +107,7 @@
 
   function cleanDashboardWizardRoute(){
     try{
-      if(requestedDashboardSubview()!=='wizard' || !location.search)return;
+      if(!/\/dashboard\/wizard\/?$/.test(String(location.pathname||'')) || !location.search)return;
       history.replaceState({space:currentDashboardSpaceSlug()||''},'',location.pathname+(location.hash||''));
     }catch(_err){}
   }
