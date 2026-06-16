@@ -205,6 +205,12 @@
 <script type="module">
   import { supabase } from '../js/supabase-client.js';
 
+  const localAuthHost = ['localhost', '127.0.0.1', '::1'].includes(String(location.hostname || '').toLowerCase());
+  if (localAuthHost) {
+    location.replace('https://uitgesproken.me/login/' + location.search);
+    throw new Error('Redirecting local auth page to production');
+  }
+
   function normalizeRedirect(target) {
     const raw = String(target || '').trim();
     if (!raw) return '/dashboard/';
