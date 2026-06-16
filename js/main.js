@@ -27,6 +27,10 @@ if (PAGE === 'kaarten') {
   void initCardsPage();
 }
 
+if (PAGE === 'uitleg') {
+  void initUitlegPage();
+}
+
 async function initSetsIndexPage() {
   const els = {
     pill: document.getElementById('themePill'),
@@ -48,13 +52,17 @@ async function initSetsIndexPage() {
     infoText: document.getElementById('indexInfoSlideText')
   };
 
-  const publicSpaceData = PUBLIC_ROUTE.spaceSlug
-    ? await loadPublicSpaceIndex(PUBLIC_ROUTE.spaceSlug).catch(function(){ return null; })
+  const localPreviewData = isLocalPreviewHost()
+    ? await loadLocalPreviewPublicIndex(PUBLIC_ROUTE).catch(function(){ return null; })
     : null;
-  const registry = publicSpaceData || await fetchJson(pagePath('sets/index.json')).catch(function(){ return null; });
+  const publicSpaceData = !localPreviewData && hasPublicIndexRoute()
+    ? await loadPublicSpaceIndex(PUBLIC_ROUTE).catch(function(){ return null; })
+    : null;
+  const registry = localPreviewData || publicSpaceData || await fetchJson(pagePath('sets/index.json')).catch(function(){ return null; });
   if (!registry || !Array.isArray(registry.sets)) return;
 
-  const loadedSets = publicSpaceData
+  const routeData = localPreviewData || publicSpaceData;
+  const loadedSets = routeData
     ? registry.sets.slice()
     : await Promise.all(registry.sets.map(function(entry){
         return loadIndexSetRecord(entry);
@@ -63,10 +71,12 @@ async function initSetsIndexPage() {
   if (!sets.length) return;
 
   // Spacenaam in paginatitel en topbar-brand zetten als we een space-pagina laden
-  if (publicSpaceData && publicSpaceData.spaceName) {
-    document.title = publicSpaceData.spaceName;
+  if (routeData && routeData.pageTitle) {
+    document.title = routeData.pageTitle;
+  }
+  if (routeData && routeData.spaceName && !PUBLIC_ROUTE.username) {
     const brandEl = document.getElementById('themePillBrand');
-    if (brandEl) brandEl.textContent = publicSpaceData.spaceName;
+    if (brandEl) brandEl.textContent = routeData.spaceName;
   }
 
   const defaultId = registry.default || (sets[0] && sets[0].id) || '';
@@ -254,6 +264,56 @@ async function initSetsIndexPage() {
   }
 }
 
+async function initUitlegPage() {
+  const els = {
+    img: document.getElementById('uitlegImg'),
+    theme: document.getElementById('kaartThema'),
+    desc: document.getElementById('desc'),
+    card: document.querySelector('.uitlegCardInner')
+  };
+  if (!els.img || !els.desc) return;
+
+  const requestedSet = readQueryParam('set') || PUBLIC_ROUTE.setSlug || 'samenwerken';
+  const set = await loadLocalCardsSetByRequested(requestedSet).catch(function(){ return null; });
+  if (!set) return;
+
+  const slides = set.infoSlides.length ? set.infoSlides : [{
+    key: 'cover',
+    title: set.title,
+    body: set.infoText,
+    img: set.cover,
+    alt: set.title
+  }];
+  let index = 0;
+
+  document.title = (set.title || 'Samen onderzoeken') + ' — Uitgesproken';
+  render();
+
+  if (els.card) {
+    els.card.addEventListener('click', function(ev){
+      const rect = els.card.getBoundingClientRect();
+      const leftSide = ev.clientX - rect.left < rect.width / 2;
+      index = Math.max(0, Math.min(slides.length - 1, index + (leftSide ? -1 : 1)));
+      render();
+    });
+  }
+
+  function render() {
+    const slide = slides[index] || slides[0];
+    if (!slide) return;
+    els.img.src = slide.img || set.cover || '';
+    els.img.alt = slide.alt || slide.title || set.title || '';
+    if (els.theme) {
+      const isCover = !slide.key || slide.key === 'cover';
+      els.theme.style.display = isCover ? 'none' : 'block';
+      els.theme.textContent = isCover ? '' : (slide.title || slide.alt || '');
+    }
+    els.desc.innerHTML =
+      (slide.title ? '<p class="infoTextSubhead"><strong>' + esc(slide.title) + '</strong></p>' : '') +
+      (slide.body ? formatInfoBodyHtml(slide.body) : '');
+  }
+}
+
 async function initCardsPage() {
   const els = {
     pill: document.getElementById('themePill'),
@@ -274,14 +334,20 @@ async function initCardsPage() {
   };
 
   let set = null;
-  if (PUBLIC_ROUTE.spaceSlug && PUBLIC_ROUTE.setSlug) {
-    set = await loadPublicCardsSet(PUBLIC_ROUTE.spaceSlug, PUBLIC_ROUTE.setSlug).catch(function(){ return null; });
+  if (isLocalPreviewHost()) {
+    const localRequestedId = readQueryParam('set') || PUBLIC_ROUTE.setSlug || '';
+    if (localRequestedId) {
+      set = await loadLocalCardsSetByRequested(localRequestedId).catch(function(){ return null; });
+    }
+  }
+  if (!set && hasPublicSetRoute()) {
+    set = await loadPublicCardsSet(PUBLIC_ROUTE).catch(function(){ return null; });
   }
 
   if (!set) {
     const registry = await fetchJson(pagePath('sets/index.json')).catch(function(){ return null; });
     if (!registry || !Array.isArray(registry.sets) || !registry.sets.length) return;
-    const requestedId = readQueryParam('set');
+    const requestedId = readQueryParam('set') || (isLocalPreviewHost() && hasPublicSetRoute() ? PUBLIC_ROUTE.setSlug : '');
     const activeId = requestedId || registry.default || registry.sets[0].id;
     const entry = await resolveRegistrySetEntry(registry.sets, activeId);
     if (!entry || !entry.id) return;
@@ -327,7 +393,7 @@ async function initCardsPage() {
     if (els.allSetsBtn) {
       els.allSetsBtn.addEventListener('click', function(){
         closeMenu();
-        location.href = PUBLIC_ROUTE.spaceSlug ? spaceHref(PUBLIC_ROUTE.spaceSlug) : pagePath('');
+        location.href = publicHomeHref();
       });
     }
     if (els.infoOverlay) {
@@ -636,35 +702,109 @@ async function resolveRegistrySetEntry(entries, requestedValue) {
   return metaHits.find(Boolean) || (entries && entries[0]) || null;
 }
 
-async function loadPublicSpaceIndex(spaceSlug) {
-  const space = await loadPublicSpace(spaceSlug);
-  if (!space || !space.id) return null;
-  const setsRes = await supabase.from('sets')
-    .select('id,slug,title,bundle,is_public,sort_order')
-    .eq('space_id', space.id)
-    .eq('is_public', true)
+async function loadPublicSpaceIndex(route) {
+  const context = await loadPublicRouteContext(route);
+  if (!context || !context.space || !context.space.id) {
+    if (isLocalPreviewHost()) {
+      return loadLocalPreviewPublicIndex(route).catch(function(){ return null; });
+    }
+    return null;
+  }
+  if (context.username && !context.isOwner && context.profile && context.profile.public_maker_home === false) {
+    return null;
+  }
+  let setsQuery = supabase.from('sets')
+    .select('id,slug,title,bundle,is_public,sort_order,status,visibility')
+    .eq('space_id', context.space.id)
     .order('sort_order');
+  if (!context.isOwner) {
+    setsQuery = setsQuery.eq('status', 'live').eq('visibility', 'public');
+  }
+  const setsRes = await setsQuery;
   if (setsRes.error) throw new Error(setsRes.error.message);
   const rows = Array.isArray(setsRes.data) ? setsRes.data : [];
+  const remoteSets = rows
+    .filter(function(row){
+      return context.isOwner || isPublicSetVisible(row);
+    })
+    .map(mapPublicIndexSet);
+  const localSets = await loadLocalPreviewIndexSets(remoteSets).catch(function(){ return []; });
+  const mergedSets = localSets.concat(remoteSets);
+  const mergedDefault = (localSets[0] && localSets[0].id) || (remoteSets[0] && remoteSets[0].id) || '';
   return {
-    default: (rows[0] && rows[0].id) || '',
-    spaceName: space.name || '',
-    sets: rows.map(mapPublicIndexSet),
+    default: mergedDefault,
+    pageTitle: context.username ? ('@' + context.username + ' — Uitgesproken') : (context.space.name || 'Uitgesproken'),
+    spaceName: context.space.name || '',
+    sets: mergedSets,
     uiDefaults: {
       index: {
-        layout: readSpaceLayout(space),
+        layout: readSpaceLayout(context.space),
         gridLimit: 6
       }
     }
   };
 }
 
-async function loadPublicCardsSet(spaceSlug, setSlug) {
-  const space = await loadPublicSpace(spaceSlug);
-  if (!space || !space.id) return null;
-  let setRow = await loadPublicSetRow(space.id, setSlug);
-  if (!setRow) return null;
-  return mapPublicCardsSet(setRow);
+async function loadLocalPreviewPublicIndex(route) {
+  const registry = await fetchJson(pagePath('sets/index.json')).catch(function(){ return null; });
+  const entries = registry && Array.isArray(registry.sets) ? registry.sets : [];
+  if (!entries.length) return null;
+  const localSets = (await Promise.all(entries.map(function(entry){
+    return loadIndexSetRecord(entry);
+  }))).filter(Boolean);
+  if (!localSets.length) return null;
+  const routeLabel = route && route.username
+    ? ('@' + normalizePublicUsername(route.username))
+    : String(route && route.spaceSlug || '').trim();
+  return {
+    default: registry && registry.default ? String(registry.default) : (localSets[0] && localSets[0].id) || '',
+    pageTitle: routeLabel ? (routeLabel + ' — Uitgesproken') : 'Uitgesproken',
+    spaceName: routeLabel,
+    sets: localSets,
+    uiDefaults: {
+      index: {
+        layout: 'featured-grid',
+        gridLimit: 6
+      }
+    }
+  };
+}
+
+async function loadPublicCardsSet(route) {
+  const context = await loadPublicRouteContext(route);
+  if (context && context.space && context.space.id) {
+    let setRow = await loadPublicSetRow(context.space.id, route && route.setSlug, context && context.isOwner);
+    if (setRow && (context.isOwner || isPublicSetVisible(setRow))) return mapPublicCardsSet(setRow);
+  }
+  if (!isLocalPreviewHost()) return null;
+  return loadLocalCardsSetByRequested(route && route.setSlug).catch(function(){ return null; });
+}
+
+async function loadLocalPreviewIndexSets(existingSets) {
+  if (!isLocalPreviewHost()) return [];
+  const registry = await fetchJson(pagePath('sets/index.json')).catch(function(){ return null; });
+  const entries = registry && Array.isArray(registry.sets) ? registry.sets : [];
+  if (!entries.length) return [];
+  const seen = new Set((existingSets || []).reduce(function(list, set){
+    if (set && set.id) list.push(String(set.id));
+    if (set && set.slug) list.push(String(set.slug));
+    return list;
+  }, []));
+  const localSets = (await Promise.all(entries.map(function(entry){
+    return loadIndexSetRecord(entry);
+  }))).filter(Boolean);
+  return localSets.filter(function(set){
+    return !seen.has(String(set.id || '')) && !seen.has(String(set.slug || ''));
+  });
+}
+
+async function loadLocalCardsSetByRequested(requestedValue) {
+  const registry = await fetchJson(pagePath('sets/index.json')).catch(function(){ return null; });
+  const entries = registry && Array.isArray(registry.sets) ? registry.sets : [];
+  if (!entries.length) return null;
+  const entry = await resolveRegistrySetEntry(entries, requestedValue);
+  if (!entry || !entry.id) return null;
+  return loadCardsSetRecord(entry.id, entry.title || entry.id, entry.slug || '');
 }
 
 async function loadPublicSpace(spaceSlug) {
@@ -676,27 +816,95 @@ async function loadPublicSpace(spaceSlug) {
   return (res.data && res.data[0]) || null;
 }
 
-async function loadPublicSetRow(spaceId, setSlug) {
+async function loadPublicProfile(username) {
+  const requested = normalizePublicUsername(username);
+  if (!requested) return null;
+  const res = await supabase.from('profiles')
+    .select('id,username,public_maker_home')
+    .eq('username', requested)
+    .limit(1);
+  if (res.error) throw new Error(res.error.message);
+  return (res.data && res.data[0]) || null;
+}
+
+async function loadPublicSpaceByOwner(ownerId) {
+  const requested = String(ownerId || '').trim();
+  if (!requested) return null;
+  const res = await supabase.from('spaces')
+    .select('id,slug,name,settings')
+    .eq('owner_id', requested)
+    .limit(1);
+  if (res.error) throw new Error(res.error.message);
+  return (res.data && res.data[0]) || null;
+}
+
+async function isPublicRouteOwner(profileId) {
+  const requested = String(profileId || '').trim();
+  if (!requested) return false;
+  try {
+    const sessionRes = await supabase.auth.getSession();
+    const viewerId = sessionRes && sessionRes.data && sessionRes.data.session && sessionRes.data.session.user
+      ? String(sessionRes.data.session.user.id || '').trim()
+      : '';
+    return !!viewerId && viewerId === requested;
+  } catch (_err) {
+    return false;
+  }
+}
+
+async function loadPublicRouteContext(route) {
+  if (!route) return null;
+  if (route.spaceSlug) {
+    const space = await loadPublicSpace(route.spaceSlug);
+    if (!space || !space.id) return null;
+    return {
+      routeType: 'space',
+      username: '',
+      profile: null,
+      space: space,
+      isOwner: false
+    };
+  }
+  if (route.username) {
+    const profile = await loadPublicProfile(route.username);
+    if (!profile || !profile.id) return null;
+    const space = await loadPublicSpaceByOwner(profile.id);
+    if (!space || !space.id) return null;
+    return {
+      routeType: 'user',
+      username: normalizePublicUsername(profile.username || route.username),
+      profile: profile,
+      space: space,
+      isOwner: await isPublicRouteOwner(profile.id)
+    };
+  }
+  return null;
+}
+
+async function loadPublicSetRow(spaceId, setSlug, includePrivate) {
   const requested = String(setSlug || '').trim();
   if (!requested) return null;
-  let res = await supabase.from('sets')
-    .select('id,slug,title,bundle,is_public')
+  let slugQuery = supabase.from('sets')
+    .select('id,slug,title,bundle,is_public,status,visibility')
     .eq('space_id', spaceId)
-    .eq('is_public', true)
     .eq('slug', requested)
     .limit(1);
+  if (!includePrivate) slugQuery = slugQuery.eq('status', 'live');
+  let res = await slugQuery;
   if (res.error) throw new Error(res.error.message);
   let row = (res.data && res.data[0]) || null;
-  if (row) return row;
-  res = await supabase.from('sets')
-    .select('id,slug,title,bundle,is_public')
+  if (row && (includePrivate || isPublicSetVisible(row))) return row;
+  let idQuery = supabase.from('sets')
+    .select('id,slug,title,bundle,is_public,status,visibility')
     .eq('space_id', spaceId)
-    .eq('is_public', true)
     .eq('id', requested)
     .limit(1);
+  if (!includePrivate) idQuery = idQuery.eq('status', 'live');
+  res = await idQuery;
   if (res.error) throw new Error(res.error.message);
   row = (res.data && res.data[0]) || null;
-  return row;
+  if (row && (includePrivate || isPublicSetVisible(row))) return row;
+  return null;
 }
 
 function mapPublicIndexSet(row) {
@@ -1020,14 +1228,23 @@ function readQueryParam(name) {
 }
 
 function cardsHrefForSet(set) {
+  if (PUBLIC_ROUTE.username) {
+    return rootPath('@' + PUBLIC_ROUTE.username + '/' + normalizeSetSlug(set && set.slug, set && set.title, set && set.id) + '/');
+  }
   if (PUBLIC_ROUTE.spaceSlug) {
     return rootPath(PUBLIC_ROUTE.spaceSlug + '/' + normalizeSetSlug(set && set.slug, set && set.title, set && set.id) + '/');
   }
   return pagePath('kaarten/?set=' + encodeURIComponent(set && set.id || ''));
 }
 
-function spaceHref(spaceSlug) {
-  return rootPath(String(spaceSlug || '').trim() + '/');
+function publicHomeHref() {
+  if (PUBLIC_ROUTE.username) {
+    return rootPath('@' + PUBLIC_ROUTE.username + '/');
+  }
+  if (PUBLIC_ROUTE.spaceSlug) {
+    return rootPath(String(PUBLIC_ROUTE.spaceSlug || '').trim() + '/');
+  }
+  return pagePath('');
 }
 
 function rootPath(path) {
@@ -1037,13 +1254,55 @@ function rootPath(path) {
 
 function parsePublicRoute() {
   const parts = splitPublicPath(location.pathname || '/');
-  if (PAGE === 'grid' && parts.length === 1 && !isReservedPublicSegment(parts[0])) {
-    return { spaceSlug: parts[0], setSlug: '' };
+  const first = parts[0] || '';
+  const second = parts[1] || '';
+  if (first && first.charAt(0) === '@') {
+    const username = normalizePublicUsername(first);
+    if (PAGE === 'grid' && parts.length === 1 && username) {
+      return { routeType: 'user', username: username, spaceSlug: '', setSlug: '' };
+    }
+    if ((PAGE === 'kaarten' || PAGE === 'uitleg') && parts.length >= 2 && username && !isReservedPublicSegment(second)) {
+      return { routeType: 'user', username: username, spaceSlug: '', setSlug: second };
+    }
   }
-  if (PAGE === 'kaarten' && parts.length >= 2 && !isReservedPublicSegment(parts[0]) && !isReservedPublicSegment(parts[1])) {
-    return { spaceSlug: parts[0], setSlug: parts[1] };
+  if (PAGE === 'grid' && parts.length === 1 && !isReservedPublicSegment(first)) {
+    return { routeType: 'space', username: '', spaceSlug: first, setSlug: '' };
   }
-  return { spaceSlug: '', setSlug: '' };
+  if ((PAGE === 'kaarten' || PAGE === 'uitleg') && parts.length >= 2 && !isReservedPublicSegment(first) && !isReservedPublicSegment(second)) {
+    return { routeType: 'space', username: '', spaceSlug: first, setSlug: second };
+  }
+  return { routeType: '', username: '', spaceSlug: '', setSlug: '' };
+}
+
+function hasPublicIndexRoute() {
+  return !!(PUBLIC_ROUTE.username || PUBLIC_ROUTE.spaceSlug);
+}
+
+function hasPublicSetRoute() {
+  return !!(PUBLIC_ROUTE.setSlug && (PUBLIC_ROUTE.username || PUBLIC_ROUTE.spaceSlug));
+}
+
+function normalizePublicUsername(value) {
+  return String(value || '').replace(/^@+/, '').trim().toLowerCase();
+}
+
+function isPublicSetVisible(row) {
+  if (!row || typeof row !== 'object') return false;
+  const status = String(row.status == null ? 'live' : row.status).trim().toLowerCase();
+  const visibility = String(row.visibility == null ? 'public' : row.visibility).trim().toLowerCase();
+  const isPublicFlag = row.is_public !== false;
+  const isLive = !status || status === 'live';
+  const isVisible = !visibility || visibility === 'public' || visibility === 'unlisted';
+  return isPublicFlag && isLive && isVisible;
+}
+
+function isLocalPreviewHost() {
+  try {
+    const host = String(location.hostname || '').toLowerCase();
+    return host === '127.0.0.1' || host === 'localhost';
+  } catch (_err) {
+    return false;
+  }
 }
 
 function splitPublicPath(pathname) {

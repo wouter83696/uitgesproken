@@ -10,7 +10,7 @@
     { "source": "/**/dashboard/**", "destination": "/dashboard/index.html" },
     { "source": "/wizard/new", "destination": "/wizard/new/index.html" },
     { "source": "/wizard/new/**", "destination": "/wizard/new/index.html" },
-    { "source": "/@:username", "destination": "/maker/index.html" },
-    { "source": "/@:username/**", "destination": "/maker/index.html" }
+    { "source": "/@:username", "destination": "/index.html" },
+    { "source": "/@:username/**", "destination": "/kaarten/index.html" }
   ]
 }

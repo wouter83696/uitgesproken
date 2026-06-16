@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const PORT = Number(process.env.PORT || 8745);
+const PORT = Number(process.env.PORT || 8744);
 const HOST = process.env.HOST || '127.0.0.1';
 
 const MIME_TYPES = {
@@ -59,8 +59,8 @@ function rewritePrettyDashboard(pathname) {
   return '/dashboard' + rest;
 }
 
-function rewriteWizardPath(pathname) {
-  if (/^\/dashboard\/wizard(?:\/.*)?$/.test(pathname)) {
+function rewriteDashboardAppPath(pathname) {
+  if (/^\/dashboard\/(?:wizard|editor)(?:\/.*)?$/.test(pathname)) {
     return '/dashboard/index.html';
   }
   return pathname;
@@ -74,6 +74,15 @@ function rewritePrettyPublic(pathname) {
   const normalized = normalizeUrlPath(pathname);
   const parts = normalized.replace(/^\/|\/$/g, '').split('/').filter(Boolean);
   if (!parts.length) return normalized;
+  if (parts[0] && parts[0].startsWith('@')) {
+    if (parts.length === 1) {
+      return '/index.html';
+    }
+    if (parts.length >= 2 && !isReservedRootSegment(parts[1])) {
+      return '/kaarten/index.html';
+    }
+    return normalized;
+  }
   if (parts.length === 1 && !isReservedRootSegment(parts[0])) {
     return '/index.html';
   }
@@ -85,7 +94,7 @@ function rewritePrettyPublic(pathname) {
 
 function resolveFilePath(requestPath) {
   let pathname = rewritePrettyDashboard(normalizeUrlPath(requestPath));
-  pathname = rewriteWizardPath(pathname);
+  pathname = rewriteDashboardAppPath(pathname);
   pathname = rewritePrettyPublic(pathname);
 
   if (pathname === '/') {

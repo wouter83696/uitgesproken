@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <base href="/">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -61,7 +62,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 
-  <!-- Zet contrast-modus vroeg (SESSION), om flash te voorkomen -->
   <script>
     (function(){
       try{ if('scrollRestoration' in history) history.scrollRestoration = 'manual'; }catch(_e2){}
@@ -104,8 +104,8 @@
         <div class="menuHeaderTools" aria-label="Acties">
           <button id="menuContrastToggle" class="menuMiniBtn" type="button" aria-label="Contrastmodus" aria-pressed="false">
             <svg class="gmIcon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 3a9 9 0 1 0 0 18"/>
-              <path d="M12 3v18"/>
+              <path d="M12 3a9 9 0 1 0 0 18"></path>
+              <path d="M12 3v18"></path>
             </svg>
           </button>
           <button id="menuInfoBtn" class="menuMiniBtn" type="button" aria-label="Informatie">
@@ -143,15 +143,14 @@
     </section>
   </main>
 
-
-  <!-- Index info sheet (volledig los van kaarten-sheet) -->
   <div id="indexInfoOverlay" class="sheetOverlay indexInfoOverlay" hidden></div>
   <section id="indexInfoSheet" class="infoSheet indexInfoSheet" role="dialog" aria-label="Over Uitgesproken" hidden>
     <div class="infoCard indexInfoCard" data-top="help" data-mode="help">
       <div class="sheetHandle" aria-hidden="true"></div>
       <button id="indexInfoClose" class="infoClose indexInfoClose menuMiniBtn" type="button" aria-label="Sluiten">
         <svg class="gmIcon" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M18 6 6 18"/><path d="M6 6l12 12"/>
+          <path d="M18 6 6 18"></path>
+          <path d="M6 6l12 12"></path>
         </svg>
       </button>
       <div class="sheetViewport indexInfoViewport">

@@ -137,7 +137,9 @@
 
   function backStyleCardStore(meta){
     var ui = backStyleUi(meta);
-    return ui.cardEntries && typeof ui.cardEntries === 'object' ? ui.cardEntries : {};
+    if(ui.cardEntries && typeof ui.cardEntries === 'object')return ui.cardEntries;
+    if(ui.byCard && typeof ui.byCard === 'object')return ui.byCard;
+    return {};
   }
 
   function backStyleCardEntry(meta, key){
@@ -184,6 +186,34 @@
     return normalizedCardSurface(colorToneAdjust(cardBgBaseForKey(meta, key), cardBgToneForKey(meta, key)));
   }
 
+  function hasExplicitBackShapeLayers(meta, key){
+    var ui = meta && meta.ui && typeof meta.ui === 'object' ? meta.ui : {};
+    var store = ui.cardShapes && typeof ui.cardShapes === 'object' ? ui.cardShapes : {};
+    return Array.isArray(store[key]) && store[key].length > 0;
+  }
+
+  function hasExplicitBackCssVars(meta, key){
+    var vars = key === BACK_STYLE_KEY ? backStyleCssVarStore(meta) : backStyleCardEntry(meta, key).cssVars;
+    if(!vars || typeof vars !== 'object') return false;
+    return Object.keys(vars).some(function(name){
+      return String(vars[name] == null ? '' : vars[name]).trim() !== '';
+    });
+  }
+
+  function hasExplicitBackBackground(meta, key, blankColor){
+    var maps = cardBgMaps(meta);
+    var safeKey = key || '';
+    if(Object.prototype.hasOwnProperty.call(maps.tone, safeKey) && (Number(maps.tone[safeKey]) || 0) !== 0) return true;
+    if(!Object.prototype.hasOwnProperty.call(maps.base, safeKey)) return false;
+    var value = normalizedCardSurface(maps.base[safeKey] || '');
+    return !!value && value !== normalizedCardSurface(blankColor);
+  }
+
+  function shouldSeedBlankBackFromFront(meta, styleKey, blankColor){
+    return !hasExplicitBackShapeLayers(meta, styleKey)
+      && !hasExplicitBackBackground(meta, styleKey, blankColor);
+  }
+
   function backPreviewConfig(meta, themeKey, backDesignKey){
     var workMeta = meta || {};
     var mode = workMeta.backMode || 'mirror';
@@ -191,12 +221,14 @@
     var blankColor = (workMeta.blankBackColors && workMeta.blankBackColors[key]) || workMeta.blankBackColor || '#F8E4D2';
     var custom = mode === 'blank';
     var styleKey = custom ? (backDesignKey || BACK_STYLE_KEY) : key;
+    var seedFromFront = custom && shouldSeedBlankBackFromFront(workMeta, styleKey, blankColor);
     var bg = custom ? (cardBgForKey(workMeta, styleKey) || normalizedCardSurface(blankColor)) : 'transparent';
     return {
       mode: mode,
       custom: custom,
       reflect: mode === 'reflect',
       mirrorImage: mode === 'mirror' || mode === 'reflect',
+      seedFromFront: seedFromFront,
       styleKey: styleKey,
       cssVars: styleCssVarsForKey(workMeta, styleKey),
       bg: bg,
@@ -469,8 +501,9 @@
     var backValign = backCv['--pk-text-valign'] || valign;
     var backAlignItems = backValign === 'top' ? 'flex-start' : backValign === 'bottom' ? 'flex-end' : 'center';
     var backJustifyContent = backHalign === 'left' ? 'flex-start' : backHalign === 'right' ? 'flex-end' : 'center';
-    var backShapeKey = backCfg.styleKey || previewKey;
-    var backBgHtml = backCfg.mirrorImage
+    var backUsesFrontDesign = backCfg.mirrorImage || backCfg.seedFromFront;
+    var backShapeKey = backUsesFrontDesign ? previewKey : (backCfg.styleKey || previewKey);
+    var backBgHtml = backUsesFrontDesign
       ? (imgSrc ? '<img class="cpBg' + (backCfg.reflect ? ' is-reflect' : '') + '" src="' + esc(imgSrc) + '" alt="">' : '<div class="cpBgEmpty" style="' + cardBgStyle(emptyBg) + ';position:absolute;inset:0"></div>')
       : '<div class="cpBgEmpty" style="' + cardBgStyle(backCfg.bg) + ';position:absolute;inset:0"></div>';
     var alignItems = valign === 'top' ? 'flex-start' : valign === 'bottom' ? 'flex-end' : 'center';
@@ -494,9 +527,9 @@
               '</div>' +
             '</div>' +
           '</div>' +
-          '<div class="cardFaceBack' + (backCfg.reflect ? ' is-reflect' : '') + '"' + (opts.backId ? ' id="' + esc(opts.backId) + '"' : '') + ' style="background:' + (backCfg.custom ? esc(backCfg.bg) : 'transparent') + ';font-family:\'' + esc(backFont) + '\',sans-serif;font-size:' + esc(backFs) + ';color:' + esc(backTextColor) + '">' +
+          '<div class="cardFaceBack' + (backCfg.reflect ? ' is-reflect' : '') + '"' + (opts.backId ? ' id="' + esc(opts.backId) + '"' : '') + ' style="background:' + ((backCfg.custom && !backCfg.seedFromFront) ? esc(backCfg.bg) : 'transparent') + ';font-family:\'' + esc(backFont) + '\',sans-serif;font-size:' + esc(backFs) + ';color:' + esc(backTextColor) + '">' +
             backBgHtml +
-            '<div class="cpShapeLayer' + (backCfg.reflect ? ' is-reflect' : '') + '" data-shape-key="' + esc(backShapeKey) + '">' + cardShapesLayerHtml(meta, backShapeKey) + '</div>' +
+            '<div class="cpShapeLayer' + (backCfg.reflect ? ' is-reflect' : '') + '" data-shape-key="' + esc(backShapeKey) + '">' + (backUsesFrontDesign ? cardShapesLayerHtml(meta, previewKey) : cardShapesLayerHtml(meta, backShapeKey)) + '</div>' +
             '<div class="cpOverlay" style="position:absolute;inset:0;display:flex;align-items:' + backAlignItems + ';justify-content:' + backJustifyContent + ';padding:10px;text-align:' + backHalign + '">' + (opts.backTxt ? esc(opts.backTxt) : '') + '</div>' +
           '</div>' +
         '</div>' +
