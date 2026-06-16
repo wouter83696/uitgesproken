@@ -7,7 +7,7 @@ var CC={},KF={},SC={},SIDEBAR_SET_THUMB_CACHE={},SIDEBAR_SET_THUMB_PENDING={},SI
 var _mySetsFilter='all',_mySetsSearch='',_mySetsView='list',_mySetsSearchTimer=null;
 var SAVE_UI={state:'idle',text:'',hideTimer:null};
 var _savedSpaceSig=null;
-var WIZARD_IFRAME_BUILD='20260611m';
+var WIZARD_IFRAME_BUILD='20260616x';
 var SET_EDITOR_PANE='themes'; // 'themes' | 'format'
 var SPACE_PREVIEW_CARDS_MODE=false;
 var SPACE_PREVIEW_CURRENT_SET_ID='';
@@ -16124,7 +16124,7 @@ function dashboardWizardIframeSrcdoc(src,setRef){
       '<link rel="preconnect" href="https://fonts.googleapis.com">'+
       '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'+
       '<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Fraunces:opsz,wght@9..144,400;9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&family=Merriweather:wght@400;700&family=Playfair+Display:wght@400;600&display=swap" rel="stylesheet">'+
-      '<link rel="stylesheet" href="/css/cards.css?v=20260517a">'+
+      '<link rel="stylesheet" href="/css/cards.css?v='+esc(WIZARD_IFRAME_BUILD)+'">'+
       '<link rel="stylesheet" href="/admin/admin.css?v='+esc(WIZARD_IFRAME_BUILD)+'">'+
       '<link rel="stylesheet" href="/css/wizard.css?v='+esc(WIZARD_IFRAME_BUILD)+'">'+
     '</head><body class="wizardPage">'+
@@ -16134,7 +16134,7 @@ function dashboardWizardIframeSrcdoc(src,setRef){
       'window.addEventListener("error",function(event){var where=(event&&event.filename)?(" in "+event.filename.split("/").pop()+":"+event.lineno+":"+event.colno):"";showWizardBootError(((event&&event.message)||"Script kon niet starten")+where);});'+
       'window.addEventListener("unhandledrejection",function(event){var reason=event&&event.reason;showWizardBootError((reason&&reason.message)||String(reason||"Promise fout"));});'+
       'setTimeout(function(){var root=document.getElementById("wizardApp");if(root&&!root.children.length)showWizardBootError("Startscript reageert niet");},2200);})();<\/script>'+
-      '<script src="/js/shared-background-preview.js?v=20260517a"><\/script>'+
+      '<script src="/js/shared-background-preview.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
       '<script src="/js/shared-card-renderer.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
       '<script src="/js/shared-preview-shell.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
       '<script src="/js/shared-preview-interactions.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
