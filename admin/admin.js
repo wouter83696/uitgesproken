@@ -2,23 +2,127 @@
 // ═══════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════
-var S={repo:'',token:'',sets:[],indexSha:'',indexData:{},activeId:null,d:{},mode:'checklist',wizStep:0,clTab:'opmaken',opmPane:'vragen',infoSlideIdx:0,dirty:false,thumbsOpen:false,history:{past:[],future:[],lastSig:'',suspend:false}};
-var CC={},KF={},SC={},bgTimer=null,asTimer=null,_lp=null,dragSrc=null;
+var S={repo:'',token:'',sets:[],sharedSets:[],indexSha:'',indexData:{},activeId:null,activeKind:'space',_view:'dashboard',_mySetsOpen:true,space:null,d:{},mode:'checklist',wizStep:0,clTab:'opmaken',opmPane:'vragen',infoSlideIdx:0,dirty:false,thumbsOpen:false,homeSliderPane:'hero',homeCardsPane:'hero',editorMode:'edit',history:{past:[],future:[],lastSig:'',suspend:false},_wizardSetId:null};
+var CC={},KF={},SC={},SIDEBAR_SET_THUMB_CACHE={},SIDEBAR_SET_THUMB_PENDING={},SIDEBAR_SET_THUMB_WARM_TIMER=0,CARD_PREVIEW_WARM_TIMER=0,bgTimer=null,asTimer=null,_lp=null,dragSrc=null;
+var _mySetsFilter='all',_mySetsSearch='',_mySetsView='list',_mySetsSearchTimer=null;
+var SAVE_UI={state:'idle',text:'',hideTimer:null};
+var _savedSpaceSig=null;
+var WIZARD_IFRAME_BUILD='20260611m';
+var SET_EDITOR_PANE='themes'; // 'themes' | 'format'
+var SPACE_PREVIEW_CARDS_MODE=false;
+var SPACE_PREVIEW_CURRENT_SET_ID='';
+var STYLE_SLIDE_DND=null;
+var SESSION_ID=(function(){var k='pk_sid';var v=sessionStorage.getItem(k);if(!v){v=Date.now()+'_'+(Math.random()*0xffff|0);sessionStorage.setItem(k,v);}return v;})();
 var BG_AUTO_PREVIEW_SEED=((Date.now()^((Math.random()*0xffffffff)>>>0))>>>0);
 var LIB_REFRESH_TOKEN=0;
 var STYLE_PREVIEW_KEY=null;
 var INFO_SLIDE_KEY='cover';
+var BACK_STYLE_KEY='__back__';
+var STYLE_BACK_EDIT_SURFACE='front';
+var SPACE_PREVIEW_W=430;
+var SPACE_PREVIEW_H=930;
 var STYLE_PAL_EXPANDED={};
 var BG_ACTIVE_PAL_INDEX=0;
 var STIJL_KLEUR_TAB='settc';
+var STYLE_CARD_COLOR_OPEN={};
+var STYLE_BG_CARD_OPEN={};
+var STYLE_SHAPE_ADJUST_OPEN={};
+var STYLE_SHAPE_COLOR_OPEN={};
+var QUESTION_SIDE_PANEL_OPEN={};
 var Q_EDITOR_SIDE='front';
+var QUESTION_ENTITY_SEQ=0;
 var SELECTED_LIB_PATH='';
 var ACTIVE_TARGET_PATH='';
 var PRELOAD={token:0,active:false,total:0,done:0};
 var RT={target:null,seed:0,richCeTarget:null,savedRange:null,ceBlurTimer:null};
+var FORCE_EDITOR_SCROLL_RESET=false;
+function syncAppBootProgress(pct){
+  var fill=g('appBootFill');
+  if(!fill)return;
+  var v=Math.max(0,Math.min(100,Number(pct)||0));
+  fill.style.width=v+'%';
+}
+function setAppPreparing(active){
+  var app=g('app');
+  var boot=g('appBoot');
+  if(!app)return;
+  app.classList.toggle('app-preparing',!!active);
+  if(boot) boot.classList.toggle('is-hidden',!active);
+}
+function requestEditorScrollReset(){
+  FORCE_EDITOR_SCROLL_RESET=true;
+}
+function applyEditorScrollReset(){
+  if(!FORCE_EDITOR_SCROLL_RESET)return;
+  var contentEl=document.querySelector('.content');
+  var panelEl=g('pw');
+  [contentEl,panelEl].forEach(function(node){
+    if(!node)return;
+    node.scrollTop=0;
+    node.scrollLeft=0;
+  });
+  FORCE_EDITOR_SCROLL_RESET=false;
+}
+function storedOpenState(store,key,defaultOpen){
+  return Object.prototype.hasOwnProperty.call(store,key)?!!store[key]:!!defaultOpen;
+}
+function toggleStoredOpenState(store,key,defaultOpen){
+  var next=!storedOpenState(store,key,defaultOpen);
+  store[key]=next;
+  return next;
+}
+function buildSectionChevronSvg(open){
+  return '<svg class="sectionChevronIcon'+(open?' is-open':'')+'" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>';
+}
+function buildSectionCollapseToggleHtml(opts){
+  opts=opts||{};
+  var open=!!opts.open;
+  var labelHtml=opts.labelHtml!=null
+    ? String(opts.labelHtml)
+    : '<div class="'+(opts.labelClass||'stijlSectionLabel')+'">'+esc(opts.label||'')+'</div>';
+  var cls=(opts.className||'sectionCollapseBtn')+(open?' is-open':'');
+  var title=opts.title||((open?'Inklappen':'Uitklappen'));
+  var ariaLabel=opts.ariaLabel||opts.label||'Sectie';
+  return '<button class="'+cls+'" type="button" onclick="'+(opts.onclick||'')+'" title="'+esc(title)+'" aria-label="'+esc(ariaLabel)+'" aria-expanded="'+(open?'true':'false')+'">'+
+    '<div class="'+(opts.labelWrapClass||'sectionCollapseLabel')+'">'+labelHtml+'</div>'+
+    '<span class="sectionChevronWrap" aria-hidden="true">'+buildSectionChevronSvg(open)+'</span>'+
+  '</button>';
+}
+function resetTransientEditorState(){
+  COVER_TEXT_DRAG=null;
+  COVER_TEXT_ACTIVE=-1;
+  COVER_TEXT_LAST_FOCUSED=0;
+  COVER_TEXT_SELECTED_MULTI=[];
+  COVER_TEXT_SUPPRESS_CLICK_UNTIL=0;
+  COVER_TEXT_DESELECTED=false;
+  COVER_ELEM_SEL=null;
+  COVER_ELEM_DRAG=null;
+  COVER_ELEM_EDITING=null;
+  STYLE_SHAPE_ACTIVE={};
+  STYLE_SHAPE_SELECTED={};
+  STYLE_SHAPE_SELECTED_MULTI={};
+  STYLE_SHAPE_COLOR_TARGET={};
+  STYLE_BACK_EDIT_SURFACE='front';
+}
+function nextQuestionEntityId(){
+  QUESTION_ENTITY_SEQ+=1;
+  return 'q'+Date.now().toString(36)+QUESTION_ENTITY_SEQ.toString(36)+(Math.random()*0xffff|0).toString(36);
+}
+function syncInfoRichLinkedFocus(el){
+  document.querySelectorAll('[data-rich-type="info"].is-linked-focus').forEach(function(node){
+    node.classList.remove('is-linked-focus');
+  });
+  if(!el||el.dataset.richType!=='info')return;
+  var key=String(el.dataset.richKey||'').trim();
+  if(!key)return;
+  document.querySelectorAll('[data-rich-type="info"][data-rich-key="'+key+'"]').forEach(function(node){
+    node.classList.add('is-linked-focus');
+  });
+}
 function activateRichCe(el){
   if(RT.ceBlurTimer){clearTimeout(RT.ceBlurTimer);RT.ceBlurTimer=null;}
   RT.richCeTarget=el;
+  syncInfoRichLinkedFocus(el);
   if(el&&el.dataset.richType!=='question'){
     document.querySelectorAll('.stijlCanvasToolbar').forEach(function(t){t.classList.add('richce-active');});
   }
@@ -30,6 +134,7 @@ function deactivateRichCe(){
     var inToolbar=!!(active&&active.closest&&active.closest('.stijlCanvasTopTools,.stijlCanvasToolbar,.textToolbarMenuPop'));
     if(!inToolbar){
       RT.richCeTarget=null;RT.savedRange=null;
+      syncInfoRichLinkedFocus(null);
       document.querySelectorAll('.stijlCanvasToolbar').forEach(function(t){t.classList.remove('richce-active');});
     }
     RT.ceBlurTimer=null;
@@ -79,6 +184,28 @@ var CARD_FORMATS=[
   {id:'square-88x88',    w:88,  h:88,  label:'Vierkant (88×88mm)',  sub:'Modern, symmetrisch'},
   {id:'portrait-70x120', w:70,  h:120, label:'Tarot (70×120mm)',    sub:'Meer ruimte voor tekst'},
 ];
+// ═══════════════════════════════════════════
+// FEATURE GATES
+// ═══════════════════════════════════════════
+var PLAN_LIMITS={
+  free:{ maxSets:20, maxCollaborators:2, layouts:['grid'], makerHome:true },
+  pro: { maxSets:Infinity, maxCollaborators:10, layouts:null, makerHome:true }
+};
+function userPlan(){ return (S._plan==='pro')?'pro':'free'; }
+function isPro(){ return userPlan()==='pro'; }
+function planLimits(){ return PLAN_LIMITS[userPlan()]||PLAN_LIMITS.free; }
+function canCreateSet(){ return true; }
+function canAddCollaborator(setId){
+  var set=(S.sets||[]).find(function(s){return s.id===setId;});
+  if(!set)return false;
+  return isPro() || ((set._memberCount||0) < planLimits().maxCollaborators);
+}
+function canUseLayout(layoutId){ return true; }
+function canUseMakerHome(){ return true; }
+function proGateHtml(label){
+  return '';
+}
+
 var DEFAULT_CARD_FORMAT='landscape-85x55';
 var CARD_EDITOR_SOURCE_FOLDER='cards';
 var CARD_ASSET_FALLBACK_FOLDERS=['cards','cards_rect','cards_square'];
@@ -199,8 +326,11 @@ function toggleAdminNight(){
 // ═══════════════════════════════════════════
 (function(){
   applyAdminNightMode();
-  // Als Supabase beschikbaar is, laat supabase-data.js de init afhandelen
-  if(window._supa) return;
+  S.sidebarCollapsed=lsGet('pk_sidebar_collapsed')==='1';
+  applySidebarState();
+  // Als deze pagina Supabase gaat gebruiken, mag de legacy GitHub-init
+  // nooit alvast demo/index-data laden voordat supabase-data.js overneemt.
+  if(window.PK_USE_SUPABASE || window._supa) return;
   // Legacy GitHub auth
   var cfg=parse(lsGet('pk_cfg'));
   if(cfg&&cfg.repo&&cfg.token){S.repo=cfg.repo;S.token=cfg.token;g('iRepo').value=S.repo;g('iToken').value=S.token;lbStart();loadIndex();}
@@ -210,6 +340,9 @@ function toggleAdminNight(){
 // API
 // ═══════════════════════════════════════════
 function api(path,method,body){
+  if((!S.repo||!S.token)&&window._supa){
+    return Promise.reject(new Error('Bestandsupload loopt nog via GitHub en is nog niet gekoppeld aan Supabase.'));
+  }
   return fetch('https://api.github.com/repos/'+S.repo+path,{
     method:method||'GET',
     cache:'no-store',
@@ -273,6 +406,7 @@ function connect(){
   if(!repo||!token){toast('Vul beide velden in','red');return;}
   var btn=g('conBtn');btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Verbinden…';
   S.repo=repo;S.token=token;localStorage.setItem('pk_cfg',JSON.stringify({repo:repo,token:token}));
+  setAppPreparing(true);
   lbStart();
   loadIndex().catch(function(e){
     btn.disabled=false;btn.innerHTML='Verbinden';
@@ -287,6 +421,8 @@ function connect(){
   });
 }
 function disconnect(){localStorage.removeItem('pk_cfg');location.reload();}
+function toggleSetPublic(){toast('Publieke zichtbaarheid werkt in de Supabase-admin','amber');}
+function saveSpaceSettings(){toast('Ruimte-instellingen werken in de Supabase-admin','amber');}
 
 
 // ─── LOADING BAR ─────────────────────────────────────────────────────────────
@@ -294,6 +430,7 @@ var _lbTimer=null,_lbVal=0;
 function lbStart(){
   var b=g('loadBar');if(!b)return;
   clearInterval(_lbTimer);_lbVal=0;
+  syncAppBootProgress(0);
   b.style.background='rgba(79,142,158,.78)';
   b.style.transition='none';b.style.width='0%';b.classList.add('on');
   setTimeout(function(){
@@ -303,6 +440,7 @@ function lbStart(){
       var step=_lbVal<30?4:_lbVal<60?2:_lbVal<85?0.8:0.2;
       _lbVal=Math.min(_lbVal+step,90);
       b.style.width=_lbVal+'%';
+      syncAppBootProgress(_lbVal);
     },100);
   },20);
 }
@@ -310,6 +448,7 @@ function lbSet(pct){
   var b=g('loadBar');if(!b)return;
   clearInterval(_lbTimer);_lbTimer=null;
   _lbVal=Math.max(0,Math.min(100,Number(pct)||0));
+  syncAppBootProgress(_lbVal);
   b.style.background='rgba(79,142,158,.78)';
   b.classList.add('on');
   b.style.transition='width .18s cubic-bezier(.33,1,.68,1),opacity .26s ease';
@@ -318,8 +457,9 @@ function lbSet(pct){
 function lbDone(){
   var b=g('loadBar');if(!b)return;
   clearInterval(_lbTimer);_lbTimer=null;_lbVal=100;
+  syncAppBootProgress(100);
   b.style.width='100%';
-  setTimeout(function(){b.classList.remove('on');setTimeout(function(){b.style.width='0%';},400);},280);
+  setTimeout(function(){b.classList.remove('on');setTimeout(function(){b.style.width='0%';syncAppBootProgress(0);},400);},280);
 }
 function lbFail(){var b=g('loadBar');if(!b)return;clearInterval(_lbTimer);b.style.background='var(--rd)';lbDone();setTimeout(function(){b.style.background='var(--tl)';},800);}
 
@@ -406,16 +546,26 @@ function calcPctFromBundle(bundle){
   var items=[
     !!(bundle&&bundle.meta&&bundle.meta.id&&cardsStepDoneForState(bundle.meta.id,meta)),
     Object.values(questions||{}).some(function(a){return Array.isArray(a)&&a.length>0;})||!themes.length,
-    !!(uitleg&&uitleg.cover),
+    (isInfoSlideEnabled(meta,'cover')?!!(uitleg&&uitleg.cover):true),
     true
   ];
   var done=items.filter(Boolean).length;
   return Math.round(done/items.length*100);
 }
 function cacheSetBundle(id,bundle){
-  SC[id]=bundle;
+  var stored=cloneSetBundle(bundle);
+  SC[id]=stored;
+  SIDEBAR_SET_THUMB_CACHE[id]=buildSidebarThumbDataUrl({id:id},stored)||'';
+  delete SIDEBAR_SET_THUMB_PENDING[id];
   var idx=S.sets.findIndex(function(s){return s.id===id;});
-  if(idx>=0)S.sets[idx]._pct=calcPctFromBundle(bundle);
+  if(idx>=0){
+    S.sets[idx]._hasBundle=true;
+    if(stored&&stored.meta){
+      if(stored.meta.title)S.sets[idx].title=stored.meta.title;
+      if(stored.meta.slug)S.sets[idx].slug=stored.meta.slug;
+    }
+    S.sets[idx]._pct=calcPctFromBundle(stored);
+  }
 }
 function historyStateSig(bundle){
   try{return JSON.stringify(bundle||{});}catch(_){return '';}
@@ -424,22 +574,62 @@ function currentHistorySnapshot(){
   return cloneSetBundle(S.d||{meta:{},questions:{},uitleg:{},intro:{}});
 }
 function savedHistorySnapshot(){
+  if(S.activeKind==='space')return _savedSpaceSig!==null?{_spaceSig:_savedSpaceSig}:null;
   return S.activeId&&SC[S.activeId]?cloneSetBundle(SC[S.activeId]):null;
+}
+function historyStateSigForSpace(bundle){
+  // For space editor: include only the editable parts
+  try{return JSON.stringify({meta:bundle.meta,uitleg:bundle.uitleg});}catch(_){return '';}
 }
 function updateDirtyUi(){
   var db=g('dirtyBadge');
   if(db)db.classList.toggle('on',!!S.dirty);
 }
+function clearTopSaveStatusTimer(){
+  if(!SAVE_UI.hideTimer)return;
+  clearTimeout(SAVE_UI.hideTimer);
+  SAVE_UI.hideTimer=null;
+}
+function updateTopSaveStatusUi(){
+  var el=g('saveMiniStatus');
+  if(!el)return;
+  var show=S.activeKind!=='space'&&!!SAVE_UI.text;
+  el.className='tbRStatus'+(show?' on':'')+(SAVE_UI.state?' is-'+SAVE_UI.state:'');
+  el.textContent=show?SAVE_UI.text:'';
+}
+function setTopSaveStatus(state,text,autoHideMs){
+  clearTopSaveStatusTimer();
+  SAVE_UI.state=state||'idle';
+  SAVE_UI.text=text||'';
+  updateTopSaveStatusUi();
+  if(autoHideMs&&SAVE_UI.text){
+    var keepState=SAVE_UI.state,keepText=SAVE_UI.text;
+    SAVE_UI.hideTimer=setTimeout(function(){
+      SAVE_UI.hideTimer=null;
+      if(SAVE_UI.state===keepState&&SAVE_UI.text===keepText){
+        SAVE_UI.state='idle';
+        SAVE_UI.text='';
+        updateTopSaveStatusUi();
+      }
+    },autoHideMs);
+  }
+}
 function refreshTopBarControls(){
   updateDirtyUi();
+  updateTopSaveStatusUi();
   var ub=g('undoBtn');
   if(ub)ub.disabled=!canUndo();
   var rb=g('redoBtn');
   if(rb)rb.disabled=!canRedo();
 }
 function syncDirtyFromSnapshot(){
-  var saved=savedHistorySnapshot();
-  S.dirty=!saved||historyStateSig(currentHistorySnapshot())!==historyStateSig(saved);
+  if(S.activeKind==='space'){
+    var curSig=historyStateSigForSpace(currentHistorySnapshot());
+    S.dirty=_savedSpaceSig!==null&&curSig!==_savedSpaceSig;
+  }else{
+    var saved=savedHistorySnapshot();
+    S.dirty=!saved||historyStateSig(currentHistorySnapshot())!==historyStateSig(saved);
+  }
   refreshTopBarControls();
 }
 function resetHistory(snapshot){
@@ -496,6 +686,8 @@ function redoSetChanges(){
 function clearSetClientState(id){
   if(!id)return;
   delete SC[id];
+  delete SIDEBAR_SET_THUMB_CACHE[id];
+  delete SIDEBAR_SET_THUMB_PENDING[id];
   lsDel('pk_draft_'+id);
   lsDel('pk_mode_'+id);
   Object.keys(CC).forEach(function(path){
@@ -563,7 +755,8 @@ function preloadAllSets(){
   var chain=Promise.resolve();
   sets.forEach(function(set){
     chain=chain.then(function(){
-      return loadSetFiles(set.id)
+      var existing=spacePreviewSetBundle(set);
+      return Promise.resolve(existing?cloneSetBundle(existing):loadSetFiles(set.id))
         .then(function(bundle){
           cacheSetBundle(set.id,bundle);
           return preloadSetAssets(set.id,bundle);
@@ -572,7 +765,6 @@ function preloadAllSets(){
         .then(function(){
           if(token!==PRELOAD.token) return;
           PRELOAD.done+=1;
-          renderSidebar();
           lbSet((PRELOAD.done/PRELOAD.total)*100);
         });
     });
@@ -580,29 +772,43 @@ function preloadAllSets(){
   return chain.then(function(){
     if(token!==PRELOAD.token) return;
     PRELOAD.active=false;
+    renderSidebar();
     lbDone();
   }).catch(function(){
     if(token!==PRELOAD.token) return;
     PRELOAD.active=false;
+    renderSidebar();
     lbDone();
   });
 }
 function renderLoadedWelcome(){
+  setAppPreparing(false);
   var count=(S.sets||[]).length;
   var label=count===1?'kaartenset':'kaartensets';
   hideFloatingTextBar(true);
   g('mc').innerHTML='<div class="welcome" style="gap:12px">'+
-    '<img src="../assets/logo-icons/masters/master-squircle.svg" style="width:56px;height:56px" alt="Uitgesproken">'+
-    '<h2>Alle kaartensets zijn geladen</h2>'+
-    '<p>Kies links een set om verder te werken.</p>'+
+    '<img src="../assets/logo-icons/masters/master-transparent.svg" style="width:72px;height:72px" alt="Uitgesproken">'+
+    '<h2>Welkom in de editor</h2>'+
+    '<p>Je kaartensets staan klaar. Kies links waarmee je verder wilt werken.</p>'+
     '<div class="welcomeStat">✓ '+count+' '+label+' en previews staan klaar in de editor</div>'+
+  '</div>';
+}
+function renderSelectSetWelcome(){
+  setAppPreparing(false);
+  hideFloatingTextBar(true);
+  g('mc').innerHTML='<div class="welcome" style="gap:12px">'+
+    '<img src="../assets/logo-icons/masters/master-transparent.svg" style="width:72px;height:72px" alt="Uitgesproken">'+
+    '<h2>Welkom in de editor</h2>'+
+    '<p>Kies links een kaartenset of maak een nieuwe aan.</p>'+
   '</div>';
 }
 // ═══════════════════════════════════════════
 // INDEX
 // ═══════════════════════════════════════════
 function loadIndex(){
+  setAppPreparing(true);
   show('app');hide('setup');g('sbRepo').textContent=S.repo;
+  applySidebarState();
   if(g('sbQ'))g('sbQ').value='';
   g('mc').innerHTML='<div class="welcome" style="opacity:.4"><p style="font-size:12px;color:var(--k3)">Sets laden…</p></div>';
   return getFile('sets/index.json').then(function(r){
@@ -611,14 +817,34 @@ function loadIndex(){
     S.indexData=r.data;
     renderSidebar();
     if(!S.sets.length){
-      g('mc').innerHTML='<div class="welcome"><h2>Selecteer een set</h2><p>Kies een kaartenset in de zijbalk of maak een nieuwe aan.</p></div>';
+      renderSelectSetWelcome();
       return Promise.resolve();
     }
-    var preferredId=(S.indexData&&S.indexData.default)||((S.sets[0]||{}).id)||null;
+    var startupIntent=dashboardStartupIntent();
+    var startupSet=dashboardFindSetByRef(startupIntent.setRef) || ((startupIntent.wizard||startupIntent.editor) ? dashboardFindSetByRef(rememberedWizardSetRef()) : null);
+    if(startupSet&&startupSet.id&&(startupIntent.setRef||startupIntent.editor||startupIntent.wizard))rememberWizardSetRef(startupSet.id);
+    var preferredId=(startupSet&&startupSet.id)||(S.indexData&&S.indexData.default)||((S.sets[0]||{}).id)||null;
+    if(startupIntent.mode==='view')S.editorMode='view';
+    else if(startupIntent.mode==='edit')S.editorMode='edit';
     return preloadAllSets()
       .catch(function(){ return null; })
       .then(function(){
         renderSidebar();
+        if(startupIntent.wizard){
+          S.activeKind='space';
+          S._view='wizard';
+          S._wizardSetId=startupSet?startupSet.id:null;
+          if(startupSet){
+            S.activeId=startupSet.id;
+            if(SC[startupSet.id]){
+              S.d=cloneSetBundle(SC[startupSet.id]);
+              normalizeLegacyCardSurfaceMeta(S.d.meta);
+            }
+          }
+          rememberWizardSetRef(startupSet?startupSet.id:'');
+          renderEditor();
+          return;
+        }
         if(preferredId&&S.sets.some(function(s){return s.id===preferredId;})){
           return loadSet(preferredId,{silent:true}).catch(function(){
             renderSidebar();
@@ -639,26 +865,431 @@ function saveIndex(msg){S.indexData.sets=S.sets;return saveFile('sets/index.json
 // ═══════════════════════════════════════════
 // SIDEBAR
 // ═══════════════════════════════════════════
-function renderSidebar(){
-  var sbQ=g('sbQ'),setList=g('setList');
-  if(!setList)return;
-  var q=String(sbQ&&sbQ.value||'').toLowerCase();
-  var list=(Array.isArray(S.sets)?S.sets:[]).filter(function(s){
-    var title=String((s&&s.title)||'').toLowerCase();
-    var id=String((s&&s.id)||'').toLowerCase();
-    return !q||title.indexOf(q)>=0||id.indexOf(q)>=0;
+function sidebarCollapsed(){
+  return !!S.sidebarCollapsed;
+}
+function sidebarBadgeText(label){
+  var raw=String(label||'').trim();
+  if(!raw)return '•';
+  var words=raw.split(/[\s_-]+/).filter(Boolean);
+  if(words.length>1)return (words[0].charAt(0)+words[1].charAt(0)).toUpperCase();
+  return raw.slice(0,2).toUpperCase();
+}
+function sidebarMiniCardHtml(){
+  return '<span class="sLeadMiniCard" aria-hidden="true">'+
+    '<span class="sLeadMiniCardLine"></span>'+
+    '<span class="sLeadMiniCardMenu"><span></span><span></span><span></span></span>'+
+    '<span class="sLeadMiniCardBlocks">'+
+      '<span class="sLeadMiniCardBlock"></span>'+
+      '<span class="sLeadMiniCardBlock is-light"></span>'+
+    '</span>'+
+  '</span>';
+}
+function sidebarThumbShell(innerHtml,isActive,setId,isFallback,styleAttr){
+  return '<span class="sLeadMiniThumb'+(isFallback?' is-fallback':'')+(isActive?' is-active':'')+'" data-thumb-id="'+esc(setId||'')+'" aria-hidden="true"'+(styleAttr?' style="'+esc(styleAttr)+'"':'')+'>'+innerHtml+'</span>';
+}
+function refreshSidebarThumbNodes(setId,dataUrl){
+  if(!setId||!dataUrl)return;
+  Array.prototype.forEach.call(document.querySelectorAll('.sLeadMiniThumb[data-thumb-id]'),function(node){
+    if((node.dataset&&node.dataset.thumbId)!==setId)return;
+    node.classList.remove('is-fallback');
+    node.innerHTML='<img src="'+esc(dataUrl)+'" alt="">';
   });
-  setList.innerHTML=list.map(function(s){
-    var sid=String((s&&s.id)||'');
-    var pct=calcPct(sid),isDirty=sid===S.activeId&&S.dirty;
-    return '<button class="sItem'+(sid===S.activeId?' active':'')+(isDirty?' dirty':'')+'" draggable="true" data-sid="'+esc(sid)+'" onclick="reqLoad(\''+esc(sid)+'\')">'+
-      '<span class="sDot"></span><span class="sNm">'+esc((s&&s.title)||sid)+'</span>'+
-      '<span class="sDirty" title="Niet opgeslagen"></span><span class="sPct">'+pct+'%</span></button>';
-  }).join('');
-  if(!list.length&&Array.isArray(S.sets)&&S.sets.length&&!q){
-    setList.innerHTML='<div class="empty" style="padding:10px 0;color:var(--k3)">Er ging iets mis bij het tonen van de sets.</div>';
+}
+function buildSidebarThumbDataUrl(set,bundle){
+  var sid=String((set&&set.id)||'').trim();
+  if(!sid)return '';
+  var sourceBundle=bundle||spacePreviewSetBundle(set);
+  if(!sourceBundle)return '';
+  try{
+    return spacePreviewSetCoverDataUrl({id:sid},sourceBundle)||'';
+  }catch(_e){
+    return '';
   }
+}
+function queueSidebarThumbBuild(set){
+  var sid=String((set&&set.id)||'').trim();
+  if(!sid||SIDEBAR_SET_THUMB_CACHE[sid]||SIDEBAR_SET_THUMB_PENDING[sid])return;
+  var bundle=spacePreviewSetBundle(set);
+  if(!bundle)return;
+  SIDEBAR_SET_THUMB_PENDING[sid]=true;
+  var run=function(){
+    if(!SIDEBAR_SET_THUMB_PENDING[sid])return;
+    var cover=buildSidebarThumbDataUrl(set,bundle);
+    if(cover){
+      SIDEBAR_SET_THUMB_CACHE[sid]=cover;
+      refreshSidebarThumbNodes(sid,cover);
+    }
+    delete SIDEBAR_SET_THUMB_PENDING[sid];
+  };
+  if(typeof requestIdleCallback==='function')requestIdleCallback(run,{timeout:180});
+  else setTimeout(run,16);
+}
+function cancelSidebarThumbWarmup(){
+  if(!SIDEBAR_SET_THUMB_WARM_TIMER)return;
+  clearTimeout(SIDEBAR_SET_THUMB_WARM_TIMER);
+  SIDEBAR_SET_THUMB_WARM_TIMER=0;
+}
+function cancelCardPreviewWarmup(){
+  if(!CARD_PREVIEW_WARM_TIMER)return;
+  clearTimeout(CARD_PREVIEW_WARM_TIMER);
+  CARD_PREVIEW_WARM_TIMER=0;
+}
+function scheduleCardPreviewWarmup(delay){
+  cancelCardPreviewWarmup();
+  var wait=Math.max(0,parseInt(delay,10)||0);
+  var loadId=S.activeId;
+  var loadKind=S.activeKind;
+  CARD_PREVIEW_WARM_TIMER=setTimeout(function(){
+    CARD_PREVIEW_WARM_TIMER=0;
+    if(S.activeId!==loadId||S.activeKind!==loadKind)return;
+    loadCardPreviews();
+  },wait);
+}
+function scheduleSidebarThumbWarmup(){
+  if(SIDEBAR_SET_THUMB_WARM_TIMER)return;
+  SIDEBAR_SET_THUMB_WARM_TIMER=setTimeout(function(){
+    SIDEBAR_SET_THUMB_WARM_TIMER=0;
+    (S.sets||[]).forEach(function(set){ queueSidebarThumbBuild(set); });
+  },240);
+}
+function sidebarSetThumbHtml(set,isActive){
+  var title=(set&&set.title)||'';
+  var bundle=spacePreviewSetBundle(set);
+  var cover=(set&&set.id&&SIDEBAR_SET_THUMB_CACHE[set.id])||'';
+  if(cover){
+    return sidebarThumbShell('<img src="'+esc(cover)+'" alt="">',isActive,set&&set.id,false);
+  }
+  var colors=_setThumbColors(title);
+  return sidebarThumbShell(_setThumbSvg(colors.shape),isActive,set&&set.id,true,'background:'+colors.bg);
+}
+function applySidebarState(){
+  var app=g('app'),btn=g('sbToggle'),q=g('sbQ');
+  var collapsed=sidebarCollapsed();
+  if(app)app.classList.toggle('sidebar-collapsed',collapsed);
+  if(btn){
+    var label=collapsed?'Zijbalk uitklappen':'Zijbalk inklappen';
+    btn.classList.toggle('is-collapsed',collapsed);
+    btn.title=label;
+    btn.setAttribute('aria-label',label);
+    btn.setAttribute('aria-pressed',collapsed?'true':'false');
+  }
+  if(q)q.tabIndex=collapsed?-1:0;
+}
+function setSidebarCollapsed(next){
+  var collapsed=!!next;
+  if(S.sidebarCollapsed===collapsed){
+    applySidebarState();
+    return;
+  }
+  S.sidebarCollapsed=collapsed;
+  lsSet('pk_sidebar_collapsed',collapsed?'1':'0');
+  var q=g('sbQ');
+  if(collapsed&&q===document.activeElement)q.blur();
+  applySidebarState();
+  renderSidebar();
+}
+function toggleSidebar(){
+  setSidebarCollapsed(!sidebarCollapsed());
+}
+function isValidSpaceView(v){
+  return v==='dashboard'||v==='home'||v==='my-sets'||v==='shared'||v==='trash';
+}
+function resolveSpaceEditorView(opts){
+  opts=opts||{};
+  if(isValidSpaceView(opts.view))return opts.view;
+  if(opts.preserveView&&isValidSpaceView(S._view))return S._view;
+  return 'home';
+}
+function cleanupSidebarCollapseBody(body){
+  if(!body||!body._sbCollapseEndHandler)return;
+  body.removeEventListener('transitionend',body._sbCollapseEndHandler);
+  body._sbCollapseEndHandler=null;
+}
+function primeSidebarCollapseBody(body,open){
+  if(!body)return;
+  cleanupSidebarCollapseBody(body);
+  body.classList.toggle('is-open',!!open);
+  body.classList.toggle('is-closed',!open);
+  body.setAttribute('aria-hidden',open?'false':'true');
+  body.style.height=open?'auto':'0px';
+}
+function animateSidebarCollapseBody(body,open){
+  if(!body)return;
+  cleanupSidebarCollapseBody(body);
+  var startHeight=body.getBoundingClientRect().height;
+  if(open){
+    body.classList.remove('is-closed');
+    body.classList.add('is-open');
+    body.setAttribute('aria-hidden','false');
+    body.style.height='auto';
+    var targetHeight=body.scrollHeight;
+    body.style.height=startHeight+'px';
+    body.offsetHeight;
+    body.style.height=targetHeight+'px';
+  }else{
+    body.style.height=startHeight+'px';
+    body.offsetHeight;
+    body.classList.remove('is-open');
+    body.classList.add('is-closed');
+    body.setAttribute('aria-hidden','true');
+    body.style.height='0px';
+  }
+  var onEnd=function(e){
+    if(e.target!==body||e.propertyName!=='height')return;
+    cleanupSidebarCollapseBody(body);
+    body.style.height=open?'auto':'0px';
+  };
+  body._sbCollapseEndHandler=onEnd;
+  body.addEventListener('transitionend',onEnd);
+}
+function renderSidebar(){
+  var setList=g('setList'),spaceNav=g('spaceNav'),spacesList=g('spacesList');
+  if(!setList||!spaceNav)return;
+  applySidebarState();
+
+  var isDashboard=S.activeKind==='space'&&(S._view==='dashboard'||S._view==='wizard');
+  var isHome=S.activeKind==='space'&&S._view==='home';
+  var isShared=S.activeKind==='space'&&S._view==='shared';
+  var isTrash=S.activeKind==='space'&&S._view==='trash';
+
+  // ── spaceNav: Dashboard + Home ──────────────────────────────
+  var dashIcon='<span class="sLeadIcon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>';
+  var homeIcon='<span class="sLeadIcon sLeadHome" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></span>';
+  spaceNav.innerHTML=
+    '<button class="sItem sItem-nav'+(isDashboard?' active':'')+'" data-nav-view="dashboard" type="button" onclick="goView(\'dashboard\')">'+
+      dashIcon+'<span class="sNm">Dashboard</span>'+
+    '</button>';
+
+  // ── setList: Mijn kaartensets (inklapbaar) + Gedeeld + Prullenbak ──
+  var setsOpen=S._mySetsOpen!==false;
+  var list=Array.isArray(S.sets)?S.sets:[];
+  var setsBodyHtml='';
+  if(list.length){
+    setsBodyHtml=list.map(function(s){
+      var sid=String((s&&s.id)||'');
+      var isDirty=S.activeKind==='set'&&sid===S.activeId&&S.dirty;
+      var isActive=S.activeKind==='set'&&sid===S.activeId;
+      var title=(s&&s.title)||sid;
+      return '<button class="sItem sItem-set'+(isActive?' active':'')+(isDirty?' dirty':'')+'" type="button" draggable="true" data-sid="'+esc(sid)+'" onclick="reqLoad(\''+esc(sid)+'\')">'+
+        sidebarSetThumbHtml(s,isActive)+
+        '<span class="sNm" title="Dubbelklik om naam te wijzigen" ondragstart="event.preventDefault();event.stopPropagation()" ondblclick="event.preventDefault();event.stopPropagation();startSidebarSetRename(\''+esc(sid)+'\',this)">'+esc(title)+'</span>'+
+        '<span class="sDirty" title="Niet opgeslagen"></span>'+
+      '</button>';
+    }).join('');
+  } else {
+    setsBodyHtml='<div class="sbEmpty">Nog geen sets. Maak er een aan!</div>';
+  }
+  var sharedIcon='<span class="sLeadIcon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>';
+  var trashIcon='<span class="sLeadIcon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></span>';
+  setList.innerHTML=
+    '<div class="sbLbl sbLblSets">Sets</div>'+
+    '<div class="sbCollapse">'+
+      '<button class="sbCollapseHead'+(S.activeKind==='set'?' has-active':'')+'" type="button" aria-expanded="'+(setsOpen?'true':'false')+'" onclick="toggleMySets()">'+
+        '<span class="sLeadIcon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6"/><path d="M9 13h4"/></svg></span>'+
+        '<span class="sNm">Mijn kaartensets</span>'+
+        '<span class="sbCollapseChev'+(setsOpen?' open':'')+'" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m4 6 4 4 4-4"/></svg></span>'+
+      '</button>'+
+      '<div class="sbCollapseBody'+(setsOpen?' is-open':' is-closed')+'" aria-hidden="'+(setsOpen?'false':'true')+'">'+setsBodyHtml+
+        '<button class="sbAllSetsBtn" onclick="goView(\'my-sets\')">Alle kaartensets bekijken <span aria-hidden="true">→</span></button>'+
+      '</div>'+
+    '</div>'+
+    '<button class="sItem sItem-nav'+(isShared?' active':'')+'" data-nav-view="shared" type="button" onclick="goView(\'shared\')">'+
+      sharedIcon+'<span class="sNm">Gedeeld met mij</span>'+
+    '</button>'+
+    '<button class="sItem sItem-nav'+(isTrash?' active':'')+'" data-nav-view="trash" type="button" onclick="goView(\'trash\')">'+
+      trashIcon+'<span class="sNm">Prullenbak</span>'+
+    '</button>'+
+    '<div style="padding-top:12px">'+
+      '<button class="sbNewSetBtn" type="button" onclick="openNewSetWizard()">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'+
+        '<span>Nieuwe set</span>'+
+      '</button>'+
+    '</div>';
+  primeSidebarCollapseBody(setList.querySelector('.sbCollapseBody'),setsOpen);
   initSbDrag();
+
+  // ── sbRepo bovenaan: alleen gebruikersnaam (zonder @) ────────
+  if(g('sbRepo')) g('sbRepo').textContent=S._username||'';
+
+  // ── Gebruiker onderaan ───────────────────────────────────────
+  var userArea=g('sbUserArea');
+  if(userArea){
+    var uName=S._userName||S._username||'';
+    var uAt=S._username?('@'+S._username):'';
+    var avatarHtml='';
+    if(S._userAvatar){
+      avatarHtml='<img class="sbUserAvatar" src="'+esc(S._userAvatar)+'" alt="'+esc(uName)+'">';
+    }else{
+      var initials=(uName||'?').trim().charAt(0).toUpperCase();
+      avatarHtml='<span class="sbUserAvatar sbUserAvatarFb">'+esc(initials)+'</span>';
+    }
+    userArea.innerHTML=
+      '<button class="sbUserBtn" type="button" onclick="toggleUserMenu(event)">'+
+        avatarHtml+
+        '<span class="sbUserInfo"><span class="sbUserName">'+esc(uName||uAt)+'</span>'+
+          (uAt?'<span class="sbUserAt">'+esc(uAt)+'</span>':'')+
+        '</span>'+
+        '<svg class="sbUserChev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m4 6 4 4 4-4"/></svg>'+
+      '</button>';
+  }
+
+  scheduleSidebarThumbWarmup();
+
+  // ── spacesList: workspace sectie met Home ──────────────────────────────────
+  if(spacesList){
+    var spaceName=(S.space&&S.space.name)||'Home';
+    // Toon switcher alleen als gebruiker meerdere spaces heeft
+    var hasMultipleSpaces=false; // TODO: Pas aan wanneer multi-space support beschikbaar is
+    var wsHtml='<div class="sbLbl sbLblWs">Ruimte</div>';
+    if(hasMultipleSpaces){
+      wsHtml+='<button class="sbWorkspaceSwitcher" type="button" onclick="toggleWorkspaceMenu(event)" title="Wissel van ruimte">'+
+        '<span class="sbWsName">'+esc(spaceName)+'</span>'+
+        '<svg class="sbWsChev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m4 6 4 4 4-4"/></svg>'+
+      '</button>';
+    }
+    wsHtml+='<button class="sItem sItem-nav sItem-home'+(isHome?' active':'')+'" data-nav-view="home" type="button" onclick="reqLoadSpace()">'+
+      homeIcon+'<span class="sNm">Home</span>'+
+    '</button>';
+    spacesList.innerHTML=wsHtml;
+  }
+}
+function syncSidebarSelectionState(){
+  var setList=g('setList'),spaceNav=g('spaceNav'),spacesList=g('spacesList');
+  if(!setList||!spaceNav||!spacesList)return false;
+  var setButtons=setList.querySelectorAll('.sItem-set[data-sid]');
+  if((S.sets||[]).length&&!setButtons.length)return false;
+  Array.prototype.forEach.call(setButtons,function(btn){
+    var sid=btn.dataset?btn.dataset.sid:'';
+    var isActive=S.activeKind==='set'&&sid===S.activeId;
+    var isDirty=isActive&&!!S.dirty;
+    btn.classList.toggle('active',isActive);
+    btn.classList.toggle('dirty',isDirty);
+    var thumb=btn.querySelector('.sLeadMiniThumb');
+    if(thumb)thumb.classList.toggle('is-active',isActive);
+  });
+  var setHead=setList.querySelector('.sbCollapseHead');
+  if(setHead)setHead.classList.toggle('has-active',S.activeKind==='set');
+  Array.prototype.forEach.call(spaceNav.querySelectorAll('[data-nav-view]'),function(btn){
+    var view=btn.dataset&&btn.dataset.navView;
+    var isActive=S.activeKind==='space'&&(S._view===view || (S._view==='wizard'&&view==='dashboard'));
+    btn.classList.toggle('active',isActive);
+  });
+  Array.prototype.forEach.call(setList.querySelectorAll('[data-nav-view]'),function(btn){
+    var view=btn.dataset&&btn.dataset.navView;
+    var isActive=S.activeKind==='space'&&(S._view===view || (S._view==='wizard'&&view==='dashboard'));
+    btn.classList.toggle('active',isActive);
+  });
+  Array.prototype.forEach.call(spacesList.querySelectorAll('[data-nav-view]'),function(btn){
+    var view=btn.dataset&&btn.dataset.navView;
+    var isActive=S.activeKind==='space'&&(S._view===view || (S._view==='wizard'&&view==='dashboard'));
+    btn.classList.toggle('active',isActive);
+  });
+  return true;
+}
+function goView(v){
+  if(S.dirty&&S.activeKind==='set'){
+    var activeName=(S.sets.find(function(s){return s.id===S.activeId;})||{}).title||S.activeId;
+    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(activeName)+'</strong>?</p>'+
+      '<div class="mAct">'+
+      '<button class="mCa" onclick="closeModal();_goViewNow(\''+esc(v)+'\')">Niet opslaan</button>'+
+      '<button class="mOk" onclick="closeModal();saveSet(function(){_goViewNow(\''+esc(v)+'\');})">Opslaan</button>'+
+      '</div>');
+    return;
+  }
+  _goViewNow(v);
+}
+function _goViewNow(v){
+  S._view=v;
+  S.activeKind='space';
+  S.dirty=false;
+  if(!syncSidebarSelectionState())renderSidebar();
+  renderEditor();
+}
+function toggleMySets(){
+  S._mySetsOpen=!S._mySetsOpen;
+  var open=S._mySetsOpen!==false;
+  var body=document.querySelector('.sbCollapseBody');
+  var chev=document.querySelector('.sbCollapseChev');
+  var head=document.querySelector('.sbCollapseHead');
+  if(body)animateSidebarCollapseBody(body,open);
+  if(chev)chev.classList.toggle('open',open);
+  if(head)head.setAttribute('aria-expanded',open?'true':'false');
+}
+function toggleUserMenu(e){
+  e.stopPropagation();
+  var existing=document.getElementById('sbUserMenu');
+  if(existing){ existing.remove(); return; }
+  var btn=e.currentTarget;
+  var rect=btn.getBoundingClientRect();
+  var menu=document.createElement('div');
+  menu.id='sbUserMenu';
+  menu.className='sbUserMenu';
+  menu.innerHTML=
+    '<button class="sbUserMenuItem" onclick="showShortcuts();document.getElementById(\'sbUserMenu\')&&document.getElementById(\'sbUserMenu\').remove()">'+
+      '<svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="3"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h12"/></svg>Sneltoetsen'+
+    '</button>'+
+    '<div class="sbUserMenuDivider"></div>'+
+    '<button class="sbUserMenuItem sbUserMenuDanger" onclick="adminSignOut()">'+
+      '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Uitloggen'+
+    '</button>';
+  // Positioneer boven de knop
+  menu.style.position='fixed';
+  menu.style.bottom=(window.innerHeight-rect.top+6)+'px';
+  menu.style.left=rect.left+'px';
+  menu.style.width=rect.width+'px';
+  document.body.appendChild(menu);
+  // Sluit bij klik buiten
+  setTimeout(function(){
+    document.addEventListener('click',function close(){ menu.remove(); document.removeEventListener('click',close); },{ once:true });
+  },0);
+}
+function toggleWorkspaceMenu(e){
+  e.stopPropagation();
+  var existing=document.getElementById('sbWorkspaceMenu');
+  if(existing){ existing.remove(); return; }
+  var btn=e.currentTarget;
+  var rect=btn.getBoundingClientRect();
+  var menu=document.createElement('div');
+  menu.id='sbWorkspaceMenu';
+  menu.className='sbWorkspaceMenu'+(document.documentElement.classList.contains('admin-night')?' dark':'');
+  var currentSpaceName=(S.space&&S.space.name)||'Home';
+  var menuHtml='<button class="sbWsMenuBtn active" type="button" title="'+esc(currentSpaceName)+'">'+
+    '<span class="sbWsMenuIcon">✓</span>'+
+    '<span>'+esc(currentSpaceName)+'</span>'+
+  '</button>';
+  // Later: voeg meer ruimtes toe wanneer beschikbaar
+  // menuHtml+='<div class="sbWsMenuDivider"></div>';
+  // menuHtml+='<button class="sbWsMenuBtn" onclick="showAddSpaceModal()"><span class="sbWsMenuIcon">+</span>Nieuwe ruimte</button>';
+  menu.innerHTML=menuHtml;
+  // Positioneer onder de knop
+  menu.style.position='fixed';
+  menu.style.top=(rect.bottom+6)+'px';
+  menu.style.left=rect.left+'px';
+  document.body.appendChild(menu);
+  // Sluit bij klik buiten
+  setTimeout(function(){
+    document.addEventListener('click',function close(){ menu.remove(); document.removeEventListener('click',close); },{ once:true });
+  },0);
+}
+function showAddSpaceModal(){
+  if(!isPro()){
+    showModal('<h3>PRO-functie</h3><p>Meerdere ruimtes zijn beschikbaar met een PRO-account.</p><div class="mAct"><button class="mOk" onclick="closeModal()">Sluiten</button></div>');
+    return;
+  }
+  toast('Ruimtes aanmaken komt binnenkort!','green');
+}
+function reqLoadSpace(){
+  if(S.activeKind==='space'&&S._view==='home')return;
+  if(S.dirty&&S.activeKind==='set'){
+    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(S.activeId)+'</strong>?</p>'+
+      '<div class="mAct">'+
+      '<button class="mCa" onclick="closeModal();loadSpaceEditor({view:\'home\'})">Niet opslaan</button>'+
+      '<button class="mOk" onclick="closeModal();saveSet(function(){loadSpaceEditor({view:\'home\'});})">Opslaan</button>'+
+      '</div>');
+    return;
+  }
+  loadSpaceEditor({view:'home'});
 }
 function calcPct(id){
   if(id!==S.activeId){
@@ -673,6 +1304,7 @@ function calcPct(id){
 }
 function initSbDrag(){
   g('setList').querySelectorAll('.sItem').forEach(function(btn){
+    if(!btn.dataset.sid)return;
     btn.addEventListener('dragstart',function(e){dragSrc=this;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',this.dataset.sid);this.style.opacity='.5';});
     btn.addEventListener('dragend',function(){this.style.opacity='';g('setList').querySelectorAll('.sItem').forEach(function(b){b.style.boxShadow='';});});
     btn.addEventListener('dragover',function(e){e.preventDefault();this.style.boxShadow='0 0 0 2px var(--tl)';});
@@ -693,12 +1325,19 @@ function initSbDrag(){
 // LOAD SET
 // ═══════════════════════════════════════════
 function reqLoad(id){
-  if(id===S.activeId)return;
+  if(id===S.activeId&&S.activeKind==='set')return;
+  cancelSidebarThumbWarmup();
+  cancelCardPreviewWarmup();
+  if(PRELOAD.active){
+    PRELOAD.token+=1;
+    PRELOAD.active=false;
+  }
   if(S.dirty){
-    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(S.activeId)+'</strong>?</p>'+
+    var activeName=(S.sets.find(function(s){return s.id===S.activeId;})||{}).title||S.activeId;
+    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(activeName)+'</strong>?</p>'+
       '<div class="mAct">'+
-      '<button class="mCa" onclick="closeModal();loadSet(\''+esc(id)+'\')">Weggooien</button>'+
-      '<button class="mOk" onclick="closeModal();saveSet(function(){loadSet(\''+esc(id)+'\');})">Eerst opslaan</button>'+
+      '<button class="mCa" onclick="closeModal();loadSet(\''+esc(id)+'\')">Niet opslaan</button>'+
+      '<button class="mOk" onclick="closeModal();saveSet(function(){loadSet(\''+esc(id)+'\');})">Opslaan</button>'+
       '</div>');
     return;
   }
@@ -706,14 +1345,19 @@ function reqLoad(id){
 }
 function loadSet(id,opts){
   opts=opts||{};
+  S.activeKind='set';
   S.activeId=id;S.dirty=false;S.wizStep=0;S.clTab='opmaken';S.opmPane='vragen';S.infoSlideIdx=0;
+  requestEditorScrollReset();
+  CANVAS_ZOOM_PCT=100;
+  CANVAS_ZOOM_SCOPE_VALUES={};
+  rememberCanvasZoomForScope(canvasZoomScopeKeyForPane('set','vragen'),CANVAS_ZOOM_PCT);
   STYLE_PREVIEW_KEY=null;
-  COVER_TEXT_SELECTED_MULTI=[];
+  resetTransientEditorState();
   if(!opts.silent){
     lbStart();
     g('mc').innerHTML='<div class="welcome" style="opacity:.3"><p style="font-size:11.5px;color:var(--k3)">Laden…</p></div>';
   }
-  renderSidebar();
+  if(!syncSidebarSelectionState())renderSidebar();
   var loader=SC[id]
     ? Promise.resolve(cloneSetBundle(SC[id]))
     : loadSetFiles(id).then(function(bundle){
@@ -725,20 +1369,108 @@ function loadSet(id,opts){
     normalizeLegacyCardSurfaceMeta(S.d.meta);
     cacheSetBundle(id,cloneSetBundle(S.d));
     var draft=parse(lsGet('pk_draft_'+id));
-    if(draft&&draft.ts&&draft.ts>Date.now()-86400000){
+    var draftSeen=sessionStorage.getItem('pk_draft_seen_'+id);
+    var draftFromOtherSession=draft&&(!draft.sid||draft.sid!==SESSION_ID);
+    if(draft&&draft.ts&&draft.ts>Date.now()-7200000&&!draftSeen&&draftFromOtherSession){
+      var draftSetName=esc((S.sets.find(function(s){return s.id===id;})||{}).title||id);
       g('mc').innerHTML='<div class="welcome" style="gap:12px">'+
-        '<p style="font-size:13px;color:var(--k2);max-width:340px;line-height:1.6">Er is een lokaal concept van <strong>'+esc(id)+'</strong>.<br>Opgeslagen '+timeAgo(draft.ts)+'</p>'+
+        '<p style="font-size:13px;color:var(--k2);max-width:340px;line-height:1.6">Er is een lokaal concept van <strong>'+draftSetName+'</strong>.<br>Opgeslagen '+timeAgo(draft.ts)+'</p>'+
         '<div style="display:flex;gap:8px">'+
-        '<button class="btnS" onclick="discardDraft()">Weggooien</button>'+
+        '<button class="btnS" onclick="discardDraft()">Negeren</button>'+
         '<button class="btn" onclick="restoreDraft()">Concept herstellen</button>'+
         '</div></div>';
       window._pd=draft;return;
     }
+    if(draft)lsDel('pk_draft_'+id);
     afterLoad(id);
   }).catch(function(e){lbFail();toast('Laden mislukt: '+e.message,'red');});
 }
+function loadSpaceEditor(opts){
+  opts=opts||{};
+  cancelCardPreviewWarmup();
+  S.activeKind='space';
+  S._view=resolveSpaceEditorView(opts);
+  S.opmPane=(S.opmPane==='info')?'info':'space';
+  S.dirty=false;
+  S.infoSlideIdx=0;
+  requestEditorScrollReset();
+  CANVAS_ZOOM_PCT=100;
+  CANVAS_ZOOM_SCOPE_VALUES={};
+  rememberCanvasZoomForScope(canvasZoomScopeKeyForPane('space',S.opmPane),CANVAS_ZOOM_PCT);
+  STYLE_PREVIEW_KEY=null;
+  resetTransientEditorState();
+  document.documentElement.style.setProperty('--cardAspect','85/55');
+  document.documentElement.classList.remove('card-fmt-narrow');
+  if(!opts.silent){
+    lbStart();
+    g('mc').innerHTML='<div class="welcome" style="opacity:.3"><p style="font-size:11.5px;color:var(--k3)">Ruimte aan het verkennen</p></div>';
+  }
+  if(!syncSidebarSelectionState())renderSidebar();
+  var sid=(Array.isArray(S.sets)&&S.sets.length)
+    ? ((S.activeId&&S.sets.some(function(s){return s.id===S.activeId;})) ? S.activeId : S.sets[0].id)
+    : null;
+  Promise.resolve().then(function(){
+    var bundle=buildSpaceEditorBundle();
+    S.d=bundle;
+    normalizeLegacyCardSurfaceMeta(S.d.meta);
+    S.activeId=sid||null;
+    _savedSpaceSig=historyStateSigForSpace(S.d);
+    resetHistory(S.d);
+    syncDirtyFromSnapshot();
+    lbDone();
+    renderEditor();
+  }).catch(function(e){
+    lbFail();
+    toast('Ruimte laden mislukt: '+e.message,'red');
+  });
+}
+function defaultSpaceEditorBundle(){
+  var spaceName=(S.space&&S.space.name)||'Home';
+  var base=mkMeta('ruimte',spaceName);
+  base.themes=[];
+  base.infoPages=[];
+  base.ui=base.ui||{};
+  base.ui.index=base.ui.index||{};
+  base.ui.index.layout='hero-grid';
+  return {
+    meta: base,
+    metaSha: null,
+    questions: {},
+    questionsSha: null,
+    uitleg: {cover:''},
+    uitlegSha: null,
+    intro: {slides:[{key:'cover',title:spaceName,body:'',img:'cards/info_cover.svg',alt:spaceName}],hint:'← → swipe'},
+    introSha: null
+  };
+}
+function normalizeSpaceEditorBundle(raw){
+  var bundle=cloneSetBundle(raw||defaultSpaceEditorBundle());
+  var fallback=defaultSpaceEditorBundle();
+  bundle.meta=bundle.meta&&typeof bundle.meta==='object'?bundle.meta:fallback.meta;
+  bundle.meta.title='Home';
+  bundle.meta.themes=Array.isArray(bundle.meta.themes)?bundle.meta.themes:[];
+  bundle.meta.infoPages=Array.isArray(bundle.meta.infoPages)?bundle.meta.infoPages:[];
+  bundle.questions=bundle.questions&&typeof bundle.questions==='object'?bundle.questions:{};
+  bundle.uitleg=bundle.uitleg&&typeof bundle.uitleg==='object'?bundle.uitleg:{cover:''};
+  bundle.intro=bundle.intro&&typeof bundle.intro==='object'?bundle.intro:{slides:[],hint:'← → swipe'};
+  bundle.intro.slides=Array.isArray(bundle.intro.slides)?bundle.intro.slides:fallback.intro.slides;
+  if(!bundle.intro.slides.length)bundle.intro.slides=fallback.intro.slides;
+  return bundle;
+}
+function buildSpaceEditorBundle(){
+  var settings=((S.space&&S.space.settings)||{});
+  var publicPage=(settings&&typeof settings.publicPage==='object')?settings.publicPage:{};
+  var savedBundle=(publicPage.editorBundle&&typeof publicPage.editorBundle==='object')?publicPage.editorBundle:null;
+  var bundle=normalizeSpaceEditorBundle(savedBundle);
+  if(publicPage.layout){
+    bundle.meta.ui=bundle.meta.ui||{};
+    bundle.meta.ui.index=bundle.meta.ui.index||{};
+    bundle.meta.ui.index.layout=publicPage.layout;
+  }
+  return bundle;
+}
 function restoreDraft(){S.d=window._pd.data;normalizeLegacyCardSurfaceMeta(S.d.meta);resetHistory(S.d);lsDel('pk_draft_'+S.activeId);afterLoad(S.activeId);}
-function discardDraft(){lsDel('pk_draft_'+S.activeId);afterLoad(S.activeId);}
+function discardDraft(){sessionStorage.setItem('pk_draft_seen_'+S.activeId,'1');lsDel('pk_draft_'+S.activeId);afterLoad(S.activeId);}
 function afterLoad(id){
   lbDone();
   applyCardFormat();
@@ -747,17 +1479,32 @@ function afterLoad(id){
   resetHistory(S.d);
   syncDirtyFromSnapshot();
   startAutoSave();
-  // Start preloading card images immediately in background
-  setTimeout(loadCardPreviews,100);
+  setTopSaveStatus('idle','');
+  // Warm previews after the first paint, not during the set-switch click flow.
+  scheduleCardPreviewWarmup(320);
   renderEditor();
 }
 function startAutoSave(){
   clearInterval(asTimer);
   asTimer=setInterval(function(){
     if(!S.dirty||!S.activeId)return;
-    localStorage.setItem('pk_draft_'+S.activeId,JSON.stringify({ts:Date.now(),data:S.d}));
+    localStorage.setItem('pk_draft_'+S.activeId,JSON.stringify({ts:Date.now(),sid:SESSION_ID,data:S.d}));
+    setTopSaveStatus('draft','Concept bewaard',2200);
     var b=g('asBanner');if(b){b.classList.add('on');setTimeout(function(){b.classList.remove('on');},2200);}
   },15000);
+}
+function buildTopSaveStatusHtml(){
+  return '';
+}
+function buildTopSaveBtnInnerHtml(label){
+  var safeLabel=esc(label||'Opslaan');
+  return ''+
+    '<svg class="tbRSaveIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+
+      '<path d="M4 5.5a1.5 1.5 0 0 1 1.5-1.5h10.4L20 8.1V18.5A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5z"/>'+
+      '<path d="M8 4v5.5h7V5"/>'+
+      '<path d="M8 20v-6.5h8V20"/>'+
+    '</svg>'+
+    '<span>'+safeLabel+'</span>';
 }
 
 // ═══════════════════════════════════════════
@@ -771,37 +1518,3909 @@ function goChecklist(){S.mode='checklist';S.clTab='opmaken';S.opmPane='vragen';S
 function closeInstPage(){
   switchTab(S.prevMainTab||'opmaken');
 }
+function resolveTopProfileMenu(el){
+  if(!el)return null;
+  if(el.classList&&el.classList.contains('tbRProfileMenu'))return el;
+  return el.closest?el.closest('.tbRProfileMenu'):null;
+}
+function clearTopProfileMenuCloseAnim(det){
+  if(!det||!det._closeAnimTimer)return;
+  clearTimeout(det._closeAnimTimer);
+  det._closeAnimTimer=null;
+}
+function closeTopProfileMenu(el){
+  var det=resolveTopProfileMenu(el);
+  if(!det)return;
+  clearTopProfileMenuAutoClose(det);
+  clearTopProfileMenuCloseAnim(det);
+  if(!det.open){
+    det.classList.remove('is-closing');
+    return;
+  }
+  det.classList.add('is-closing');
+  det._closeAnimTimer=setTimeout(function(){
+    det._closeAnimTimer=null;
+    det.classList.remove('is-closing');
+    det.open=false;
+  },180);
+}
+function closeAllTopProfileMenus(exceptEl){
+  var keep=resolveTopProfileMenu(exceptEl);
+  Array.prototype.slice.call(document.querySelectorAll('.tbRProfileMenu[open]')).forEach(function(det){
+    if(det!==keep){
+      closeTopProfileMenu(det);
+    }
+  });
+}
+function clearTopProfileMenuAutoClose(det){
+  if(!det||!det._autoCloseTimer)return;
+  clearTimeout(det._autoCloseTimer);
+  det._autoCloseTimer=null;
+}
+function scheduleTopProfileMenuAutoClose(det,delay){
+  if(!det)return;
+  clearTopProfileMenuAutoClose(det);
+  det._autoCloseTimer=setTimeout(function(){
+    det._autoCloseTimer=null;
+    closeTopProfileMenu(det);
+  },delay||2800);
+}
+function openTopProfileMenu(el){
+  var det=resolveTopProfileMenu(el);
+  if(!det)return;
+  clearTopProfileMenuCloseAnim(det);
+  det.classList.remove('is-closing');
+  if(!det.open)det.open=true;
+}
+function toggleTopProfileMenu(ev,el){
+  if(ev){
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+  var det=resolveTopProfileMenu(el);
+  if(!det)return false;
+  if(det.open&&!det.classList.contains('is-closing')){
+    closeTopProfileMenu(det);
+    return false;
+  }
+  closeAllTopProfileMenus(det);
+  openTopProfileMenu(det);
+  return false;
+}
+function adminSignOut(){
+  if(window._supa&&window._supa.auth){
+    window._supa.auth.signOut().then(function(){location.href='/login/';});
+  }
+}
+function openTopSettings(){
+  closeAllTopProfileMenus();
+  setOpmakenPane('inst');
+  if(S.clTab!=='opmaken')switchTab('opmaken');
+  else renderEditor();
+}
+function topProfileName(){
+  return String(S._userName||S._email||'');
+}
+function topProfileAvatarUrl(){
+  return String(S._userAvatar||'').trim();
+}
+function topProfileInitials(){
+  var raw=topProfileName().trim();
+  if(!raw)return'U';
+  var parts=raw.split(/\s+/).filter(Boolean);
+  if(parts.length>1)return(parts[0].charAt(0)+parts[1].charAt(0)).toUpperCase();
+  var base=raw.split('@')[0]||raw;
+  return base.slice(0,2).toUpperCase();
+}
+function topProfileBadgeHtml(cls){
+  var name=esc(topProfileName()||'Account');
+  var avatar=topProfileAvatarUrl();
+  var initials=esc(topProfileInitials());
+  if(avatar){
+    var fbStyle='display:none;width:100%;height:100%';
+    return '<img class="'+cls+'" src="'+esc(avatar)+'" alt="'+name+'" referrerpolicy="no-referrer" crossorigin="anonymous" onerror="this.style.display=\'none\';var fb=this.nextElementSibling;if(fb)fb.style.display=\'inline-flex\'">'
+      +'<span class="'+cls+' is-fallback" style="'+fbStyle+'" aria-hidden="true">'+initials+'</span>';
+  }
+  return '<span class="'+cls+' is-fallback" aria-hidden="true">'+initials+'</span>';
+}
+function buildTopProfileMenuHtml(){
+  var adminNight=adminNightMode();
+  var adminNightIcon=adminNight
+    ? '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.9 1.8a5.8 5.8 0 1 0 3.3 10.7 6.2 6.2 0 1 1-3.3-10.7Z"></path></svg>'
+    : '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.4"></circle><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"></path></svg>';
+  var settingsSvg='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+  var logoutSvg='<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
+  var name=esc(topProfileName()||'Account');
+  var email=esc(String(S._email||''));
+  return '<details class="tbRProfileMenu">'+
+    '<summary class="tbRProfileBtn" title="Account en instellingen" aria-label="Account en instellingen" onclick="return toggleTopProfileMenu(event,this)">'+
+      topProfileBadgeHtml('tbRProfileAvatar')+
+    '</summary>'+
+    '<div class="tbRMenuPop">'+
+      '<div class="tbRMenuAccount">'+
+        topProfileBadgeHtml('tbRMenuAvatar')+
+        '<div class="tbRMenuMeta">'+
+          '<div class="tbRMenuName">'+name+'</div>'+
+          (S._username?'<div class="tbRMenuUsername">@'+esc(S._username)+'</div>':'')+
+          '<div class="tbRMenuMail">'+email+'</div>'+
+        '</div>'+
+      '</div>'+
+      '<button class="tbRMenuItem'+(adminNight?' is-active':'')+'" type="button" onclick="toggleAdminNight();closeTopProfileMenu(this)" title="'+(adminNight?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'">'+adminNightIcon+'<span>Nachtmodus</span></button>'+
+      '<button class="tbRMenuItem" type="button" onclick="openTopSettings();closeTopProfileMenu(this)">'+settingsSvg+'<span>Instellingen</span></button>'+
+      '<button class="tbRMenuItem tbRMenuItem-danger" type="button" onclick="adminSignOut();closeTopProfileMenu(this)">'+logoutSvg+'<span>Uitloggen</span></button>'+
+    '</div>'+
+  '</details>';
+}
+
+// ═══════════════════════════════════════════
+// DASHBOARD / OVERZICHT PAGINA'S
+// ═══════════════════════════════════════════
+function renderDashboard(){
+  setAppPreparing(false);
+  hideFloatingTextBar(true);
+  var rawName=S._userName||S._username||'';
+  var firstName=rawName?rawName.trim().split(' ')[0]:'';
+  firstName=firstName.charAt(0).toUpperCase()+firstName.slice(1);
+
+  var allSets=S.sets||[];
+  var recentSets=allSets.slice(0,5);
+  var draftSets=allSets.filter(function(s){return (!s.status||s.status==='draft');}).slice(0,4);
+  var totalSets=allSets.length;
+
+  // ── Stat-kaarten — semantic tokens: mint=sets, blue=visitors, peach=analytics, lavender=collaboration
+  var statsHtml=
+    '<div class="dbStats">'+
+      _dbStat('Kaartensets','<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6"/><path d="M9 13h4"/></svg>',totalSets,null,'mint')+
+      _dbStat('Bezoekers (30 dagen)','<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>','—',null,'blue')+
+      _dbStat('Paginaweergaven','<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>','—',null,'peach')+
+      _dbStat('Gedeeld','<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>','—',null,'lavender')+
+    '</div>';
+
+  // ── Recente sets (met kaartenaantal, datum, status, oog-count + menu)
+  var recentHtml=recentSets.length?recentSets.map(function(s){
+    var colors=_setThumbColors(s.title);
+    var cardCount=_countCards(spacePreviewSetBundle(s));
+    var timeAgo=_timeAgo(s.updatedAt);
+    var timeLabel=timeAgo?'Bijgewerkt '+timeAgo:'';
+    var meta=(cardCount?cardCount+(cardCount===1?' kaart':' kaarten'):'')+(cardCount&&timeLabel?' • ':'')+timeLabel;
+    return '<div class="dbSetRow">'+
+      '<button class="dbSetRowMain" onclick="reqLoad(\''+esc(s.id||'')+'\')">'+
+        '<span class="dbSetThumb" style="background:'+colors.bg+'">'+_setThumbSvg(colors.shape)+'</span>'+
+        '<span class="dbSetInfo">'+
+          (function(){var lbl=_setStatusLabel(s),cls=_setStatusCls(s);return(
+            '<span class="dbSetTitle"><span>'+esc(s.title||'Naamloos')+'</span>'+
+              (lbl?'<span class="dbSetStatus '+cls+'">'+lbl+'</span>':'')+
+            '</span>'+
+            (meta?'<span class="dbSetMeta">'+esc(meta)+'</span>':'')
+          );})()+
+        '</span>'+
+      '</button>'+
+      '<span class="dbSetRight">'+
+        '<span class="dbSetViews"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>—</span></span>'+
+        '<button class="dbSetMenuBtn" type="button" title="Opties" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/></svg></button>'+
+      '</span>'+
+    '</div>';
+  }).join(''):
+    '<div class="dbEmpty">Nog geen sets. Maak een nieuwe aan.</div>';
+
+  // ── Snelle acties (verticale lijst, mint + paars)
+  var actiesHtml=
+    _dbActie('reqLoadSpace()','home',
+      '<svg viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>',
+      'Home bewerken','Bewerk je publieke pagina')+
+    _dbActie('openNewSetWizard()','new',
+      '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></svg>',
+      'Nieuwe kaartenset','Maak een nieuwe set met vragen')+
+    _dbActie('','import',
+      '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+      'Importeren','Importeer een set vanuit bestand',true)+
+    _dbActie('goView(\'shared\')','share',
+      '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+      'Uitnodigen','Nodig iemand uit om samen te werken',false);
+
+  // ── Concepten sectie (met thumbnail + menu)
+  var conceptenHtml=draftSets.length?draftSets.map(function(s){
+    var colors=_setThumbColors(s.title);
+    var cardCount=_countCards(spacePreviewSetBundle(s));
+    var timeAgo=_timeAgo(s.updatedAt);
+    var timeLabel=timeAgo?'Bijgewerkt '+timeAgo:'';
+    var meta=(cardCount?cardCount+(cardCount===1?' kaart':' kaarten'):'')+(cardCount&&timeLabel?' • ':'')+timeLabel;
+    return '<div class="dbConceptRow">'+
+      '<button class="dbConceptRowMain" onclick="reqLoad(\''+esc(s.id||'')+'\')">'+
+        '<span class="dbConceptThumb" style="background:'+colors.bg+'">'+_setThumbSvg(colors.shape)+'</span>'+
+        '<span class="dbConceptInfo">'+
+          '<span class="dbConceptTitle">'+esc(s.title||'Naamloos')+'</span>'+
+          (meta?'<span class="dbConceptMeta">'+esc(meta)+'</span>':'')+
+        '</span>'+
+      '</button>'+
+      '<span class="dbConceptRight">'+
+        '<span class="dbSetStatus ssc-draft">Concept</span>'+
+        '<button class="dbSetMenuBtn" type="button" title="Opties" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/></svg></button>'+
+      '</span>'+
+    '</div>';
+  }).join(''):
+    '<div class="dbEmpty">Geen concepten.</div>';
+
+  g('mc').innerHTML=
+    '<div class="dbPage">'+
+      '<div class="dbTop">'+
+        '<div>'+
+          '<p class="dbPageLabel">Dashboard</p>'+
+          '<h1 class="dbH1">Welkom terug'+(firstName?', '+esc(firstName):'')+'!</h1>'+
+          '<p class="dbSub">Hier is een overzicht van je ruimte.</p>'+
+        '</div>'+
+      '</div>'+
+      statsHtml+
+      // Hoofd-grid: recente sets + snelle acties
+      '<div class="dbMainGrid">'+
+        '<div class="dbCard">'+
+          '<div class="dbCardHead">'+
+            '<span class="dbCardTitle">Recente kaartensets</span>'+
+            '<button class="dbLinkBtn" onclick="goView(\'my-sets\')">Bekijk alle</button>'+
+          '</div>'+
+          '<div class="dbSetList">'+recentHtml+'</div>'+
+        '</div>'+
+        '<div class="dbCard">'+
+          '<div class="dbCardHead">'+
+            '<span class="dbCardTitle">Snelle acties</span>'+
+            '<button class="dbActieNewBtn" onclick="openNewSetWizard()">+ Nieuwe kaartenset</button>'+
+          '</div>'+
+          '<div class="dbActieList">'+actiesHtml+'</div>'+
+        '</div>'+
+      '</div>'+
+      // Onder-grid: concepten + bezoekers + statistieken
+      '<div class="dbBottomGrid">'+
+        '<div class="dbCard">'+
+          '<div class="dbCardHead">'+
+            '<span class="dbCardTitle">Concepten</span>'+
+            '<button class="dbLinkBtn" onclick="goView(\'my-sets\')">Bekijk alle</button>'+
+          '</div>'+
+          '<div class="dbConceptList">'+conceptenHtml+'</div>'+
+        '</div>'+
+        '<div class="dbCard">'+
+          '<div class="dbCardHead">'+
+            '<span class="dbCardTitle">Laatste bezoekers</span>'+
+            '<button class="dbLinkBtn">Bekijk alle</button>'+
+          '</div>'+
+          '<div class="dbEmpty dbEmptyCenter">Bezoekersdata beschikbaar zodra statistieken actief zijn.</div>'+
+        '</div>'+
+        '<div class="dbCard">'+
+          '<div class="dbCardHead">'+
+            '<span class="dbCardTitle">Statistieken</span>'+
+            '<button class="dbLinkBtn">30 dagen ↓</button>'+
+          '</div>'+
+          '<div class="dbEmpty dbEmptyCenter">Statistieken komen binnenkort.</div>'+
+        '</div>'+
+      '</div>'+
+      // Tip-balk
+      _dbTipBarHtml('dashboard')+
+    '</div>';
+}
+var _DB_TIPS={
+  dashboard:[
+    {text:'Maak je Home-pagina persoonlijker door een achtergrond en eigen vormen toe te voegen.',btn:'Naar Home',action:'reqLoadSpace()'},
+    {text:'Geef je publieke pagina een eigen stijl — kies een lay-out, kleur en introductietekst.',btn:'Naar Home',action:'reqLoadSpace()'},
+    {text:'Deel een kaartenset via een publieke link. Zet hem op "Openbaar" via de instellingen.',btn:null,action:null},
+    {text:'Gebruik thema\'s om vragen per onderwerp te groeperen binnen één set.',btn:null,action:null},
+    {text:'Nodig medewerkers uit om samen aan een set te werken via Instellingen → Samenwerking.',btn:null,action:null}
+  ],
+  mysets:[
+    {text:'Gebruik kaartensets om vragen en thema\'s te organiseren per onderwerp.',btn:null,action:null},
+    {text:'Deel een set via een publieke link — zet hem op "Openbaar" via de set-instellingen.',btn:null,action:null},
+    {text:'Dupliceer een bestaande set als startpunt voor een nieuwe.',btn:null,action:null},
+    {text:'Voeg een set toe aan je Home-pagina zodat bezoekers hem direct zien.',btn:'Naar Home',action:'reqLoadSpace()'},
+    {text:'Sets in de prullenbak worden na 30 dagen automatisch verwijderd.',btn:null,action:null}
+  ]
+};
+var _dbTipIdxMap={};
+function _dbTipBarHtml(key,extraStyle){
+  var tips=_DB_TIPS[key]||[];
+  if(!tips.length)return '';
+  var idx=_dbTipIdxMap[key]||0;
+  var tip=tips[idx];
+  var total=tips.length;
+  var ico='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21h6"/><path d="M9 18h6"/><path d="M9 15c0-1-.4-1.9-1.2-2.6a6 6 0 1 1 8.4 0C15.4 13.1 15 14 15 15H9z"/></svg>';
+  var chevL='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 4L6 8l4 4"/></svg>';
+  var chevR='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 4l4 4-4 4"/></svg>';
+  var nav='<div class="dbTipNav">'+
+    '<button class="dbTipNavBtn" type="button" onclick="_dbTipNav(\''+key+'\',-1)"'+(idx===0?' disabled':'')+'>'+chevL+'</button>'+
+    '<span class="dbTipNavCount">'+(idx+1)+'/'+total+'</span>'+
+    '<button class="dbTipNavBtn" type="button" onclick="_dbTipNav(\''+key+'\',1)"'+(idx===total-1?' disabled':'')+'>'+chevR+'</button>'+
+  '</div>';
+  var btn=tip.btn?'<button class="dbTipBarBtn" onclick="'+tip.action+'">'+esc(tip.btn)+' →</button>':'';
+  return '<div class="dbTipBar" id="dbTipBar_'+key+'"'+(extraStyle?' style="'+extraStyle+'"':'')+'>'+
+    '<span class="dbTipBarIcon">'+ico+'</span>'+
+    '<span class="dbTipBarText" id="dbTipBarText_'+key+'"><strong>Tip:</strong> '+esc(tip.text)+'</span>'+
+    nav+
+    btn+
+  '</div>';
+}
+function _dbTipNav(key,dir){
+  var tips=_DB_TIPS[key]||[];
+  var idx=(_dbTipIdxMap[key]||0)+dir;
+  idx=Math.max(0,Math.min(tips.length-1,idx));
+  _dbTipIdxMap[key]=idx;
+  var el=document.getElementById('dbTipBar_'+key);
+  if(!el)return;
+  var style=el.getAttribute('style')||'';
+  el.outerHTML=_dbTipBarHtml(key,style||null);
+}
+function _dbStat(label,iconSvg,value,sub,color){
+  return '<div class="dbStatCard dbStatCard-'+color+'">'+
+    '<div class="dbStatIcon">'+iconSvg+'</div>'+
+    '<div class="dbStatBody">'+
+      '<div class="dbStatValue">'+esc(String(value))+'</div>'+
+      '<div class="dbStatLabel">'+esc(label)+'</div>'+
+      (sub?'<div class="dbStatSub">'+esc(sub)+'</div>':'')+
+    '</div>'+
+  '</div>';
+}
+function _dbActie(onclick,key,iconSvg,label,sub,disabled){
+  var cls='dbActieRow'+(disabled?' dbActieDisabled':'');
+  var attr=onclick&&!disabled?'onclick="'+onclick+'"':'';
+  return '<button class="'+cls+'" '+attr+' type="button">'+
+    '<span class="dbActieIconWrap dbActieIcon-'+key+'">'+iconSvg+'</span>'+
+    '<span class="dbActieInfo">'+
+      '<span class="dbActieLabel">'+esc(label)+'</span>'+
+      '<span class="dbActieSub">'+esc(sub)+'</span>'+
+    '</span>'+
+    (!disabled?'<svg class="dbActieArrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 4 4 4-4 4"/></svg>':'')+
+  '</button>';
+}
+var _setThumbPalettes=[
+  {bg:'#fde8d8',shape:'#f5b896'},
+  {bg:'#fef3d0',shape:'#f7d882'},
+  {bg:'#e0eef8',shape:'#9dc8e8'},
+  {bg:'#e4f0e8',shape:'#8dcba8'},
+  {bg:'#ede8f8',shape:'#b8a8e8'},
+  {bg:'#fde8ee',shape:'#f0a8bc'}
+];
+function _setThumbColors(title){
+  var h=0;for(var i=0;i<(title||'').length;i++)h=(h*31+title.charCodeAt(i))&0xffff;
+  return _setThumbPalettes[h%_setThumbPalettes.length];
+}
+function _setThumbSvg(color){
+  return '<svg viewBox="0 0 48 40" xmlns="http://www.w3.org/2000/svg">'+
+    '<ellipse cx="22" cy="22" rx="18" ry="14" fill="'+color+'" opacity=".7"/>'+
+    '<ellipse cx="32" cy="14" rx="10" ry="8" fill="'+color+'" opacity=".5"/>'+
+  '</svg>';
+}
+function _setStatusLabel(s){
+  if(!s||s.status==='draft') return 'Concept';
+  if(s.visibility==='public') return '';          // Openbaar = standaard, geen badge
+  if(s.visibility==='unlisted') return 'Verborgen link';
+  return 'Privé';
+}
+function _setStatusCls(s){
+  if(!s||s.status==='draft') return 'ssc-draft';
+  if(s.visibility==='public') return '';
+  if(s.visibility==='unlisted') return 'ssc-unlisted';
+  return 'ssc-private';
+}
+var _dotPalette=['#f0a8bc','#b8a8e8','#f7c96a','#7dd4a8','#9cc8e6','#f5a880'];
+function _setDotColor(title){
+  var h=0;for(var i=0;i<(title||'').length;i++)h=(h*31+title.charCodeAt(i))&0xffff;
+  return _dotPalette[h%_dotPalette.length];
+}
+function _setBadgeColor(title){
+  var colors=['#e8f4f8','#e8f0fb','#f0eaf8','#e8f8f0','#fdf0e8','#f8f4e8'];
+  var h=0;for(var i=0;i<(title||'').length;i++)h=(h*31+title.charCodeAt(i))&0xffff;
+  return colors[h%colors.length];
+}
+function _countCards(bundle){
+  if(!bundle||typeof bundle!=='object')return 0;
+  var questions=bundle.questions||{};
+  return Object.keys(questions).reduce(function(total,key){
+    return total+(Array.isArray(questions[key])?questions[key].length:0);
+  },0);
+}
+function _timeAgo(dateStr){
+  if(!dateStr)return '';
+  var d=new Date(dateStr);
+  if(isNaN(d.getTime()))return '';
+  var diffMs=Date.now()-d.getTime();
+  var diffMins=Math.floor(diffMs/60000);
+  if(diffMins<2)return 'zojuist';
+  if(diffMins<60)return diffMins+' min. geleden';
+  var diffHours=Math.floor(diffMins/60);
+  if(diffHours<24)return diffHours+(diffHours===1?' uur':' uur')+' geleden';
+  var diffDays=Math.floor(diffHours/24);
+  if(diffDays<7)return diffDays+(diffDays===1?' dag':' dagen')+' geleden';
+  var diffWeeks=Math.floor(diffDays/7);
+  if(diffWeeks<5)return diffWeeks+(diffWeeks===1?' week':' weken')+' geleden';
+  var diffMonths=Math.floor(diffDays/30);
+  if(diffMonths<12)return diffMonths+(diffMonths===1?' maand':' maanden')+' geleden';
+  var diffYears=Math.floor(diffDays/365);
+  return diffYears+(diffYears===1?' jaar':' jaar')+' geleden';
+}
+// ═══════════════════════════════════════════
+// MIJN KAARTENSETS PAGINA
+// ═══════════════════════════════════════════
+function renderMySets(){
+  hideFloatingTextBar(true);
+  var allSets=S.sets||[];
+  var q=(_mySetsSearch||'').trim().toLowerCase();
+  var filtered=allSets.filter(function(s){
+    if(q&&!(s.title||'').toLowerCase().includes(q))return false;
+    if(_mySetsFilter==='public') return s.status!=='draft'&&s.visibility==='public';
+    if(_mySetsFilter==='private') return s.status!=='draft'&&(s.visibility==='private'||!s.visibility);
+    if(_mySetsFilter==='draft') return !s.status||s.status==='draft';
+    if(_mySetsFilter==='unlisted') return s.status!=='draft'&&s.visibility==='unlisted';
+    return true;
+  });
+  // Filter tabs
+  var tabs=[
+    {k:'all',label:'Alle'},
+    {k:'public',label:'Openbaar'},
+    {k:'private',label:'Privé'},
+    {k:'draft',label:'Concept'},
+    {k:'unlisted',label:'Verborgen link'}
+  ];
+  var tabsHtml=tabs.map(function(t){
+    return '<button class="msTab'+(t.k===_mySetsFilter?' active':'')+'" type="button" onclick="setMySetsFilter(\''+t.k+'\')">'+t.label+'</button>';
+  }).join('');
+  // Rows
+  var eyeIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var cardIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6"/><path d="M9 13h4"/></svg>';
+  var rowsHtml=filtered.length?filtered.map(function(s){
+    var colors=_setThumbColors(s.title);
+    var cardCount=_countCards(spacePreviewSetBundle(s));
+    var timeAgo=_timeAgo(s.updatedAt);
+    var isDraft=!s.status||s.status==='draft';
+    var fullLabel=isDraft?'Concept':s.visibility==='public'?'Openbaar':s.visibility==='unlisted'?'Verborgen link':'Privé';
+    var fullCls=isDraft?'ssc-draft':s.visibility==='public'?'ssc-public':s.visibility==='unlisted'?'ssc-unlisted':'ssc-private';
+    return '<div class="msRow" data-sid="'+esc(s.id||'')+'">'+
+      '<button class="msRowMain" onclick="reqLoad(\''+esc(s.id||'')+'\')" type="button">'+
+        '<span class="msThumb" style="background:'+colors.bg+'">'+_setThumbSvg(colors.shape)+'</span>'+
+        '<span class="msInfo">'+
+          '<span class="msTitle">'+esc(s.title||'Naamloos')+
+            '<span class="dbSetStatus '+fullCls+'">'+fullLabel+'</span>'+
+          '</span>'+
+          '<span class="msMeta">'+(timeAgo?'Bijgewerkt '+esc(timeAgo):'—')+'</span>'+
+        '</span>'+
+      '</button>'+
+      '<span class="msRight">'+
+        '<span class="msCount">'+cardIco+(cardCount?cardCount+(cardCount===1?' kaart':' kaarten'):'—')+'</span>'+
+        '<button class="msEditBtn" onclick="reqLoad(\''+esc(s.id||'')+'\')" type="button">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+          'Bewerken'+
+        '</button>'+
+        '<button class="msMenuBtn" onclick="showSetContextMenu(event,\''+esc(s.id||'')+'\')" type="button" title="Meer opties">'+
+          '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg>'+
+        '</button>'+
+      '</span>'+
+    '</div>';
+  }).join(''):
+    '<div class="msEmpty">'+
+      (q||_mySetsFilter!=='all'?'Geen sets gevonden voor deze filter.':'Nog geen sets. Maak er een aan!')+
+    '</div>';
+
+  g('mc').innerHTML=
+    '<div class="msPage">'+
+      '<div class="msHeader">'+
+        '<div>'+
+          '<h1 class="dbH1">Mijn kaartensets</h1>'+
+          '<p class="dbSub">Bekijk en beheer al je kaartensets op één plek.</p>'+
+        '</div>'+
+        '<div class="msHeaderActions">'+
+          '<div class="msSearchWrap">'+
+            '<svg class="msSearchIco" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>'+
+            '<input class="msSearchInput" type="search" placeholder="Zoek kaartensets…" value="'+esc(_mySetsSearch)+'" oninput="debounceMySetsSearch(this.value)" spellcheck="false">'+
+          '</div>'+
+          '<button class="msNewBtn" onclick="openNewSetWizard()" type="button">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'+
+            'Nieuwe kaartenset'+
+          '</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="msToolbar">'+
+        '<div class="msFilterTabs">'+tabsHtml+'</div>'+
+        '<div class="msToolbarRight">'+
+          '<button class="msSortBtn" type="button">Naam <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m4 6 4 4 4-4"/></svg></button>'+
+          '<div class="msViewToggle">'+
+            '<button class="msViewBtn'+((_mySetsView==='list')?' active':'')+'" onclick="setMySetsView(\'list\')" type="button" title="Lijstweergave">'+
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>'+
+            '</button>'+
+            '<button class="msViewBtn'+((_mySetsView==='grid')?' active':'')+'" onclick="setMySetsView(\'grid\')" type="button" title="Rasterweergave">'+
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>'+
+            '</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="msList">'+rowsHtml+'</div>'+
+      _dbTipBarHtml('mysets', 'margin-top:20px')+
+    '</div>';
+}
+function setMySetsFilter(f){
+  _mySetsFilter=f;
+  renderMySets();
+}
+function setMySetsView(v){
+  _mySetsView=v;
+  renderMySets();
+}
+function debounceMySetsSearch(val){
+  _mySetsSearch=val;
+  if(_mySetsSearchTimer)clearTimeout(_mySetsSearchTimer);
+  _mySetsSearchTimer=setTimeout(function(){renderMySets();},200);
+}
+function showSetContextMenu(e,sid){
+  e.stopPropagation();
+  document.querySelectorAll('.msContextMenu').forEach(function(m){m.remove();});
+  var s=(S.sets||[]).find(function(x){return x.id===sid;});
+  if(!s)return;
+  var isDraft=!s.status||s.status==='draft';
+  var isPublic=!isDraft&&s.visibility==='public';
+  var isUnlisted=!isDraft&&s.visibility==='unlisted';
+  var isPrivate=!isDraft&&!isPublic&&!isUnlisted;
+  var menuItems='';
+  menuItems+='<button class="msCtxItem" onclick="reqLoad(\''+esc(sid)+'\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+    'Bewerken</button>';
+  menuItems+='<div class="msCtxDivider"></div>';
+  if(!isPublic)menuItems+='<button class="msCtxItem" onclick="updateSetStatus(\''+esc(sid)+'\',\'live\',\'public\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'+
+    'Openbaar maken</button>';
+  if(!isPrivate)menuItems+='<button class="msCtxItem" onclick="updateSetStatus(\''+esc(sid)+'\',\'live\',\'private\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'+
+    'Privé instellen</button>';
+  if(!isUnlisted)menuItems+='<button class="msCtxItem" onclick="updateSetStatus(\''+esc(sid)+'\',\'live\',\'unlisted\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>'+
+    'Verborgen link</button>';
+  if(!isDraft)menuItems+='<button class="msCtxItem" onclick="updateSetStatus(\''+esc(sid)+'\',\'draft\',\'private\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><circle cx="18" cy="6" r="4"/></svg>'+
+    'Terug naar concept</button>';
+  menuItems+='<div class="msCtxDivider"></div>';
+  menuItems+='<button class="msCtxItem msCtxDanger" onclick="doDeleteSet(\''+esc(sid)+'\');this.closest(\'.msContextMenu\').remove()">'+
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg>'+
+    'Verwijderen</button>';
+  var menu=document.createElement('div');
+  menu.className='msContextMenu';
+  menu.innerHTML=menuItems;
+  document.body.appendChild(menu);
+  var btn=e.currentTarget||e.target;
+  var rect=btn.getBoundingClientRect();
+  var mw=200;
+  var left=Math.min(rect.right-mw,window.innerWidth-mw-8);
+  menu.style.cssText='position:fixed;top:'+(rect.bottom+4)+'px;left:'+Math.max(8,left)+'px;z-index:9999';
+  setTimeout(function(){document.addEventListener('click',function rm(){menu.remove();document.removeEventListener('click',rm);},{once:true});},0);
+}
+async function updateSetStatus(sid,status,visibility){
+  var db=window._supa;
+  if(!db)return;
+  var r=await db.from('sets').update({status:status,visibility:visibility}).eq('id',sid);
+  if(r.error){toast('Fout: '+r.error.message,'red');return;}
+  var s=(S.sets||[]).find(function(x){return x.id===sid;});
+  if(s){s.status=status;s.visibility=visibility;}
+  renderMySets();
+  renderSidebar();
+  toast('Status bijgewerkt ✓','green');
+}
+// ── ⋮ Editor meer-menu ──────────────────────────────────────────
+function openEditorMoreMenu(btn){
+  document.querySelectorAll('.clMoreMenu').forEach(function(m){m.remove();});
+  var isSet=S.activeKind==='set';
+  var settingsIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+  var shareIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98"/></svg>';
+  var exportIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+  var items='';
+  items+=_moreMenuItem(shareIco,'Delen','openEditorShareModal()');
+  items+=_moreMenuItem(exportIco,'Exporteren','openEditorExportModal()');
+
+  var menu=document.createElement('div');
+  menu.className='clMoreMenu';
+  menu.innerHTML=items;
+  document.body.appendChild(menu);
+  var rect=btn.getBoundingClientRect();
+  menu.style.cssText='position:fixed;top:'+(rect.bottom+6)+'px;right:'+(window.innerWidth-rect.right)+'px;z-index:9999';
+  setTimeout(function(){
+    function dismiss(e){
+      if(!menu.contains(e.target)&&e.target!==btn){menu.remove();document.removeEventListener('click',dismiss);}
+    }
+    document.addEventListener('click',dismiss);
+    function onKey(e){if(e.key==='Escape'){menu.remove();document.removeEventListener('keydown',onKey);}}
+    document.addEventListener('keydown',onKey);
+  },0);
+}
+function _moreMenuItem(ico,label,onclick){
+  return '<button class="clMoreItem" type="button" onclick="'+onclick+';document.querySelectorAll(\'.clMoreMenu\').forEach(function(m){m.remove();})">'+
+    '<span class="clMoreItemIco">'+ico+'</span>'+esc(label)+
+  '</button>';
+}
+function openEditorSettingsFromMenu(){
+  if(S.opmPane==='inst'){toggleInlineSettingsPane();}
+  else{toggleInlineSettingsPane();}
+}
+function openEditorShareModal(){
+  var currentSet=(S.sets||[]).find(function(s){return s.id===S.activeId;})||{};
+  var slug=currentSet.slug||'';
+  var isPublic=currentSet.visibility==='public'&&currentSet.status!=='draft';
+  var pubUrl=(S._username&&slug)?window.location.origin+'/@'+S._username+'/'+slug:'';
+  var linkHtml=pubUrl
+    ? '<div class="clShareLinkWrap">'+
+        '<input class="clShareLinkInput" type="text" value="'+esc(pubUrl)+'" readonly onclick="this.select()">'+
+        '<button class="clShareLinkCopy" type="button" onclick="navigator.clipboard.writeText(\''+esc(pubUrl)+'\').then(function(){toast(\'Link gekopieerd ✓\',\'green\');})">Kopiëren</button>'+
+      '</div>'+
+      (!isPublic?'<p class="clShareNote">Deze set is nog niet openbaar. Zet hem op \'Openbaar\' via Mijn kaartensets om de link te activeren.</p>':'')
+    : '<p class="clShareNote">Geen publieke link beschikbaar.</p>';
+  showModal(
+    '<h3>Delen</h3>'+
+    '<p style="font-size:12.5px;color:var(--k3);margin-bottom:14px">Deel de publieke link van deze kaartenset.</p>'+
+    linkHtml+
+    '<div class="mAct"><button class="mCa" onclick="closeModal()">Sluiten</button></div>'
+  );
+}
+function openEditorExportModal(){
+  showModal(
+    '<h3>Exporteren</h3>'+
+    '<p style="font-size:12.5px;color:var(--k3);margin-bottom:6px">Exportopties zijn beschikbaar in een volgende update.</p>'+
+    '<p style="font-size:11.5px;color:var(--k3)">Gepland: PDF, CSV, en Anki-formaat.</p>'+
+    '<div class="mAct"><button class="mCa" onclick="closeModal()">Sluiten</button></div>'
+  );
+}
+function doDeleteSet(sid){
+  var s=(S.sets||[]).find(function(x){return x.id===sid;});
+  var name=(s&&s.title)||'deze set';
+  showModal('<h3>Naar prullenbak?</h3><p>Zet <strong>'+esc(name)+'</strong> in de prullenbak. Je kunt hem binnen 30 dagen herstellen.</p>'+
+    '<div class="mAct">'+
+    '<button class="mCa" onclick="closeModal()">Annuleren</button>'+
+    '<button class="mOk mOkDanger" onclick="closeModal();_confirmDeleteSet(\''+esc(sid)+'\')">Naar prullenbak</button>'+
+    '</div>');
+}
+function doDeleteWizardSet(sid){
+  var s=(S.sets||[]).find(function(x){return x.id===sid;});
+  var name=(s&&s.title)||'deze set';
+  showModal('<h3>Naar prullenbak?</h3><p>Zet <strong>'+esc(name)+'</strong> in de prullenbak. Je kunt hem binnen 30 dagen herstellen.</p>'+
+    '<div class="mAct">'+
+    '<button class="mCa" onclick="closeModal()">Annuleren</button>'+
+    '<button class="mOk mOkDanger" onclick="closeModal();_confirmDeleteSet(\''+esc(sid)+'\',\'wizard\')">Naar prullenbak</button>'+
+    '</div>');
+}
+async function _confirmDeleteSet(sid,source){
+  var db=window._supa;
+  if(!db)return;
+  var now=new Date().toISOString();
+  var r=await db.from('sets').update({deleted_at:now}).eq('id',sid);
+  if(r.error){toast('Fout: '+r.error.message,'red');return;}
+  S.sets=(S.sets||[]).filter(function(x){return x.id!==sid;});
+  if(source==='wizard'){
+    if(S.activeId===sid)S.activeId=null;
+    renderSidebar();
+    location.href=dashboardBaseUrl();
+    return;
+  }
+  renderMySets();
+  renderSidebar();
+  toast('Naar prullenbak verplaatst','green');
+}
+function renderSharedWithMe(){
+  hideFloatingTextBar(true);
+  g('mc').innerHTML=
+    '<div class="swmPage">'+
+      '<div class="swmHeader">'+
+        '<h1 class="dbH1">Gedeeld met mij</h1>'+
+        '<p class="dbSub">Kaartensets waar je bent uitgenodigd als medewerker.</p>'+
+      '</div>'+
+      '<div id="swmListWrap" class="swmListWrap">'+
+        '<div class="swmLoading"><span>Laden…</span></div>'+
+      '</div>'+
+    '</div>';
+  if(typeof window.loadSharedWithMe==='function'){
+    window.loadSharedWithMe().then(function(items){
+      S.sharedSets=items||[];
+      _renderSharedList();
+    }).catch(function(e){
+      var wrap=g('swmListWrap');
+      if(wrap)wrap.innerHTML='<div class="swmEmpty"><p>Laden mislukt: '+esc(e.message)+'</p></div>';
+    });
+  } else {
+    _renderSharedList();
+  }
+}
+function _renderSharedList(){
+  var wrap=g('swmListWrap');
+  if(!wrap)return;
+  var items=S.sharedSets||[];
+  if(!items.length){
+    wrap.innerHTML=
+      '<div class="swmList">'+
+        '<div class="swmEmpty">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" style="width:34px;height:34px;opacity:.25;margin-bottom:10px;display:block;margin-left:auto;margin-right:auto"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'+
+          '<p>Nog geen gedeelde sets.<br>Vraag iemand jou uit te nodigen als medewerker.</p>'+
+        '</div>'+
+      '</div>';
+    return;
+  }
+  var cardIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6"/><path d="M9 13h4"/></svg>';
+  var rowsHtml=items.map(function(item){
+    var s=item.set||{};
+    var colors=_setThumbColors(s.title||'');
+    var cardCount=_countCards(s.bundle||{});
+    var ownerLabel=item.ownerUsername?'@'+item.ownerUsername:(item.spaceName||'Onbekend');
+    var ownerInitial=(item.ownerUsername||item.spaceName||'?').charAt(0).toUpperCase();
+    var isDraft=!s.status||s.status==='draft';
+    var fullLabel=isDraft?'Concept':s.visibility==='public'?'Openbaar':s.visibility==='unlisted'?'Verborgen link':'Privé';
+    var fullCls=isDraft?'ssc-draft':s.visibility==='public'?'ssc-public':s.visibility==='unlisted'?'ssc-unlisted':'ssc-private';
+    return '<div class="swmRow">'+
+      '<button class="swmRowMain" onclick="openSharedSet(\''+esc(s.id||'')+'\')" type="button">'+
+        '<span class="swmThumb" style="background:'+colors.bg+'">'+_setThumbSvg(colors.shape)+'</span>'+
+        '<span class="swmInfo">'+
+          '<span class="swmTitle">'+esc(s.title||'Naamloos')+
+            (fullCls?'<span class="dbSetStatus '+fullCls+'">'+fullLabel+'</span>':'')+
+          '</span>'+
+          '<span class="swmMeta">'+
+            '<span class="swmOwnerChip">'+
+              '<span class="swmOwnerAv" style="background:'+colors.bg+';color:'+colors.fg+'">'+esc(ownerInitial)+'</span>'+
+              esc(ownerLabel)+
+            '</span>'+
+          '</span>'+
+        '</span>'+
+      '</button>'+
+      '<span class="swmRight">'+
+        '<span class="swmCount">'+cardIco+(cardCount?cardCount+(cardCount===1?' kaart':' kaarten'):'—')+'</span>'+
+        '<button class="swmEditBtn" onclick="openSharedSet(\''+esc(s.id||'')+'\')" type="button">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+          'Bewerken'+
+        '</button>'+
+      '</span>'+
+    '</div>';
+  }).join('');
+  wrap.innerHTML='<div class="swmList">'+rowsHtml+'</div>';
+}
+function renderTrash(){
+  hideFloatingTextBar(true);
+  g('mc').innerHTML=
+    '<div class="msPage">'+
+      '<div class="msHeader">'+
+        '<div>'+
+          '<h1 class="dbH1">Prullenbak</h1>'+
+          '<p class="dbSub">Sets worden na 30 dagen automatisch verwijderd.</p>'+
+        '</div>'+
+        '<div class="msHeaderActions" id="trashHeaderActions"></div>'+
+      '</div>'+
+      '<div class="msList" id="trashList">'+
+        '<div class="msEmpty" style="opacity:.5">Laden…</div>'+
+      '</div>'+
+    '</div>';
+  if(typeof window.loadTrashedSets==='function'){
+    window.loadTrashedSets().then(function(sets){
+      _renderTrashList(sets);
+    });
+  }
+}
+function _renderTrashList(sets){
+  var listEl=g('trashList');
+  var actEl=g('trashHeaderActions');
+  if(!listEl)return;
+  if(!sets||!sets.length){
+    listEl.innerHTML='<div class="msEmpty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" style="width:32px;height:32px;opacity:.25;display:block;margin:0 auto 10px"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg>De prullenbak is leeg.</div>';
+    if(actEl) actEl.innerHTML='';
+    return;
+  }
+  if(actEl) actEl.innerHTML='<button class="msEmptyTrashBtn" type="button" onclick="_confirmEmptyTrash()">Prullenbak leegmaken</button>';
+  var now=Date.now();
+  var html=sets.map(function(s){
+    var deletedMs=new Date(s.deleted_at).getTime();
+    var daysLeft=Math.ceil((30*24*60*60*1000-(now-deletedMs))/(24*60*60*1000));
+    daysLeft=Math.max(1,daysLeft);
+    var title=esc((s.bundle&&s.bundle.meta&&s.bundle.meta.title)||s.title||s.id);
+    return '<div class="trashItem" data-id="'+esc(s.id)+'">'+
+      '<div class="trashItemInfo">'+
+        '<div class="trashItemTitle">'+title+'</div>'+
+        '<div class="trashItemMeta">Nog '+daysLeft+' dag'+(daysLeft===1?'':'en')+'</div>'+
+      '</div>'+
+      '<div class="trashItemActions">'+
+        '<button class="trashRestoreBtn" type="button" onclick="restoreSet(\''+esc(s.id)+'\')">Herstellen</button>'+
+        '<button class="trashDeleteBtn" type="button" onclick="_confirmPurgeSet(\''+esc(s.id)+'\',\''+title+'\')">Permanent verwijderen</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+  listEl.innerHTML=html;
+}
+function _confirmEmptyTrash(){
+  showModal('<h3>Prullenbak leegmaken?</h3><p>Alle sets in de prullenbak worden permanent verwijderd. Dit kan niet ongedaan worden gemaakt.</p>'+
+    '<div class="mAct"><button class="mCa" onclick="closeModal()">Annuleren</button><button class="mDng" onclick="closeModal();emptyTrash()">Leegmaken</button></div>');
+}
+function _confirmPurgeSet(id,name){
+  showModal('<h3>Permanent verwijderen?</h3><p><strong>'+name+'</strong> wordt definitief verwijderd. Dit kan niet ongedaan worden gemaakt.</p>'+
+    '<div class="mAct"><button class="mCa" onclick="closeModal()">Annuleren</button><button class="mDng" onclick="closeModal();purgeSet(\''+id+'\',function(){goView(\'trash\');})">Verwijderen</button></div>');
+}
 
 // ═══════════════════════════════════════════
 // RENDER EDITOR
 // ═══════════════════════════════════════════
 function renderEditor(){
+  var mcRoot=g('mc');
+  if(mcRoot)mcRoot.classList.remove('view-mode-mc','view-focus-mode');
+  var appRoot=g('app');
+  if(appRoot)appRoot.classList.remove('focus-presentation-active');
+  if(!isViewCardsFocusModeActive())exitFocusPresentationFullscreen();
+  if(S.activeKind==='space'){
+    if(S._view==='dashboard'){ renderDashboard(); return; }
+    if(S._view==='my-sets'){ renderMySets(); return; }
+    if(S._view==='shared'){ renderSharedWithMe(); return; }
+    if(S._view==='trash'){ renderTrash(); return; }
+    if(S._view==='wizard'){ renderDashboardWizardPage(); return; }
+    renderSpaceEditor(); return;
+  }
   hideFloatingTextBar(true);
-  var adminNight=adminNightMode();
-  var adminNightIcon=adminNight
-    ? '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.9 1.8a5.8 5.8 0 1 0 3.3 10.7 6.2 6.2 0 1 1-3.3-10.7Z"></path></svg>'
-    : '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.4"></circle><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"></path></svg>';
-  var settingsBtn='<button class="btnIcon'+(S.clTab==='inst'?' is-active':'')+'" type="button" title="Instellingen" aria-label="Instellingen" onclick="switchTab(\'inst\')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>';
-  var backToStyleBtn=S.clTab==='inst'
-    ? '<button class="btnS clBackBtn" type="button" onclick="closeInstPage()" title="Terug naar Opmaak">← Opmaak</button>'
-    : '';
+  var saveStatus=buildTopSaveStatusHtml();
+  var currentSet=(S.sets||[]).find(function(s){return s.id===S.activeId;})||{};
+  cleanVisibleDashboardEditorUrl();
   var setTitle=esc((S.d&&S.d.meta&&S.d.meta.title)||S.activeId||'');
-  var headTitle='<div class="clHeadTitle">'+
-    '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="'+setTitle+'" placeholder="Setnaam" oninput="updateStyleSetName(this.value)">'+
-    '<span class="clHeadThemeSep" id="editorThemeSep" style="display:none"></span>'+
-    '<input id="editorThemeTitle" class="clHeadThemeInput" type="text" value="" placeholder="Thema" style="display:none" oninput="updateActiveHeaderThemeName(this.value)">'+
+  var statusCls=_setStatusCls(currentSet);
+  var statusLabel=_setStatusLabel(currentSet);
+  // "Openbaar" heeft geen badge → toon altijd badge voor duidelijkheid in editor
+  var editorBadgeLabel=(!currentSet.status||currentSet.status==='draft')?'Concept':(currentSet.visibility==='public'?'Openbaar':(currentSet.visibility==='unlisted'?'Verborgen link':'Privé'));
+  var editorBadgeCls=(!currentSet.status||currentSet.status==='draft')?'ssc-draft':(currentSet.visibility==='public'?'ssc-public':(currentSet.visibility==='unlisted'?'ssc-unlisted':'ssc-private'));
+  var updatedAt=(S.d&&S.d.meta&&S.d.meta.updatedAt)||currentSet.updatedAt||null;
+  // Ondertitel alleen tonen als de set medewerkers heeft — voor een solo set voegt dit niets toe
+  var hasCollaborators=(currentSet._memberCount||0)>0;
+  var lastEditedBy=(S.d&&S.d.meta&&S.d.meta.lastEditedBy)||currentSet.lastEditedBy||null;
+  var lastEdited='';
+  if(updatedAt&&hasCollaborators){
+    var lastEditedByStr=lastEditedBy?'door @'+esc(lastEditedBy)+' · ':'';
+    lastEdited='<div class="clHeadSub">Laatste bewerkt '+lastEditedByStr+esc(_timeAgo(updatedAt))+'</div>';
+  }
+  var headTitle='<div class="clHeadMeta">'+
+    '<div class="clHeadTitle">'+
+      '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="'+setTitle+'" placeholder="Setnaam" readonly title="Dubbelklik om naam te wijzigen" ondblclick="startEditorSetTitleEdit(this)" onblur="finishEditorSetTitleEdit(this)" onkeydown="handleEditorSetTitleKey(event,this)" oninput="updateStyleSetName(this.value)">'+
+      '<span class="clHeadThemeSep" id="editorThemeSep" style="display:none"></span>'+
+      '<input id="editorThemeTitle" class="clHeadThemeInput" type="text" value="" placeholder="Thema" style="display:none" oninput="updateActiveHeaderThemeName(this.value)">'+
+    '</div>'+
+    lastEdited+
   '</div>';
-  var headActions='<div class="tbR">'+
-    '<button class="btnS" type="button" onclick="showLivePreview()" style="font-size:11.5px" title="Bekijk set in telefoonweergave">↗ Live</button>'+
-    '<button class="btnIcon" id="undoBtn" type="button" onclick="undoSetChanges()"'+(canUndo()?'':' disabled')+' title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
-    '<button class="btnIcon" id="redoBtn" type="button" onclick="redoSetChanges()"'+(canRedo()?'':' disabled')+' title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
-    '<button class="btnIcon'+(adminNight?' is-active':'')+'" type="button" onclick="toggleAdminNight()" title="'+(adminNight?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" aria-label="'+(adminNight?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'">'+adminNightIcon+'</button>'+
-    backToStyleBtn+
-    settingsBtn+
-    '<button class="btnIconDanger" type="button" onclick="doDelete()" title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
-    '<button class="btn" id="saveBtn" onclick="saveSet()">Opslaan</button>'+
+  var slug=(currentSet.slug||'');
+  var previewUrl=(S._username&&slug)?'/@'+S._username+'/'+slug:'';
+  var em=S.editorMode||'edit';
+  var isViewFocusMode=em==='view'&&getViewCardsBrowserMode()==='focus';
+  if(isViewFocusMode)lastEdited='';
+  var modeBtns=
+    '<div class="edModeSwitcher">'+
+      '<button class="edModeBtn'+(em==='edit'?' active':'')+'" type="button" onclick="setEditorMode(\'edit\')" title="Bewerken" aria-label="Bewerken">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+      '</button>'+
+      '<button class="edModeBtn'+(em==='view'?' active':'')+'" type="button" onclick="setEditorMode(\'view\')" title="Bekijken" aria-label="Bekijken">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'+
+      '</button>'+
+      '<button class="edModeBtn" type="button" onclick="setEditorMode(\'wizard\')" title="Wizard" aria-label="Wizard">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"/></svg>'+
+      '</button>'+
+    '</div>';
+  var headActions;
+  if(isViewFocusMode){
+    var focusNightOn=previewNightMode()||adminNightMode();
+    var focusNightLabel=focusNightOn?'Dagmodus tonen':'Nachtmodus tonen';
+    var focusNightIcon=focusNightPresentationIconHtml(focusNightOn);
+    var focusBackMode=((S.d&&S.d.meta&&S.d.meta.backMode)||'mirror');
+    var focusCanFlip=focusBackMode!=='blank';
+    var focusFlipIcon='<span class="flipGlyph" aria-hidden="true">↻</span>';
+    var focusCloseIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+    headActions=
+      '<div class="tbRWrap tbRWrap-editor tbRWrap-focus">'+
+        '<div class="focusHeadHotspot" aria-hidden="true"></div>'+
+        '<div class="focusHeadPanel"><div class="tbR tbR-focus">'+
+          '<div class="focusHeadBar">'+
+            '<div class="focusHeadBarSide focusHeadBarSide-left">'+buildCanvasZoomControlHtml('focusHeadZoom')+'</div>'+
+            '<div class="focusHeadBarSide focusHeadBarSide-right"><div class="focusHeadActions">'+
+              (focusCanFlip?('<button class="btnIcon focusHeadBtn stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" data-focus-flip-toggle="1" type="button" onclick="toggleCanvasFlip()" title="Kaart omdraaien" aria-label="Kaart omdraaien">'+focusFlipIcon+'</button>'):'')+
+              '<button class="btnIcon focusHeadBtn'+(focusNightOn?' is-active':'')+'" data-focus-night-toggle="1" type="button" onclick="togglePreviewNight()" title="'+focusNightLabel+'" aria-label="'+focusNightLabel+'">'+focusNightIcon+'</button>'+
+              '<button class="btnIcon focusHeadBtn" type="button" onclick="exitViewCardsFocusMode()" title="Focusmodus sluiten" aria-label="Focusmodus sluiten">'+focusCloseIcon+'</button>'+
+            '</div></div>'+
+          '</div>'+
+        '</div></div>'+
+      '</div>';
+  }else{
+    headActions=
+      '<div class="tbRWrap tbRWrap-editor"><div class="tbR">'+
+        modeBtns+
+        '<div class="tbRActions">'+
+          '<button class="btnIcon" id="undoBtn" type="button" onclick="undoSetChanges()"'+(canUndo()?'':' disabled')+' title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
+          '<button class="btnIcon" id="redoBtn" type="button" onclick="redoSetChanges()"'+(canRedo()?'':' disabled')+' title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
+          '<button class="btnIconDanger" type="button" onclick="doDelete()" title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
+        '</div>'+
+        saveStatus+
+        '<button class="btn tbRSaveBtn" id="saveBtn" onclick="saveSet()">'+buildTopSaveBtnInnerHtml('Opslaan')+'</button>'+
+        '<button class="btnIcon clMoreBtn" id="clMoreBtn" type="button" title="Meer opties" aria-label="Meer opties" onclick="openEditorMoreMenu(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg></button>'+
+      '</div></div>';
+  }
+  if(em==='view'){ renderEditorViewMode(headTitle,headActions); return; }
+  if(em==='wizard'){ openCurrentSetWizard(); return; }
+  renderEditorShell(headTitle,headActions);
+}
+function setEditorMode(mode){
+  var mc=g('mc');
+  if(mc)mc.classList.remove('view-mode-mc');
+  if(mode==='wizard'){
+    openCurrentSetWizard();
+    return;
+  }
+  S.editorMode=mode;
+  renderEditor();
+}
+function renderEditorViewMode(headTitle,headActions){
+  renderEditorShell(headTitle,headActions);
+  var pw=g('pw');
+  if(pw){
+    pw.classList.add('view-mode');
+    pw.classList.remove('is-preparing');
+  }
+  var mc=g('mc');
+  var focusMode=isViewCardsFocusModeActive();
+  var app=g('app');
+  if(app)app.classList.toggle('focus-presentation-active',focusMode);
+  if(mc){
+    mc.classList.add('view-mode-mc');
+    mc.classList.toggle('view-focus-mode',focusMode);
+    var head=mc.querySelector('.clHead');
+    if(head)head.classList.toggle('is-focus-presentation',focusMode);
+  }
+}
+function setViewPreviewQuestion(key,qi){
+  QUESTION_SELECTION[key]=Math.max(0,parseInt(qi,10)||0);
+  setStylePreviewKey(key);
+}
+function normalizeViewCardsBrowserMode(mode){
+  mode=String(mode||'grid').toLowerCase();
+  if(mode==='list')return 'list';
+  if(mode==='focus')return 'focus';
+  return 'grid';
+}
+function getViewCardsOverviewMode(){
+  var mode=normalizeViewCardsBrowserMode(S.viewCardsBrowserBaseMode||'grid');
+  return mode==='focus'?'grid':mode;
+}
+function getViewCardsBrowserMode(){
+  var mode=S.viewCardsBrowserMode;
+  if(!mode)mode='grid';
+  S.viewCardsBrowserMode=normalizeViewCardsBrowserMode(mode);
+  if(!S.viewCardsBrowserBaseMode)S.viewCardsBrowserBaseMode='grid';
+  return S.viewCardsBrowserMode;
+}
+function isViewCardsFocusModeActive(){
+  return S.editorMode==='view'&&getViewCardsBrowserMode()==='focus';
+}
+function focusPresentationRootEl(){
+  return g('app')||document.documentElement||document.body;
+}
+function focusPresentationFullscreenElement(){
+  return document.fullscreenElement||document.webkitFullscreenElement||document.msFullscreenElement||document.mozFullScreenElement||null;
+}
+function isFocusPresentationFullscreenActive(){
+  var root=focusPresentationRootEl();
+  var active=focusPresentationFullscreenElement();
+  if(!active)return false;
+  return active===root||active===document.documentElement||(!!root&&typeof root.contains==='function'&&root.contains(active));
+}
+function enterFocusPresentationFullscreen(){
+  var root=focusPresentationRootEl();
+  if(!root||isFocusPresentationFullscreenActive())return;
+  var req=root.requestFullscreen||root.webkitRequestFullscreen||root.msRequestFullscreen||root.mozRequestFullScreen;
+  if(typeof req!=='function')return;
+  try{
+    var res=req.call(root);
+    if(res&&typeof res.catch==='function')res.catch(function(){});
+  }catch(_e){}
+}
+function exitFocusPresentationFullscreen(){
+  var active=focusPresentationFullscreenElement();
+  if(!active)return;
+  var exit=document.exitFullscreen||document.webkitExitFullscreen||document.msExitFullscreen||document.mozCancelFullScreen;
+  if(typeof exit!=='function')return;
+  try{
+    var res=exit.call(document);
+    if(res&&typeof res.catch==='function')res.catch(function(){});
+  }catch(_e){}
+}
+function setViewCardsBrowserMode(mode){
+  mode=normalizeViewCardsBrowserMode(mode);
+  var current=getViewCardsBrowserMode();
+  if(mode==='focus'){
+    if(current!=='focus')S.viewCardsBrowserBaseMode=current;
+    var currentPreviewWrap=document.querySelector('#pw.view-mode .stijlCanvasWindow.viewer-only-preview #bgWrap, #pw .stijlCanvasWindow:not(.site-preview-window) #bgWrap');
+    if(currentPreviewWrap){
+      capturePreviewBackgroundReferenceMetrics(currentPreviewWrap);
+      capturePreviewBackgroundSnapshot(currentPreviewWrap);
+    }
+  }else{
+    S.viewCardsBrowserBaseMode=mode;
+  }
+  S.viewCardsBrowserMode=mode;
+  if(S.editorMode==='view'&&(current==='focus'||mode==='focus')){
+    renderEditor();
+    if(mode==='focus')enterFocusPresentationFullscreen();
+    else exitFocusPresentationFullscreen();
+    return;
+  }
+  if(S.editorMode==='view'){
+    refreshViewCardsBrowserSidebar();
+    return;
+  }
+  buildStijlPreserveBg(g('pw'));
+}
+function exitViewCardsFocusMode(){
+  setViewCardsBrowserMode(getViewCardsOverviewMode());
+}
+function normalizeThemeLabelForCompare(value){
+  return String(value||'')
+    .toLowerCase()
+    .replace(/\btheme\b/g,'thema')
+    .replace(/[^a-z0-9]+/g,'');
+}
+function buildViewThemeDisplayLabel(index,rawLabel,joiner,baseLabel){
+  var base=(baseLabel||'Thema')+' '+index;
+  var clean=String(rawLabel||'').trim();
+  if(!clean)return base;
+  var normBase=normalizeThemeLabelForCompare(base);
+  var normOrdinal=normalizeThemeLabelForCompare(themeOrdinalLabel(index));
+  var normClean=normalizeThemeLabelForCompare(clean);
+  if(!normClean)return base;
+  if(normClean===normBase||normClean===normOrdinal)return base;
+  var parts=clean.split(/\s+[·•|\/–—-]\s+/).map(function(part){
+    return normalizeThemeLabelForCompare(part);
+  }).filter(Boolean);
+  if(parts.length&&parts.every(function(part){return part===parts[0];})&&(parts[0]===normBase||parts[0]===normOrdinal))return base;
+  return base+(joiner||' · ')+clean;
+}
+function buildCanvasZoomControlHtml(extraClass){
+  return '<div class="cvZoomControl'+(extraClass?' '+extraClass:'')+'">'+
+    '<button class="cvZoomBtn" type="button" onclick="stepCanvasZoom(-25)" title="Uitzoomen">−</button>'+
+    '<button class="cvZoomPct" type="button" onclick="resetCanvasZoom()" title="Telefoon-formaat (100%)">'+CANVAS_ZOOM_PCT+'%</button>'+
+    '<button class="cvZoomBtn" type="button" onclick="stepCanvasZoom(25)" title="Inzoomen">+</button>'+
   '</div>';
-  g('mc').innerHTML='<div class="clHead">'+headTitle+headActions+'</div><div class="clBody" id="pw"></div>';
+}
+function focusNightPresentationIconHtml(isNight){
+  return isNight
+    ?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 12.5A5.5 5.5 0 1 1 11.5 7 4.5 4.5 0 0 0 17 12.5Z"/></svg>'
+    :'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.4"/><path d="M12 2.5v2.2M12 19.3v2.2M21.5 12h-2.2M4.7 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></svg>';
+}
+function refreshFocusPresentationHeadActions(){
+  var btn=document.querySelector('.focusHeadBtn[data-focus-night-toggle="1"]');
+  if(!btn)return;
+  var isNight=previewNightMode()||adminNightMode();
+  var label=isNight?'Dagmodus tonen':'Nachtmodus tonen';
+  btn.classList.toggle('is-active',isNight);
+  btn.setAttribute('title',label);
+  btn.setAttribute('aria-label',label);
+  btn.innerHTML=focusNightPresentationIconHtml(isNight);
+}
+function viewCardSequence(){
+  var previewState=stylePreviewState((S.d&&S.d.meta)||{});
+  var items=[];
+  var coverOpt=previewState.options.find(function(opt){return opt.key==='cover';});
+  var themeOpts=previewState.options.filter(function(opt){return opt.key!=='cover';});
+  if(coverOpt)items.push({kind:'cover',key:'cover',qi:-1});
+  themeOpts.forEach(function(opt){
+    var qs=(S.d&&S.d.questions&&S.d.questions[opt.key])||[];
+    qs.forEach(function(_q,qi){
+      items.push({kind:'question',key:opt.key,qi:qi});
+    });
+  });
+  return items;
+}
+function currentViewCardSequenceIndex(){
+  var selectedKey=STYLE_PREVIEW_KEY||'cover';
+  var selectedQi=selectedKey==='cover'?-1:selectedQuestionIndex(selectedKey);
+  var items=viewCardSequence();
+  if(!items.length)return -1;
+  for(var i=0;i<items.length;i++){
+    if(items[i].key===selectedKey&&items[i].qi===selectedQi)return i;
+  }
+  for(var j=0;j<items.length;j++){
+    if(items[j].key===selectedKey)return j;
+  }
+  return 0;
+}
+function applyViewCardSequenceItem(item){
+  if(!item)return;
+  if(item.kind==='cover'||item.key==='cover'){setStylePreviewKey('cover');return;}
+  setViewPreviewQuestion(item.key,item.qi);
+}
+function viewPreviewNavBack(){
+  var items=viewCardSequence();
+  if(!items.length)return;
+  var idx=currentViewCardSequenceIndex();
+  if(idx<0)idx=0;
+  applyViewCardSequenceItem(items[Math.max(0,idx-1)]);
+}
+function viewPreviewNavForward(){
+  var items=viewCardSequence();
+  if(!items.length)return;
+  var idx=currentViewCardSequenceIndex();
+  if(idx<0)idx=0;
+  applyViewCardSequenceItem(items[Math.min(items.length-1,idx+1)]);
+}
+function viewCardListText(raw,fallback){
+  var txt=String(raw||'').replace(/\s+/g,' ').trim();
+  return txt||fallback||'Kaart';
+}
+function buildViewCardsModeBarHtml(activeMode){
+  activeMode=normalizeViewCardsBrowserMode(activeMode||'grid');
+  var buttons=[
+    {
+      id:'grid',
+      label:'Grid',
+      icon:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="4.2" height="4.2" rx="1.1"></rect><rect x="9.8" y="2" width="4.2" height="4.2" rx="1.1"></rect><rect x="2" y="9.8" width="4.2" height="4.2" rx="1.1"></rect><rect x="9.8" y="9.8" width="4.2" height="4.2" rx="1.1"></rect></svg>'
+    },
+    {
+      id:'list',
+      label:'Lijst',
+      icon:'<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="3.3" r="1"></circle><circle cx="3" cy="8" r="1"></circle><circle cx="3" cy="12.7" r="1"></circle><line x1="6" y1="3.3" x2="13.5" y2="3.3"></line><line x1="6" y1="8" x2="13.5" y2="8"></line><line x1="6" y1="12.7" x2="13.5" y2="12.7"></line></svg>'
+    },
+    {
+      id:'focus',
+      label:'Focus',
+      icon:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5H2.5V5"></path><path d="M11 2.5h2.5V5"></path><path d="M5 13.5H2.5V11"></path><path d="M11 13.5h2.5V11"></path><rect x="5.2" y="5.2" width="5.6" height="5.6" rx="1.2"></rect></svg>'
+    }
+  ];
+  return '<div class="evpModeBar" role="tablist" aria-label="Kaartviewer weergave">'+
+    buttons.map(function(btn){
+      return '<button class="evpModeBtn'+(activeMode===btn.id?' sel':'')+'" type="button" role="tab" aria-selected="'+(activeMode===btn.id?'true':'false')+'" title="'+esc(btn.label)+'" aria-label="'+esc(btn.label)+'" onclick="setViewCardsBrowserMode(\''+btn.id+'\')">'+btn.icon+'</button>';
+    }).join('')+
+  '</div>';
+}
+function buildViewListRowHtml(opts){
+  opts=opts||{};
+  return '<button class="evpListRow'+(opts.active?' sel':'')+'" type="button" onclick="'+(opts.onclick||'')+'" title="'+esc(opts.title||opts.label||'Kaart')+'">'+
+    '<span class="evpListThumbWrap">'+
+      (opts.thumb?'<img class="evpListThumb" src="'+opts.thumb+'" alt="'+esc(opts.alt||opts.label||'Kaart')+'" aria-hidden="true">':'<span class="evpListThumbPlaceholder"></span>')+
+    '</span>'+
+    '<span class="evpListBody">'+
+      '<span class="evpListTitle">'+esc(opts.label||'Kaart')+'</span>'+
+      (opts.meta?'<span class="evpListMeta">'+esc(opts.meta)+'</span>':'')+
+    '</span>'+
+  '</button>';
+}
+function buildSetThemeQuestionCards(themeKey,selectedKey,largeMode){
+  var qs=(S.d&&S.d.questions&&S.d.questions[themeKey])||[];
+  if(!qs.length){
+    return '<div class="setThemeQEmpty'+(largeMode?' is-large':'')+'">Nog geen vraagkaarten</div>';
+  }
+  var selectedIdx=(selectedKey===themeKey)?selectedQuestionIndex(themeKey):0;
+  return qs.map(function(q,qi){
+    var front=q.voorkant||q.q||'';
+    var back=q.achterkant||q.back||'';
+    return '<button class="stijlSlideCard setThemeQCard'+(largeMode?' is-large':'')+((selectedKey===themeKey&&selectedIdx===qi)?' sel':'')+'" type="button" onclick="setViewPreviewQuestion(\''+esc(themeKey)+'\','+qi+')">'+
+      '<div class="stijlSlideThumb setThemeQThumb">'+
+        '<div class="setThemeQFront">'+esc(front||'—')+'</div>'+
+        (back?'<div class="setThemeQBack">'+esc(back)+'</div>':'')+
+      '</div>'+
+    '</button>';
+  }).join('');
+}
+function buildSetThemePickerSections(selectedKey,opts){
+  opts=opts||{};
+  var largeMode=!!opts.largeMode;
+  var previewState=stylePreviewState((S.d&&S.d.meta)||{});
+  var themeOpts=previewState.options.filter(function(o){return o.key!=='cover';});
+  var coverOpt=previewState.options.find(function(o){return o.key==='cover';});
+  var sectionCls=largeMode?' evpThemeSection':' setThemeSection';
+  var railCls=largeMode?' homeHeroPickerRail setThemePickerRail evpThemeRail':'homeHeroPickerRail setThemePickerRail';
+  var coverSection=coverOpt
+    ? '<div class="homeHeroPickerSection'+(largeMode?' evpCoverSection':'')+'">'+
+        '<div class="homeHeroPickerLabel">Cover</div>'+
+        '<div class="'+railCls+'">'+styleSlideCardHtml(coverOpt,selectedKey)+'</div>'+
+      '</div>'
+    : '';
+  var themeSections=themeOpts.length
+    ? themeOpts.map(function(opt){
+        var label=opt.label||opt.key;
+        var questionCount=((S.d&&S.d.questions&&S.d.questions[opt.key])||[]).length;
+        var cardCount=questionCount+1;
+        return '<div class="homeHeroPickerSection'+sectionCls+'">'+
+          '<div class="homeHeroPickerLabel setThemeSectionLabel"><span>'+esc(label)+'</span><span class="evpThemeCount">'+cardCount+' kaart'+(cardCount===1?'':'en')+'</span></div>'+
+          '<div class="'+railCls+'">'+
+            styleSlideCardHtml(opt,selectedKey)+
+            buildSetThemeQuestionCards(opt.key,selectedKey,largeMode)+
+          '</div>'+
+        '</div>';
+      }).join('')
+    : '<div class="homeSetSliderEmpty">Nog geen thema\'s.</div>';
+  return coverSection+themeSections;
+}
+function buildViewCardsBrowserHtml(){
+  var selectedKey=STYLE_PREVIEW_KEY||'cover';
+  var mode=getViewCardsBrowserMode();
+  var bodyMode=(mode==='focus'?getViewCardsOverviewMode():mode);
+  var previewState=stylePreviewState((S.d&&S.d.meta)||{});
+  var coverOpt=previewState.options.find(function(o){return o.key==='cover';});
+  var themeOpts=previewState.options.filter(function(o){return o.key!=='cover';});
+  var totalThemes=themeOpts.length;
+  var totalCards=themeOpts.reduce(function(sum,opt){
+    return sum+(((S.d&&S.d.questions&&S.d.questions[opt.key])||[]).length);
+  },0);
+  var metaStr=totalThemes+' thema'+(totalThemes===1?'':'\'s')+' / '+totalCards+' kaart'+(totalCards===1?'':'en');
+  var html='<div class="evpBrowser evpBrowser--'+bodyMode+'">'+
+    '<div class="evpBrowserHead">'+
+      '<div class="evpBrowserHeadLeft">'+
+        '<span class="evpBrowserTitle">Kaartviewer</span>'+
+        '<span class="evpBrowserMeta">'+esc(metaStr)+'</span>'+
+      '</div>'+buildViewCardsModeBarHtml(mode)+
+    '</div>'+
+    '<div class="evpBrowserBody">';
+  if(coverOpt){
+    var coverCached=((cachedCardAssetForFile(S.activeId,coverOpt.file)||{}).asset)||null;
+    var coverThumb=(coverCached&&coverCached.dataUrl)||styleSlideThumbDataUrl(coverOpt);
+    html+='<div class="evpSection">'+
+      '<div class="evpSectionHead">'+
+        '<span class="evpSectionTitle evpSectionTitleEm">COVER</span>'+
+        '<span class="evpSectionCount">1 kaart</span>'+
+      '</div>'+(bodyMode==='list'
+        ?('<div class="evpList">'+
+            buildViewListRowHtml({
+              active:selectedKey==='cover',
+              onclick:'setStylePreviewKey(\'cover\')',
+              label:'Cover',
+              meta:'Openingskaart',
+              thumb:coverThumb,
+              alt:'Cover'
+            })+
+          '</div>')
+        :('<div class="evpGrid evpGrid--cover">'+
+            '<button class="evpTile'+(selectedKey==='cover'?' sel':'')+'" type="button" onclick="setStylePreviewKey(\'cover\')">'+
+              (coverThumb?'<img class="evpTileImg" src="'+coverThumb+'" alt="Cover">':'')+
+            '</button>'+
+          '</div>'))+
+    '</div>';
+  }
+  var _themeNumber=0;
+  themeOpts.forEach(function(opt){
+    var qs=(S.d&&S.d.questions&&S.d.questions[opt.key])||[];
+    var count=qs.length;
+    var selIdx=selectedKey===opt.key?selectedQuestionIndex(opt.key):-1;
+    _themeNumber++;
+    var rawLabel=String(opt.label||opt.key||'');
+    var displayLabel=buildViewThemeDisplayLabel(_themeNumber,rawLabel,' – ','THEMA');
+    var thCached=((cachedCardAssetForFile(S.activeId,opt.file)||{}).asset)||null;
+    var thumbDataUrl=(thCached&&thCached.dataUrl)||styleSlideThumbDataUrl(opt);
+    html+='<div class="evpSection">'+
+      '<div class="evpSectionHead">'+
+        '<span class="evpSectionTitle evpSectionTitleEm">'+esc(displayLabel)+'</span>'+
+        '<span class="evpSectionCount">'+count+' kaart'+(count===1?'':'en')+'</span>'+
+      '</div>'+(bodyMode==='list'?'<div class="evpList">':'<div class="evpGrid">');
+    if(!count){
+      html+='<div class="evpTileEmpty">Nog geen kaarten</div>';
+    }else{
+      qs.forEach(function(q,qi){
+        var isActive=selectedKey===opt.key&&selIdx===qi;
+        if(bodyMode==='list'){
+          var themeMetaLabel=buildViewThemeDisplayLabel(_themeNumber,rawLabel,'','Thema');
+          html+=buildViewListRowHtml({
+            active:isActive,
+            onclick:'setViewPreviewQuestion(\''+esc(opt.key)+'\','+qi+')',
+            label:viewCardListText(q.voorkant||q.q,'Kaart '+(qi+1)),
+            meta:themeMetaLabel,
+            thumb:thumbDataUrl,
+            alt:'Kaart '+(qi+1)
+          });
+        }else{
+          html+='<button class="evpTile'+(isActive?' sel':'')+'" type="button" onclick="setViewPreviewQuestion(\''+esc(opt.key)+'\','+qi+')">'+
+            (thumbDataUrl?'<img class="evpTileImg" src="'+thumbDataUrl+'" alt="Kaart '+(qi+1)+'" aria-hidden="true">':'')+
+          '</button>';
+        }
+      });
+    }
+    html+='</div></div>';
+  });
+  if(!coverOpt&&!themeOpts.length){
+    html+='<div class="evpTileEmpty">Nog geen kaarten.</div>';
+  }
+  html+='</div></div>';
+  return html;
+}
+function refreshViewCardsBrowserSidebar(){
+  var sidebar=document.querySelector('#pw.view-mode .evpViewerSidebar');
+  if(!sidebar){
+    buildStijlPreserveBg(g('pw'));
+    return;
+  }
+  var body=sidebar.querySelector('.evpBrowserBody');
+  var prevScrollTop=body?body.scrollTop:0;
+  sidebar.innerHTML=buildViewCardsBrowserHtml();
+  var nextBody=sidebar.querySelector('.evpBrowserBody');
+  if(nextBody)nextBody.scrollTop=prevScrollTop;
+}
+function buildViewFocusRailHtml(){
+  var selectedKey=STYLE_PREVIEW_KEY||'cover';
+  var previewState=stylePreviewState((S.d&&S.d.meta)||{});
+  var coverOpt=previewState.options.find(function(o){return o.key==='cover';});
+  var themeOpts=previewState.options.filter(function(o){return o.key!=='cover';});
+  var groups=[];
+  if(coverOpt){
+    var coverCached=((cachedCardAssetForFile(S.activeId,coverOpt.file)||{}).asset)||null;
+    var coverThumb=(coverCached&&coverCached.dataUrl)||styleSlideThumbDataUrl(coverOpt);
+    groups.push(
+      '<div class="viewFocusRailGroup">'+
+        '<div class="viewFocusRailLabel">Cover</div>'+
+        '<div class="viewFocusRailItems">'+
+          '<button class="viewFocusRailTile'+(selectedKey==='cover'?' sel':'')+'" type="button" onclick="setStylePreviewKey(\'cover\')" title="Cover">'+
+            (coverThumb?'<img class="viewFocusRailTileImg" src="'+coverThumb+'" alt="Cover" aria-hidden="true">':'<span class="viewFocusRailTilePlaceholder"></span>')+
+          '</button>'+
+        '</div>'+
+      '</div>'
+    );
+  }
+  var themeNumber=0;
+  themeOpts.forEach(function(opt){
+    var qs=(S.d&&S.d.questions&&S.d.questions[opt.key])||[];
+    if(!qs.length)return;
+    themeNumber++;
+    var rawLabel=String(opt.label||opt.key||'').trim();
+    var label=buildViewThemeDisplayLabel(themeNumber,rawLabel,' · ','Thema');
+    var thCached=((cachedCardAssetForFile(S.activeId,opt.file)||{}).asset)||null;
+    var thumbDataUrl=(thCached&&thCached.dataUrl)||styleSlideThumbDataUrl(opt);
+    var selIdx=selectedKey===opt.key?selectedQuestionIndex(opt.key):-1;
+    var items=qs.map(function(_q,qi){
+      var active=selectedKey===opt.key&&selIdx===qi;
+      return '<button class="viewFocusRailTile'+(active?' sel':'')+'" type="button" onclick="setViewPreviewQuestion(\''+esc(opt.key)+'\','+qi+')" title="'+esc(rawLabel||('Kaart '+(qi+1)))+'">'+
+        (thumbDataUrl?'<img class="viewFocusRailTileImg" src="'+thumbDataUrl+'" alt="Kaart '+(qi+1)+'" aria-hidden="true">':'<span class="viewFocusRailTilePlaceholder"></span>')+
+      '</button>';
+    }).join('');
+    groups.push(
+      '<div class="viewFocusRailGroup">'+
+        '<div class="viewFocusRailLabel">'+esc(label)+'</div>'+
+        '<div class="viewFocusRailItems">'+items+'</div>'+
+      '</div>'
+    );
+  });
+  if(!groups.length)return '';
+  return '<div class="viewFocusRailWrap" aria-label="Kaartnavigatie focusmodus">'+
+    '<div class="viewFocusRailHotspot" aria-hidden="true"></div>'+
+    '<div class="viewFocusRailPanel">'+
+      '<div class="viewFocusRailScroller">'+groups.join('')+'</div>'+
+    '</div>'+
+  '</div>';
+}
+function toggleViewNav(){
+  S._viewModeNav=!S._viewModeNav;
+  renderEditor();
+}
+function _buildViewPanelHtml(){
+  var m=S.d&&S.d.meta||{};
+  var themes=(m.themes&&m.themes.length)?m.themes:[{key:'algemeen',label:''}];
+  var html='';
+  themes.forEach(function(theme,idx){
+    var key=theme.key||'algemeen';
+    var qs=(S.d&&S.d.questions&&S.d.questions[key])||[];
+    var label=themeLabelForIndex(idx,theme.label)||('Thema '+(idx+1));
+    // Theme header
+    html+='<div class="evpTheme">'+
+      '<div class="evpThemeHead">'+
+        '<span class="evpThemeName">'+esc(label)+'</span>'+
+        '<span class="evpThemeCount">'+qs.length+(qs.length===1?' kaart':' kaarten')+'</span>'+
+      '</div>';
+    // Cover card for this theme
+    html+='<button class="evpCard evpCoverCard" type="button" onclick="previewState&&switchPreviewCard(\''+esc(key)+'\');cardPreviewNavHome()" title="Cover">'+
+      '<span class="evpCardLabel">Cover</span>'+
+    '</button>';
+    // Question cards
+    if(qs.length){
+      qs.forEach(function(q,qi){
+        var front=(q.voorkant||q.q||'').trim();
+        var back=(q.achterkant||q.back||'').trim();
+        html+='<button class="evpCard" type="button" onclick="selectQuestion(\''+esc(key)+'\','+qi+')" title="'+esc(front||'Kaart '+(qi+1))+'">'+
+          '<span class="evpCardQ">'+esc(front||'—')+'</span>'+
+          (back?'<span class="evpCardA">'+esc(back)+'</span>':'')+
+        '</button>';
+      });
+    } else {
+      html+='<div class="evpEmpty">Nog geen kaarten</div>';
+    }
+    html+='</div>';
+  });
+  return html;
+}
+function renderEditorWizardMode(){
+  openCurrentSetWizard();
+}
+function renderChromeShell(headTitle,headActions,headCenter,opts){
+  var keepPreparing=!!(opts&&opts.keepPreparing);
+  g('mc').innerHTML='<div class="clHead">'+headTitle+(headCenter?'<div class="clHeadCenter">'+headCenter+'</div>':'')+headActions+'</div><div class="clBody is-preparing" id="pw"></div>';
+  requestAnimationFrame(function(){
+    applyEditorScrollReset();
+    requestAnimationFrame(function(){
+      var pw=g('pw');
+      if(pw&&!keepPreparing)pw.classList.remove('is-preparing');
+      if(!keepPreparing)setAppPreparing(false);
+    });
+  });
+}
+function markDashboardWizardReady(){
+  if(S._wizardReadyTimer){
+    clearTimeout(S._wizardReadyTimer);
+    S._wizardReadyTimer=null;
+  }
+  var pw=g('pw');
+  var shell=g('wizardWorkspaceShell');
+  var frame=g('wizardWorkspaceFrame');
+  if(pw)pw.classList.remove('is-preparing');
+  if(shell){
+    shell.classList.remove('is-loading');
+    shell.classList.add('is-ready');
+  }
+  if(frame)frame.classList.add('is-ready');
+  setAppPreparing(false);
+}
+function dashboardWizardFrameHasRenderableContent(){
+  var frame=g('wizardWorkspaceFrame');
+  if(!frame)return false;
+  try{
+    var doc=frame.contentDocument;
+    var appRoot=doc&&doc.getElementById('wizardApp');
+    if(!appRoot)return false;
+    if(doc.querySelector('.wizardLoadingPanel,.wizardLoadingWindow,.wizardLoadingField,.wizardLoadingPreviewCard')) return false;
+    if(doc.querySelector('.appBoot.wizardBoot')) return false;
+    if(appRoot.querySelector&&appRoot.querySelector('.wizardShell,.wizardEmpty')) return true;
+    if(appRoot.children&&appRoot.children.length)return true;
+    return String(appRoot.innerHTML||'').trim().length>0;
+  }catch(_err){
+    return false;
+  }
+}
+function queueDashboardWizardReadyCheck(attempt){
+  if(S._view!=='wizard')return;
+  if(dashboardWizardFrameHasRenderableContent()){
+    markDashboardWizardReady();
+    return;
+  }
+  if((attempt||0)>=35){
+    markDashboardWizardReady();
+    return;
+  }
+  setTimeout(function(){
+    queueDashboardWizardReadyCheck((attempt||0)+1);
+  },80);
+}
+function markDashboardWizardIframeLoaded(){
+  if(S._view!=='wizard')return;
+  queueDashboardWizardReadyCheck(0);
+}
+function postWizardFrameAction(action){
+  var frame=g('wizardWorkspaceFrame');
+  if(!frame||!frame.contentWindow)return;
+  try{
+    frame.contentWindow.postMessage({uitgesproken:1,type:'wizardAction',action:String(action||'')},window.location.origin);
+  }catch(_err){}
+}
+function postWizardFramePreviewCommand(action,value){
+  var frame=g('wizardWorkspaceFrame');
+  if(!frame||!frame.contentWindow)return;
+  try{
+    frame.contentWindow.postMessage({
+      uitgesproken:1,
+      type:'wizardPreviewCommand',
+      action:String(action||''),
+      value:value
+    },window.location.origin);
+  }catch(_err){}
+}
+function dashboardWizardPreviewPayload(){
+  return S&&S._wizardPreviewPayload&&typeof S._wizardPreviewPayload==='object'?S._wizardPreviewPayload:null;
+}
+function dashboardWizardPreviewNavigate(delta){
+  postWizardFramePreviewCommand('navigate',Number(delta)||0);
+}
+function dashboardWizardPreviewNavigateHome(){
+  postWizardFramePreviewCommand('navigateHome');
+}
+function dashboardWizardPreviewToggleFlip(){
+  postWizardFramePreviewCommand('toggleFlip');
+}
+function dashboardWizardPreviewToggleGrid(){
+  postWizardFramePreviewCommand('toggleGrid');
+}
+function dashboardWizardPreviewToggleNight(){
+  postWizardFramePreviewCommand('toggleNight');
+}
+function dashboardWizardPreviewSetBackMode(mode){
+  postWizardFramePreviewCommand('setBackMode',String(mode||'mirror'));
+}
+function dashboardWizardPreviewSetBackEditSurface(surface){
+  postWizardFramePreviewCommand('setBackEditSurface',String(surface||'front'));
+}
+function dashboardWizardPreviewSetBackScope(scope){
+  postWizardFramePreviewCommand('setBackScope',String(scope||'set'));
+}
+function dashboardWizardPreviewStepZoom(delta){
+  postWizardFramePreviewCommand('zoomStep',Number(delta)||0);
+}
+function dashboardWizardPreviewResetZoom(){
+  postWizardFramePreviewCommand('zoomReset');
+}
+function withDashboardWizardPreviewState(payload,fn){
+  payload=payload&&typeof payload==='object'?payload:{};
+  var bundle=payload.bundle&&typeof payload.bundle==='object'?payload.bundle:null;
+  if(!bundle||!bundle.meta)return typeof fn==='function'?fn():null;
+  var actualBackMode=String(payload.backModeActual||payload.backMode||bundle.meta.backMode||'mirror');
+  var uiBackMode=String(payload.backMode||actualBackMode||'mirror');
+  var uiBackSurface=String(payload.backEditSurfaceUi||payload.backEditSurface||'front');
+  var prevState={
+    d:S.d,
+    activeKind:S.activeKind,
+    stylePreviewKey:STYLE_PREVIEW_KEY,
+    flipped:CANVAS_CARD_FLIPPED,
+    backSurface:STYLE_BACK_EDIT_SURFACE,
+    backModeOverride:BACK_MODE_UI_OVERRIDE,
+    backSurfaceOverride:BACK_SURFACE_UI_OVERRIDE,
+    backExtraDelayed:BACK_EXTRA_CONTROLS_DELAYED
+  };
+  var tempBundle={
+    meta:cloneJson(bundle.meta||{}),
+    questions:cloneJson(bundle.questions||{}),
+    uitleg:cloneJson(bundle.uitleg||{}),
+    intro:cloneJson(bundle.intro||{})
+  };
+  tempBundle.meta=tempBundle.meta||{};
+  tempBundle.meta.ui=tempBundle.meta.ui||{};
+  tempBundle.meta.ui.previewGrid=!!payload.gridMode;
+  tempBundle.meta.ui.previewNight=!!payload.nightMode;
+  // Render the preview content from the actual target back mode.
+  // The UI may temporarily keep the previous button selected during
+  // a transition, but the back face itself should already represent
+  // the requested mode (mirror / reflect / blank).
+  tempBundle.meta.backMode=actualBackMode;
+  try{
+    S.activeKind='set';
+    S.d=tempBundle;
+    STYLE_PREVIEW_KEY=payload.previewKey||'cover';
+    CANVAS_CARD_FLIPPED=!!payload.flipped;
+    STYLE_BACK_EDIT_SURFACE=(actualBackMode==='blank' && String(payload.backEditSurface||'back')==='back')?'back':'front';
+    BACK_MODE_UI_OVERRIDE=uiBackMode!==actualBackMode?uiBackMode:'';
+    BACK_SURFACE_UI_OVERRIDE=(uiBackSurface!==STYLE_BACK_EDIT_SURFACE)?uiBackSurface:'';
+    BACK_EXTRA_CONTROLS_DELAYED=!!payload.backExtraDelayed;
+    return typeof fn==='function'?fn(tempBundle):null;
+  }finally{
+    S.d=prevState.d;
+    S.activeKind=prevState.activeKind;
+    STYLE_PREVIEW_KEY=prevState.stylePreviewKey;
+    CANVAS_CARD_FLIPPED=prevState.flipped;
+    STYLE_BACK_EDIT_SURFACE=prevState.backSurface;
+    BACK_MODE_UI_OVERRIDE=prevState.backModeOverride;
+    BACK_SURFACE_UI_OVERRIDE=prevState.backSurfaceOverride;
+    BACK_EXTRA_CONTROLS_DELAYED=prevState.backExtraDelayed;
+  }
+}
+function rewriteDashboardWizardPreviewActions(html){
+  return String(html||'')
+    .replace(/stepCanvasZoom\(-25\)/g,'dashboardWizardPreviewStepZoom(-25)')
+    .replace(/stepCanvasZoom\(25\)/g,'dashboardWizardPreviewStepZoom(25)')
+    .replace(/resetCanvasZoom\(\)/g,'dashboardWizardPreviewResetZoom()')
+    .replace(/cardPreviewNavBack\(\)/g,'dashboardWizardPreviewNavigate(-1)')
+    .replace(/cardPreviewNavHome\(\)/g,'dashboardWizardPreviewNavigateHome()')
+    .replace(/cardPreviewNavForward\(\)/g,'dashboardWizardPreviewNavigate(1)')
+    .replace(/toggleCanvasFlip\(\)/g,'dashboardWizardPreviewToggleFlip()')
+    .replace(/togglePreviewGrid\(\)/g,'dashboardWizardPreviewToggleGrid()')
+    .replace(/togglePreviewNight\(\)/g,'dashboardWizardPreviewToggleNight()')
+    .replace(/setBackMode\('mirror'\)/g,'dashboardWizardPreviewSetBackMode(\'mirror\')')
+    .replace(/setBackMode\('reflect'\)/g,'dashboardWizardPreviewSetBackMode(\'reflect\')')
+    .replace(/setBackMode\('blank'\)/g,'dashboardWizardPreviewSetBackMode(\'blank\')')
+    .replace(/setBackEditSurface\('front'\)/g,'dashboardWizardPreviewSetBackEditSurface(\'front\')')
+    .replace(/setBackEditSurface\('back'\)/g,'dashboardWizardPreviewSetBackEditSurface(\'back\')')
+    .replace(/setBackDesignScope\('set'\)/g,'dashboardWizardPreviewSetBackScope(\'set\')')
+    .replace(/setBackDesignScope\('card'\)/g,'dashboardWizardPreviewSetBackScope(\'card\')');
+}
+function exactDashboardWizardPreviewHtml(payload){
+  return withDashboardWizardPreviewState(payload,function(){
+    var layoutHtml=buildSharedCardEditor({
+      layoutMode:'canvas',
+      hideToolbar:true,
+      hideShapeCard:true,
+      hideColorCard:true,
+      hideBgCard:true,
+      hideToolbar:true,
+      disableSticky:true,
+      previewFile:payload.previewFile||'voorkant.svg',
+      previewKey:payload.previewKey||'cover',
+      themeKey:payload.previewKey||'cover',
+      frontTxt:payload.frontTxt||'',
+      backTxt:payload.backTxt||'',
+      backDesignKey:payload.backDesignKey||'',
+      flipped:!!payload.flipped,
+      forceNoImage:true,
+      suppressEmptyFrontHint:true
+    });
+    var probe=document.createElement('div');
+    probe.innerHTML=layoutHtml;
+    var previewSide=probe.querySelector('.stijlCanvasSide.preview');
+    var previewWindow=probe.querySelector('.stijlCanvasWindow');
+    if(previewWindow)previewWindow.setAttribute('data-dashboard-wizard-preview','1');
+    if(previewSide)previewSide.classList.add('home-static-preview');
+    return rewriteDashboardWizardPreviewActions(previewSide?previewSide.outerHTML:layoutHtml);
+  })||'';
+}
+function paintDashboardWizardPreviewBackground(host,payload){
+  withDashboardWizardPreviewState(payload,function(){
+    var wrap=host&&host.querySelector?host.querySelector('#bgWrap'):null;
+    var canvas=host&&host.querySelector?host.querySelector('#bgCanvas'):null;
+    if(!wrap||!canvas)return;
+    var rect=wrap.getBoundingClientRect();
+    var W=Math.round(rect.width)||wrap.offsetWidth||300;
+    var H=Math.round(rect.height)||wrap.offsetHeight||468;
+    if(W<20||H<20)return;
+    canvas.width=W*2;
+    canvas.height=H*2;
+    canvas.style.width=W+'px';
+    canvas.style.height=H+'px';
+    var ctx=canvas.getContext('2d');
+    if(!ctx)return;
+    paintSharedPreviewBackground(ctx,W*2,H*2,{
+      isNight:!!payload.nightMode,
+      presentationMode:false,
+      baseFill:previewCardsBaseFill(!!payload.nightMode)
+    });
+  });
+}
+function dashboardWizardPreviewHtml(payload){
+  payload=payload&&typeof payload==='object'?payload:{};
+  return exactDashboardWizardPreviewHtml(payload);
+}
+function clearDashboardWizardPreviewTimers(){
+  if(S._dashboardWizardPreviewSwapTimer){
+    clearTimeout(S._dashboardWizardPreviewSwapTimer);
+    S._dashboardWizardPreviewSwapTimer=0;
+  }
+  if(S._dashboardWizardPreviewTurnTimer){
+    clearTimeout(S._dashboardWizardPreviewTurnTimer);
+    S._dashboardWizardPreviewTurnTimer=0;
+  }
+}
+function dashboardWizardPreviewWindow(host){
+  return host&&host.querySelector?host.querySelector('.stijlCanvasWindow[data-dashboard-wizard-preview="1"]'):null;
+}
+function buildDashboardWizardPreviewProbe(payload){
+  var probe=document.createElement('div');
+  probe.innerHTML=dashboardWizardPreviewHtml(payload);
+  return probe;
+}
+function replaceDashboardWizardPreviewBackFace(host,payload){
+  var currentWin=dashboardWizardPreviewWindow(host);
+  if(!currentWin)return false;
+  var probe=buildDashboardWizardPreviewProbe(payload);
+  var nextWin=dashboardWizardPreviewWindow(probe);
+  var currentBack=currentWin.querySelector('.cardFaceBack');
+  var nextBack=nextWin&&nextWin.querySelector?nextWin.querySelector('.cardFaceBack'):null;
+  if(!currentBack||!nextBack)return false;
+  currentBack.replaceWith(nextBack);
+  return true;
+}
+function replaceDashboardWizardPreviewBackbar(host,payload){
+  var currentWin=dashboardWizardPreviewWindow(host);
+  if(!currentWin)return false;
+  var probe=buildDashboardWizardPreviewProbe(payload);
+  var nextWin=dashboardWizardPreviewWindow(probe);
+  var currentBar=currentWin.querySelector('.stijlCanvasBackbar');
+  var nextBar=nextWin&&nextWin.querySelector?nextWin.querySelector('.stijlCanvasBackbar'):null;
+  if(currentBar&&nextBar){
+    currentBar.replaceWith(nextBar);
+    return true;
+  }
+  if(currentBar&&!nextBar){
+    currentBar.remove();
+    return true;
+  }
+  if(!currentBar&&nextBar){
+    var inner=currentWin.querySelector('.stijlCanvasWindowInner');
+    if(inner&&inner.parentNode){
+      inner.insertAdjacentElement('afterend',nextBar);
+      return true;
+    }
+  }
+  return false;
+}
+function applyDashboardWizardPreviewUi(host,payload,opts){
+  opts=opts||{};
+  var win=dashboardWizardPreviewWindow(host);
+  if(!win)return false;
+  var flipped=!!payload.flipped;
+  var gridMode=!!payload.gridMode;
+  var nightMode=!!payload.nightMode;
+  var zoomPct=Math.max(40,Math.min(200,Number(payload.zoomPct)||100));
+  var backMode=String(payload.backMode||payload.backModeActual||'mirror');
+  var backEditSurface=(String(payload.backEditSurfaceUi||payload.backEditSurface||'back')==='front')?'front':'back';
+  var backScope=(String(payload.backScope||'set')==='card')?'card':'set';
+  var showBackExtra=backMode==='blank'&&backEditSurface==='back'&&!payload.backExtraDelayed;
+  var canCardBackScope=!!payload.canCardBackScope;
+  var navLabel=String(payload.navLabel||'Cover');
+  var inner=win.querySelector('.cardFaceInner');
+  if(inner&&!opts.skipFlipState)inner.classList.toggle('flipped',flipped);
+  win.classList.toggle('grid-on',gridMode);
+  win.classList.toggle('night',nightMode);
+  var visual=win.querySelector('.cardFaceOuter, .adminInfoSlide');
+  if(visual)visual.style.zoom=(zoomPct/100);
+  var zoomPctEl=win.querySelector('.cvZoomPct');
+  if(zoomPctEl)zoomPctEl.textContent=zoomPct+'%';
+  Array.prototype.slice.call(win.querySelectorAll('.previewNavPosText')).forEach(function(el){
+    el.textContent=navLabel;
+  });
+  Array.prototype.slice.call(win.querySelectorAll('.stijlCanvasFlipBtn')).forEach(function(btn){
+    btn.classList.toggle('sel',flipped);
+  });
+  Array.prototype.slice.call(win.querySelectorAll('.stijlCanvasGridBtn')).forEach(function(btn){
+    var label=gridMode?'Raster uitzetten':'Raster tonen';
+    btn.classList.toggle('sel',gridMode);
+    btn.setAttribute('aria-label',label);
+    btn.setAttribute('title',label);
+  });
+  Array.prototype.slice.call(win.querySelectorAll('[data-preview-night-toggle="1"]')).forEach(function(btn){
+    var label=nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten';
+    btn.classList.toggle('sel',nightMode);
+    btn.setAttribute('aria-label',label);
+    btn.setAttribute('title',label);
+    btn.innerHTML=previewNightToggleIconHtml(nightMode);
+  });
+  Array.prototype.slice.call(win.querySelectorAll('[data-back-mode]')).forEach(function(btn){
+    btn.classList.toggle('sel',btn.getAttribute('data-back-mode')===backMode);
+  });
+  Array.prototype.slice.call(win.querySelectorAll('.previewEditSurfaceStack')).forEach(function(stack){
+    stack.classList.toggle('is-visible',showBackExtra);
+    stack.classList.toggle('is-hidden',!showBackExtra);
+    if(showBackExtra) stack.removeAttribute('aria-hidden');
+    else stack.setAttribute('aria-hidden','true');
+  });
+  Array.prototype.slice.call(win.querySelectorAll('[data-back-edit-surface]')).forEach(function(btn){
+    var surface=btn.getAttribute('data-back-edit-surface');
+    btn.classList.toggle('sel',(surface==='back'?backEditSurface==='back':backEditSurface!=='back'));
+    if(showBackExtra) btn.removeAttribute('tabindex');
+    else btn.setAttribute('tabindex','-1');
+  });
+  Array.prototype.slice.call(win.querySelectorAll('[data-back-scope]')).forEach(function(btn){
+    var scope=btn.getAttribute('data-back-scope');
+    var isCard=scope==='card';
+    btn.classList.toggle('sel',isCard?backScope==='card':backScope!=='card');
+    btn.classList.toggle('is-disabled',isCard&&!canCardBackScope);
+    if(isCard&&!canCardBackScope) btn.setAttribute('aria-disabled','true');
+    else btn.removeAttribute('aria-disabled');
+    if(showBackExtra&&(!isCard||canCardBackScope)) btn.removeAttribute('tabindex');
+    else btn.setAttribute('tabindex','-1');
+  });
+  syncSingleCanvasPreviewLayout(win);
+  paintDashboardWizardPreviewBackground(host,payload);
+  return true;
+}
+function tryApplyDashboardWizardPreviewDelta(prevPayload,nextPayload){
+  prevPayload=prevPayload&&typeof prevPayload==='object'?prevPayload:null;
+  nextPayload=nextPayload&&typeof nextPayload==='object'?nextPayload:null;
+  if(!prevPayload||!nextPayload||!prevPayload.external||!nextPayload.external)return false;
+  if(String(prevPayload.stepId||'')!==String(nextPayload.stepId||''))return false;
+  if(String(prevPayload.previewKey||'')!==String(nextPayload.previewKey||''))return false;
+  if(String(prevPayload.previewFile||'')!==String(nextPayload.previewFile||''))return false;
+  var host=g('dashboardWizardPreviewHost');
+  var win=dashboardWizardPreviewWindow(host);
+  if(!host||!win)return false;
+  var inner=win.querySelector('.cardFaceInner');
+  if(!inner)return false;
+  var prevFlipped=!!prevPayload.flipped;
+  var nextFlipped=!!nextPayload.flipped;
+  var flippedChanged=prevFlipped!==nextFlipped;
+  var prevMode=String(prevPayload.backModeActual||prevPayload.backMode||'mirror');
+  var nextMode=String(nextPayload.backModeActual||nextPayload.backMode||'mirror');
+  var modeChanged=prevMode!==nextMode;
+  var frontChanged=String(prevPayload.frontTxt||'')!==String(nextPayload.frontTxt||'');
+  var backChanged=String(prevPayload.backTxt||'')!==String(nextPayload.backTxt||'');
+  var htmlChanged=String(prevPayload.html||'')!==String(nextPayload.html||'');
+  clearDashboardWizardPreviewTimers();
+  if(modeChanged&&prevFlipped&&nextFlipped){
+    applyDashboardWizardPreviewUi(host,nextPayload,{skipFlipState:true});
+    inner.classList.remove('back-swap-turn');
+    void inner.offsetWidth;
+    inner.classList.add('back-swap-turn');
+    S._dashboardWizardPreviewSwapTimer=setTimeout(function(){
+      S._dashboardWizardPreviewSwapTimer=0;
+      replaceDashboardWizardPreviewBackFace(host,nextPayload);
+      replaceDashboardWizardPreviewBackbar(host,nextPayload);
+      applyDashboardWizardPreviewUi(host,nextPayload,{skipFlipState:true});
+    },170);
+    S._dashboardWizardPreviewTurnTimer=setTimeout(function(){
+      S._dashboardWizardPreviewTurnTimer=0;
+      var liveWin=dashboardWizardPreviewWindow(host);
+      var liveInner=liveWin&&liveWin.querySelector?liveWin.querySelector('.cardFaceInner'):null;
+      if(liveInner)liveInner.classList.remove('back-swap-turn');
+    },420);
+    return true;
+  }
+  if(modeChanged&&!prevFlipped&&nextFlipped){
+    applyDashboardWizardPreviewUi(host,nextPayload,{skipFlipState:true});
+    inner.classList.add('flipped');
+    S._dashboardWizardPreviewSwapTimer=setTimeout(function(){
+      S._dashboardWizardPreviewSwapTimer=0;
+      replaceDashboardWizardPreviewBackFace(host,nextPayload);
+      replaceDashboardWizardPreviewBackbar(host,nextPayload);
+      applyDashboardWizardPreviewUi(host,nextPayload,{skipFlipState:true});
+    },220);
+    return true;
+  }
+  if(flippedChanged&&!modeChanged&&!frontChanged&&!backChanged&&!htmlChanged){
+    applyDashboardWizardPreviewUi(host,nextPayload,{skipFlipState:true});
+    inner.classList.toggle('flipped',nextFlipped);
+    return true;
+  }
+  if(!flippedChanged&&!frontChanged&&!backChanged&&!htmlChanged){
+    applyDashboardWizardPreviewUi(host,nextPayload);
+    return true;
+  }
+  return false;
+}
+function renderDashboardWizardPreviewHost(){
+  var shell=g('wizardWorkspaceShell');
+  var pane=g('wizardWorkspacePreviewPane');
+  var host=g('dashboardWizardPreviewHost');
+  if(!shell||!pane||!host)return;
+  var payload=dashboardWizardPreviewPayload();
+  var useParentPreview=!!(payload&&payload.external);
+  shell.classList.toggle('has-parent-preview',useParentPreview);
+  shell.classList.toggle('has-iframe-preview',!useParentPreview);
+  shell.setAttribute('data-wizard-preview-step',payload&&payload.stepId?String(payload.stepId):'');
+  pane.classList.toggle('hidden',!useParentPreview);
+  if(!useParentPreview){
+    host.innerHTML='';
+    return;
+  }
+  host.innerHTML=dashboardWizardPreviewHtml(payload);
+  requestAnimationFrame(function(){
+    var win=host.querySelector('.stijlCanvasWindow[data-dashboard-wizard-preview="1"]');
+    if(win)win.removeAttribute('data-wizard-preview');
+    syncSingleCanvasPreviewLayout(win);
+    paintDashboardWizardPreviewBackground(host,payload);
+  });
+}
+function syncDashboardWizardPreview(payload){
+  var nextPayload=(payload&&typeof payload==='object')?payload:null;
+  var prevPayload=dashboardWizardPreviewPayload();
+  S._wizardPreviewPayload=nextPayload;
+  if(tryApplyDashboardWizardPreviewDelta(prevPayload,nextPayload))return;
+  renderDashboardWizardPreviewHost();
+}
+function currentDashboardWizardSet(){
+  var ref=resolveDashboardWizardSetRef();
+  return dashboardFindSetByRef(ref)||dashboardFindSetByRef(S.activeId)||null;
+}
+function dashboardSetModeUrl(setRef,mode){
+  var set=dashboardFindSetByRef(setRef)||null;
+  var ref=(set&&set.id)||String(setRef||'').trim();
+  var cleanMode=String(mode||'edit').trim().toLowerCase();
+  if(cleanMode!=='view'&&cleanMode!=='edit')cleanMode='edit';
+  if(cleanMode==='edit'){
+    if(ref)rememberWizardSetRef(ref);
+    return dashboardBaseUrl()+(ref?('?set='+encodeURIComponent(ref)+'&mode=edit'):'?mode=edit');
+  }
+  return dashboardBaseUrl()+(ref?('?set='+encodeURIComponent(ref)+'&mode='+encodeURIComponent(cleanMode)):('?mode='+encodeURIComponent(cleanMode)));
+}
+function openWizardSetMode(mode){
+  var currentSet=currentDashboardWizardSet();
+  var ref=(currentSet&&currentSet.id)||resolveDashboardWizardSetRef()||S.activeId||'';
+  if(currentSet&&currentSet.id){
+    S.activeId=currentSet.id;
+    rememberWizardSetRef(currentSet.id);
+  }
+  location.href=dashboardSetModeUrl(ref,mode);
+}
+function wizardUndoAction(){
+  postWizardFrameAction('undo');
+}
+function wizardRedoAction(){
+  postWizardFrameAction('redo');
+}
+function wizardDeleteAction(){
+  var targetId=S._wizardSetId||S.activeId||null;
+  var currentSet=(S.sets||[]).find(function(set){return set&&set.id===targetId;})||null;
+  if(!currentSet||!currentSet.id)return;
+  doDeleteWizardSet(currentSet.id);
+}
+function syncDashboardWizardHeader(payload){
+  var data=payload&&typeof payload==='object'?payload:{};
+  var title=String(data.title||'').trim();
+  var stepLabel=String(data.stepLabel||'').trim();
+  var titleEl=g('editorSetTitle');
+  var stepEl=g('editorThemeTitle');
+  var sepEl=g('editorThemeSep');
+  var undoBtn=g('wizardUndoBtn');
+  var redoBtn=g('wizardRedoBtn');
+  var deleteBtn=g('wizardDeleteBtn');
+  if(data.setId){
+    S._wizardSetId=String(data.setId);
+    S.activeId=String(data.setId);
+    rememberWizardSetRef(S._wizardSetId);
+  }
+  if(titleEl&&title)titleEl.value=title;
+  if(stepEl)stepEl.value=stepLabel||'Wizard';
+  if(sepEl)sepEl.style.display=stepLabel?'inline-block':'none';
+  if(undoBtn)undoBtn.disabled=!data.canUndo;
+  if(redoBtn)redoBtn.disabled=!data.canRedo;
+  if(deleteBtn)deleteBtn.disabled=!data.canDelete;
+  syncEditorHeaderWidths();
+  markDashboardWizardReady();
+}
+function openWizardMoreMenu(btn){
+  document.querySelectorAll('.clMoreMenu').forEach(function(m){m.remove();});
+  var currentSet=currentDashboardWizardSet();
+  var hasSet=!!(currentSet&&currentSet.id);
+  var editHref=hasSet?dashboardSetModeUrl(currentSet.id,'edit'):dashboardBaseUrl();
+  var viewHref=hasSet?dashboardSetModeUrl(currentSet.id,'view'):'';
+  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+S._username+'/'+currentSet.slug):'';
+  var restartHref=dashboardBaseUrl()+'wizard/';
+  var editIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  var viewIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var restartIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>';
+  var items='';
+  if(hasSet)items+=_moreMenuItem(editIco,'Verder in editor','location.href='+JSON.stringify(editHref));
+  if(viewHref)items+=_moreMenuItem(viewIco,'Open viewer','location.href='+JSON.stringify(viewHref));
+  if(previewHref)items+=_moreMenuItem(viewIco,'Publieke preview','window.open('+JSON.stringify(previewHref)+',"_blank","noopener")');
+  items+=_moreMenuItem(restartIco,'Nieuwe wizard','location.href='+JSON.stringify(restartHref));
+  var menu=document.createElement('div');
+  menu.className='clMoreMenu';
+  menu.innerHTML=items;
+  document.body.appendChild(menu);
+  var rect=btn.getBoundingClientRect();
+  menu.style.cssText='position:fixed;top:'+(rect.bottom+6)+'px;right:'+(window.innerWidth-rect.right)+'px;z-index:9999';
+  setTimeout(function(){
+    function dismiss(e){
+      if(!menu.contains(e.target)&&e.target!==btn){menu.remove();document.removeEventListener('click',dismiss);}
+    }
+    document.addEventListener('click',dismiss);
+    function onKey(e){if(e.key==='Escape'){menu.remove();document.removeEventListener('keydown',onKey);}}
+    document.addEventListener('keydown',onKey);
+  },0);
+}
+function renderDashboardWizardPage(){
+  cleanVisibleDashboardWizardUrl();
+  setAppPreparing(true);
+  hideFloatingTextBar(true);
+  var wizardSetRef=resolveDashboardWizardSetRef();
+  var currentSet=(S.sets||[]).find(function(set){
+    return set && wizardSetRef && (String(set.id||'')===wizardSetRef || String(set.slug||'')===wizardSetRef);
+  })||null;
+  var hasSet=!!(currentSet&&currentSet.id);
+  S._wizardSetId=hasSet?currentSet.id:null;
+  if(hasSet&&SC[currentSet.id]){
+    S.activeId=currentSet.id;
+    S.d=cloneSetBundle(SC[currentSet.id]);
+    normalizeLegacyCardSurfaceMeta(S.d.meta);
+  }
+  var titleHtml=
+    '<div class="clHeadMeta">'+
+      '<div class="clHeadTitle">'+
+        '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="'+esc(hasSet?(currentSet.title||'Naamloze set'):'Nieuwe kaartenset')+'" readonly>'+
+        '<span class="clHeadThemeSep" id="editorThemeSep" style="display:inline-block"></span>'+
+        '<input id="editorThemeTitle" class="clHeadThemeInput is-static" type="text" value="Naam" readonly>'+
+      '</div>'+
+    '</div>';
+  var backHref=hasSet?dashboardSetModeUrl(currentSet.id,'edit'):dashboardBaseUrl();
+  var viewHref=hasSet?dashboardSetModeUrl(currentSet.id,'view'):'';
+  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+S._username+'/'+currentSet.slug):'';
+  var wizardModeBtns=
+    '<div class="edModeSwitcher">'+
+      (hasSet
+        ? '<button class="edModeBtn" type="button" onclick="openWizardSetMode(\'edit\')" data-href="'+esc(backHref)+'" title="Bewerken" aria-label="Bewerken">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+          '</button>'
+        : '<button class="edModeBtn is-disabled" type="button" disabled title="Bewerken" aria-label="Bewerken">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
+          '</button>')+
+      (hasSet
+        ? '<button class="edModeBtn" type="button" onclick="openWizardSetMode(\'view\')" data-href="'+esc(viewHref)+'" title="Bekijken" aria-label="Bekijken">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'+
+          '</button>'
+        : '<button class="edModeBtn is-disabled" type="button" disabled title="Bekijken" aria-label="Bekijken">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'+
+          '</button>')+
+      '<button class="edModeBtn active" type="button" title="Wizard" aria-label="Wizard" aria-current="page">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"/></svg>'+
+      '</button>'+
+    '</div>';
+  var quickActions=previewHref
+    ? '<div class="tbRActions"><a class="btnIcon" href="'+esc(previewHref)+'" target="_blank" rel="noopener" title="Publieke preview" aria-label="Publieke preview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></a></div>'
+    : '';
+  var headActions=
+    '<div class="tbRWrap tbRWrap-editor"><div class="tbR">'+
+      wizardModeBtns+
+      '<div class="tbRActions">'+
+        '<button class="btnIcon" id="wizardUndoBtn" type="button" onclick="wizardUndoAction()" disabled title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
+        '<button class="btnIcon" id="wizardRedoBtn" type="button" onclick="wizardRedoAction()" disabled title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
+        '<button class="btnIconDanger" id="wizardDeleteBtn" type="button" onclick="wizardDeleteAction()"'+(hasSet?'':' disabled')+' title="Verwijder" aria-label="Verwijder"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'+
+      '</div>'+
+      quickActions+
+      '<button class="btnIcon clMoreBtn" id="wizardMoreBtn" type="button" title="Meer opties" aria-label="Meer opties" onclick="openWizardMoreMenu(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg></button>'+
+    '</div></div>';
+  exposeDashboardWizardBridge();
+  renderChromeShell(titleHtml,headActions,null,{keepPreparing:true});
+  var pw=g('pw');
+  if(pw){
+    S._wizardPreviewPayload=null;
+    var wizardFrameSrc=standaloneWizardIframeUrl(hasSet?currentSet.id:'');
+    pw.classList.add('wizardWorkspaceBody');
+    pw.classList.remove('is-preparing');
+    pw.innerHTML=
+      '<div class="wizardWorkspaceShell is-loading" id="wizardWorkspaceShell">'+
+        '<div class="wizardWorkspaceSplit">'+
+          '<div class="wizardWorkspaceMain">'+
+            '<iframe id="wizardWorkspaceFrame" class="wizardWorkspaceFrame" src="about:blank" title="Kaartenset wizard" loading="eager" onload="markDashboardWizardIframeLoaded()"></iframe>'+
+          '</div>'+
+          '<aside class="wizardWorkspacePreviewPane hidden" id="wizardWorkspacePreviewPane" aria-label="Kaart preview">'+
+            '<div class="wizardWorkspacePreviewHost" id="dashboardWizardPreviewHost"></div>'+
+          '</aside>'+
+        '</div>'+
+      '</div>';
+    var wizardFrame=g('wizardWorkspaceFrame');
+    if(wizardFrame){
+      wizardFrame.dataset.src=wizardFrameSrc;
+      wizardFrame.srcdoc=dashboardWizardIframeSrcdoc(wizardFrameSrc,hasSet?currentSet.id:'');
+    }
+    renderDashboardWizardPreviewHost();
+  }
+  if(S._wizardReadyTimer)clearTimeout(S._wizardReadyTimer);
+  S._wizardReadyTimer=setTimeout(function(){
+    if(S._view==='wizard')markDashboardWizardReady();
+  },2800);
+  syncEditorHeaderWidths();
+}
+function cleanVisibleDashboardWizardUrl(){
+  try{
+    if(!/\/dashboard\/wizard\/?$/.test(String(location.pathname||'')) || !location.search)return;
+    history.replaceState({space:S.spaceSlug||((S.space&&S.space.slug)||'')||''},'',location.pathname+(location.hash||''));
+  }catch(_err){}
+}
+function cleanVisibleDashboardEditorUrl(){
+  try{
+    if(S.activeKind!=='set'||!S.activeId||S.editorMode!=='edit')return;
+    rememberWizardSetRef(S.activeId);
+    var path=String(location.pathname||'');
+    var search=String(location.search||'');
+    var params=new URLSearchParams(search);
+    var isEditorPath=/\/dashboard\/editor\/?$/.test(path);
+    var isDashboardPath=/\/dashboard\/?$/.test(path);
+    var shouldClean=(isEditorPath&&!!search)||(isDashboardPath&&(params.has('set')||String(params.get('mode')||'').toLowerCase()==='edit'));
+    if(!shouldClean)return;
+    history.replaceState(
+      {space:S.spaceSlug||((S.space&&S.space.slug)||''),set:S.activeId,mode:'edit'},
+      '',
+      dashboardBaseUrl()+'editor/'+(location.hash||'')
+    );
+  }catch(_err){}
+}
+function renderSpaceEditor(){
+  hideFloatingTextBar(true);
+  var saveStatus=buildTopSaveStatusHtml();
+  var spaceUpdatedAt=(currentSpacePublicPage().updatedAt)||null;
+  var spaceLastEdited=spaceUpdatedAt?'<div class="clHeadSub">Laatst bewerkt: '+esc(_timeAgo(spaceUpdatedAt))+'</div>':'';
+  var headTitle='<div class="clHeadMeta">'+
+    '<div class="clHeadTitle">'+
+      '<input id="editorSetTitle" class="clHeadTitleInput" type="text" value="Home" readonly>'+
+    '</div>'+
+    spaceLastEdited+
+  '</div>';
+  var headActions='<div class="tbRWrap tbRWrap-editor"><div class="tbR">'+
+    '<div class="tbRActions">'+
+      '<button class="btnIcon" id="undoBtn" type="button" onclick="undoSetChanges()"'+(canUndo()?'':' disabled')+' title="Ongedaan" aria-label="Ongedaan"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 1 1 0 12h-2"/></svg></button>'+
+      '<button class="btnIcon" id="redoBtn" type="button" onclick="redoSetChanges()"'+(canRedo()?'':' disabled')+' title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 1 0 0 12h2"/></svg></button>'+
+    '</div>'+
+    saveStatus+
+    '<button class="btn tbRSaveBtn" id="saveSpaceBtn" type="button" onclick="saveSpaceSettings()">'+buildTopSaveBtnInnerHtml('Opslaan')+'</button>'+
+    '<button class="btnIcon clMoreBtn" type="button" title="Meer opties"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button>'+
+  '</div></div>';
+  renderEditorShell(headTitle,headActions);
+}
+function currentSpaceLayoutMode(){
+  var publicPage=currentSpacePublicPage();
+  return String(publicPage.layout||S.spaceLayoutMode||'hero-grid');
+}
+function currentSpacePublicPage(){
+  var settings=((S.space&&S.space.settings)||{});
+  return settings&&typeof settings.publicPage==='object'?settings.publicPage:{};
+}
+function currentHomeIsEnabled(){
+  var publicPage=currentSpacePublicPage();
+  return publicPage.enabled!==false;
+}
+function ensureSpacePublicPage(){
+  if(!S.space)S.space={};
+  S.space.settings=S.space.settings&&typeof S.space.settings==='object'?S.space.settings:{};
+  S.space.settings.publicPage=S.space.settings.publicPage&&typeof S.space.settings.publicPage==='object'
+    ? S.space.settings.publicPage
+    : {};
+  return S.space.settings.publicPage;
+}
+function touchSpaceSettings(){
+  S.dirty=true;
+  setTopSaveStatus('dirty','Wijzigingen…');
+  if(g('spaceSaveHint')){
+    g('spaceSaveHint').className='spaceSaveHint';
+    g('spaceSaveHint').textContent='Nog niet opgeslagen.';
+  }
+  refreshTopBarControls();
+}
+function setSpacePublicPageField(key,value){
+  var publicPage=ensureSpacePublicPage();
+  publicPage[key]=value;
+  touchSpaceSettings();
+  buildStijlPreserveBg(g('pw'));
+}
+function currentHomeSortMode(){
+  return String(currentSpacePublicPage().sortMode||'manual');
+}
+function setHomeSortMode(mode){
+  setSpacePublicPageField('sortMode',String(mode||'manual'));
+}
+function currentHomeHeroSortMode(){
+  return String(currentSpacePublicPage().heroSortMode||'manual');
+}
+function homeSortOptions(){
+  return [
+    {v:'manual',  l:'Eigen volgorde'},
+    {v:'alpha-asc', l:'A-Z'},
+    {v:'alpha-desc',l:'Z-A'},
+    {v:'public-first',l:'Live eerst'}
+  ];
+}
+function sortedHomeSets(){
+  var sets=(Array.isArray(S.sets)?S.sets:[]).filter(function(s){return s&&s.id;}).slice();
+  var sortMode=currentHomeSortMode();
+  if(sortMode==='alpha-asc'){
+    sets.sort(function(a,b){return String(a.title||'').localeCompare(String(b.title||''),'nl');});
+  }else if(sortMode==='alpha-desc'){
+    sets.sort(function(a,b){return String(b.title||'').localeCompare(String(a.title||''),'nl');});
+  }else if(sortMode==='public-first'){
+    sets.sort(function(a,b){
+      var ap=a.isPublic!==false?0:1;
+      var bp=b.isPublic!==false?0:1;
+      return ap-bp || String(a.title||'').localeCompare(String(b.title||''),'nl');
+    });
+  }
+  return sets;
+}
+function sortedHomeSetIdsByMode(ids,mode){
+  var byId={};
+  (S.sets||[]).forEach(function(set){if(set&&set.id)byId[set.id]=set;});
+  var next=(Array.isArray(ids)?ids:[]).slice();
+  mode=String(mode||'manual');
+  if(mode==='alpha-asc'){
+    next.sort(function(a,b){return String((byId[a]||{}).title||'').localeCompare(String((byId[b]||{}).title||''),'nl');});
+  }else if(mode==='alpha-desc'){
+    next.sort(function(a,b){return String((byId[b]||{}).title||'').localeCompare(String((byId[a]||{}).title||''),'nl');});
+  }else if(mode==='public-first'){
+    next.sort(function(a,b){
+      var ap=(byId[a]||{}).isPublic!==false?0:1;
+      var bp=(byId[b]||{}).isPublic!==false?0:1;
+      return ap-bp || String((byId[a]||{}).title||'').localeCompare(String((byId[b]||{}).title||''),'nl');
+    });
+  }
+  return next;
+}
+function normalizeHomeSliderPane(pane){
+  return (pane==='layout'||pane==='hero'||pane==='grid')?pane:'grid';
+}
+function setHomeSliderPane(pane){
+  var next=normalizeHomeSliderPane(pane);
+  S.homeSliderPane=next;
+  if(next==='hero'||next==='grid')S.homeCardsPane=next;
+  buildStijlPreserveBg(g('pw'));
+}
+function selectHomeCardsPane(pane){
+  S.homeSliderPane=pane;
+  S.homeCardsPane=pane;
+  buildStijlPreserveBg(g('pw'));
+}
+function toggleHomeGridExpanded(){
+  if(normalizeHomeSliderPane(S.homeSliderPane)!=='grid'){
+    S.homeSliderPane='grid';
+    S.homeCardsPane='grid';
+  }
+  S.homeGridExpanded=!S.homeGridExpanded;
+  buildStijlPreserveBg(g('pw'));
+}
+function toggleHomeHeroExpanded(){
+  if(normalizeHomeSliderPane(S.homeSliderPane)!=='hero'){
+    S.homeSliderPane='hero';
+    S.homeCardsPane='hero';
+  }
+  S.homeHeroExpanded=!S.homeHeroExpanded;
+  buildStijlPreserveBg(g('pw'));
+}
+function activateHeroSliderPane(){
+  selectHomeCardsPane('hero');
+}
+function activateGridSliderPane(){
+  selectHomeCardsPane('grid');
+}
+function sliderExpandCornerBtnHtml(pane,expanded){
+  var onclick=pane==='hero'?'toggleHomeHeroExpanded()':'toggleHomeGridExpanded()';
+  var title=expanded?'Inklappen':'Uitklappen';
+  return '<button class="homeSliderExpandCornerBtn'+(expanded?' is-open':'')+'" type="button" onclick="'+onclick+'" title="'+title+'">'+(expanded?'−':'+')+'</button>';
+}
+function setHomeSortModeFromSlider(mode){
+  setHomeSortMode(mode);
+}
+function setHomeHeroSortMode(mode){
+  mode=String(mode||'manual');
+  var publicPage=ensureSpacePublicPage();
+  publicPage.heroSortMode=mode;
+  if(mode!=='manual'){
+    publicPage.heroSetIds=sortedHomeSetIdsByMode(resolvedHomeHeroSetIds(),mode).slice(0,6);
+  }
+  touchSpaceSettings();
+  buildStijlPreserveBg(g('pw'));
+}
+function setHomeOrderModeFromSlider(mode,pane){
+  if(pane==='hero')setHomeHeroSortMode(mode);
+  else setHomeSortMode(mode);
+}
+function reorderedIdList(ids,fromId,toId,after){
+  if(!fromId||!toId||fromId===toId)return null;
+  ids=(Array.isArray(ids)?ids:[]).slice();
+  var fi=ids.indexOf(fromId),ti=ids.indexOf(toId);
+  if(fi<0||ti<0)return null;
+  var item=ids.splice(fi,1)[0];
+  ti=ids.indexOf(toId);
+  if(ti<0)return null;
+  ids.splice(ti+(after?1:0),0,item);
+  return ids;
+}
+function reorderHomeSet(fromId,toId,after){
+  if(!fromId||!toId||fromId===toId)return;
+  var byId={};
+  (S.sets||[]).forEach(function(set){if(set&&set.id)byId[set.id]=set;});
+  var ids=reorderedIdList((S.sets||[]).map(function(set){return set&&set.id;}).filter(Boolean),fromId,toId,after);
+  if(!ids)return;
+  S.sets=ids.map(function(id){return byId[id];}).filter(Boolean);
+  ensureSpacePublicPage().sortMode='manual';
+  touchSpaceSettings();
+  saveIndex('Reorder sets').then(function(){
+    renderSidebar();
+    buildStijlPreserveBg(g('pw'));
+  }).catch(function(){
+    renderSidebar();
+    buildStijlPreserveBg(g('pw'));
+  });
+}
+function validHomeSetIds(){
+  return sortedHomeSets().map(function(set){return set.id;}).filter(Boolean);
+}
+function normalizedIdOrder(ids,baseIds,limit){
+  var seen={},out=[];
+  (Array.isArray(ids)?ids:[]).forEach(function(id){
+    if(baseIds.indexOf(id)>=0&&!seen[id]){
+      seen[id]=true;out.push(id);
+    }
+  });
+  baseIds.forEach(function(id){
+    if(!seen[id]){seen[id]=true;out.push(id);}
+  });
+  return typeof limit==='number'?out.slice(0,limit):out;
+}
+function isHeroPlaceholder(id){return String(id||'').indexOf('__ph__:')===0;}
+function placeholderBg(id){return String(id||'').split(':')[1]||'#d4eaf0';}
+function addHeroPlaceholder(bg){
+  var ids=resolvedHomeHeroSetIds();
+  if(ids.length>=6){toast('Maximaal 6 kaarten in Uitgelicht','amber');return;}
+  ids.push('__ph__:'+bg+':'+Date.now());
+  setHomeHeroSetIds(ids);markDirty();buildStijlPreserveBg(g('pw'));
+}
+function removeHeroPlaceholder(ph){
+  setHomeHeroSetIds(currentHomeHeroSetIds().filter(function(id){return id!==ph;}));
+  markDirty();buildStijlPreserveBg(g('pw'));
+}
+function changeHeroPlaceholderColor(ph,newBg){
+  var newPh='__ph__:'+newBg+':'+String(ph).split(':').slice(2).join(':');
+  setHomeHeroSetIds(currentHomeHeroSetIds().map(function(id){return id===ph?newPh:id;}));
+  markDirty();buildStijlPreserveBg(g('pw'));
+}
+function openPlaceholderColorPicker(ph){
+  var cur=placeholderBg(ph);
+  var sw=HOME_SJABLONEN.map(function(s,i){
+    return '<button type="button" class="legeKaartSwatch'+(s.bg===cur?' sel':'')+'" style="background:'+s.bg+'" onclick="changeHeroPlaceholderColor(\''+esc(ph)+'\',\''+esc(s.bg)+'\');closeModal()" title="Kleur '+(i+1)+'"></button>';
+  }).join('');
+  showModal('<h3>Kleur lege kaart</h3><div class="field"><div class="legeKaartSwatches">'+sw+'</div></div><div class="mAct"><button class="mCa" onclick="closeModal()">Sluiten</button></div>');
+}
+function heroPlaceholderCardHtml(ph){
+  var bg=placeholderBg(ph);
+  return '<div class="homeSetSlideCard homeSetSlideCard-hero is-placeholder" data-home-pane="hero" data-home-set-id="'+esc(ph)+'" draggable="true" title="Lege kaart — klik om kleur te wijzigen" onclick="openPlaceholderColorPicker(\''+esc(ph)+'\')">'+
+    '<div class="homeSetSlideThumb">'+
+      '<div class="homeSetThumbFallback" style="--home-set-bg:'+esc(bg)+'"></div>'+
+      '<button class="homeHeroToggleBtn is-sel" type="button" onclick="event.stopPropagation();removeHeroPlaceholder(\''+esc(ph)+'\')" title="Verwijderen uit Uitgelicht">'+
+        '<span class="heroRemoveMinus" aria-hidden="true">−</span>'+
+      '</button>'+
+    '</div>'+
+    '<div class="homeSetSlideLabelWrap"></div>'+
+  '</div>';
+}
+function resolvedHomeHeroSetIds(){
+  var base=validHomeSetIds();
+  var publicPage=currentSpacePublicPage();
+  if(!Array.isArray(publicPage.heroSetIds))return base.slice(0,6);
+  var seen={},out=[];
+  publicPage.heroSetIds.forEach(function(id){
+    if((isHeroPlaceholder(id)||base.indexOf(id)>=0)&&!seen[id]){seen[id]=true;out.push(id);}
+  });
+  return out.slice(0,6);
+}
+function setResolvedHomeHeroSetIds(ids){
+  var base=validHomeSetIds();
+  var seen={},out=[];
+  (Array.isArray(ids)?ids:[]).forEach(function(id){
+    if((isHeroPlaceholder(id)||base.indexOf(id)>=0)&&!seen[id]){seen[id]=true;out.push(id);}
+  });
+  setHomeHeroSetIds(out.slice(0,6));
+}
+function toggleHomeHeroSet(id){
+  var ids=resolvedHomeHeroSetIds();
+  var idx=ids.indexOf(id);
+  if(idx>=0){
+    ids.splice(idx,1);
+  }else{
+    if(ids.length>=6){toast('Maximaal 6 kaartsets in Uitgelicht','amber');return;}
+    ids.push(id);
+  }
+  if(currentHomeHeroSortMode()!=='manual')ids=sortedHomeSetIdsByMode(ids,currentHomeHeroSortMode());
+  setResolvedHomeHeroSetIds(ids);
+}
+function reorderHomeHeroSet(fromId,toId,after){
+  var ids=resolvedHomeHeroSetIds();
+  var next=reorderedIdList(ids,fromId,toId,after);
+  if(next){
+    ensureSpacePublicPage().heroSortMode='manual';
+    setResolvedHomeHeroSetIds(next);
+  }
+}
+function currentHomeGridSetIds(){
+  var v=currentSpacePublicPage().gridSetIds;
+  return Array.isArray(v)?v:[];
+}
+function setHomeGridSetIds(ids){
+  setSpacePublicPageField('gridSetIds',Array.isArray(ids)?ids:[]);
+}
+function resolvedHomeGridSetIds(){
+  if(currentHomeSortMode()!=='manual')return validHomeSetIds();
+  return normalizedIdOrder(currentHomeGridSetIds(),validHomeSetIds());
+}
+function homeGridOrderedSets(){
+  var ids=resolvedHomeGridSetIds();
+  var byId={};
+  sortedHomeSets().forEach(function(set){byId[set.id]=set;});
+  return ids.map(function(id){return byId[id];}).filter(Boolean);
+}
+function homeHeroOrderedSets(){
+  var ids=resolvedHomeHeroSetIds();
+  var byId={};
+  sortedHomeSets().forEach(function(set){byId[set.id]=set;});
+  return ids.map(function(id){return byId[id];}).filter(Boolean);
+}
+function reorderHomeGridSet(fromId,toId,after){
+  var ids=resolvedHomeGridSetIds();
+  var next=reorderedIdList(ids,fromId,toId,after);
+  if(!next)return;
+  ensureSpacePublicPage().sortMode='manual';
+  setHomeGridSetIds(next);
+}
+function currentHomePlaceholderCount(){
+  var n=parseInt(currentSpacePublicPage().placeholderCount,10);
+  return isFinite(n)?Math.max(0,Math.min(8,n)):0;
+}
+function setHomePlaceholderCount(value){
+  var n=parseInt(value,10);
+  if(!isFinite(n))n=0;
+  setSpacePublicPageField('placeholderCount',Math.max(0,Math.min(8,n)));
+}
+function setSpaceLayoutMode(mode){
+  var publicPage=ensureSpacePublicPage();
+  publicPage.layout=mode||'hero-grid';
+  publicPage.layoutChosen=true;
+  S.spaceLayoutMode=publicPage.layout;
+  S.homeSliderPane=S.homeCardsPane==='grid'?'grid':'hero';
+  try{localStorage.setItem('pk_layout_chosen',publicPage.layout);}catch(e){}
+  touchSpaceSettings();
+  buildStijlPreserveBg(g('pw'));
+}
+function spaceInfoPages(){
+  var slides=((S.d&&S.d.intro&&S.d.intro.slides)||[]).slice();
+  if(!slides.length)return[{key:'cover',title:'Cover'}];
+  return slides.map(function(slide,idx){
+    return {
+      key: slide.key||('slide-'+idx),
+      title: slide.title||slide.label||('Pagina '+(idx+1))
+    };
+  });
+}
+function setSpaceInfoPage(key){
+  INFO_SLIDE_KEY=key||'cover';
+  buildStijlPreserveBg(g('pw'));
+}
+function spaceLayoutOptions(){
+  return [
+    {id:'grid',label:'Grid',thumb:'grid'},
+    {id:'list',label:'Onder elkaar',thumb:'list'},
+    {id:'hero-grid',label:'Uitgesproken',thumb:'hero'}
+  ];
+}
+function spacePreviewBackgroundDataUrl(width,height,isNight){
+  var W2=Math.max(80,Math.round(width||SPACE_PREVIEW_W));
+  var H2=Math.max(80,Math.round(height||SPACE_PREVIEW_H));
+  var canvas=document.createElement('canvas');
+  canvas.width=W2*2;
+  canvas.height=H2*2;
+  var ctx=canvas.getContext('2d');
+  if(!ctx)return '';
+  paintSharedPreviewBackground(ctx,canvas.width,canvas.height,{isNight:isNight,baseFill:previewMainIndexBaseFill(isNight)});
+  return canvas.toDataURL('image/png');
+}
+function spaceLayoutThumbCard(item,cls,idx){
+  var tones=['#6EA2B3','#AFC9D4','#B8D0D8','#C5D9DF'];
+  var tone=tones[idx%tones.length]||tones[0];
+  var inner='<div class="spaceLayoutMiniFallback is-uniform" style="--space-card-accent:'+esc(tone)+'"></div>';
+  return '<div class="spaceLayoutMiniCard'+(cls?' '+cls:'')+'">'+inner+'</div>';
+}
+function spaceLayoutThumbHtml(kind){
+  var items=spacePreviewSets();
+  var bg=spacePreviewBackgroundDataUrl(170,110,false);
+  var topbar='<div class="spaceLayoutThumbTopbar">'+
+    '<span class="spaceLayoutThumbLogo"></span>'+
+    '<span class="spaceLayoutThumbBrand"></span>'+
+    '<svg class="spaceLayoutThumbMenuSvg" viewBox="0 0 8 6" fill="none" aria-hidden="true">'+
+      '<path d="M0 .6h8M0 3h8M0 5.4h8" stroke="#9eb0b8" stroke-width="1.1" stroke-linecap="round"/>'+
+    '</svg>'+
+  '</div>';
+  var body='';
+  if(kind==='list'){
+    body='<div class="spaceLayoutMiniList">'+
+      '<div class="spaceLayoutMiniRow">'+spaceLayoutThumbCard(items[0],'is-list',0)+'</div>'+
+      '<div class="spaceLayoutMiniRow">'+spaceLayoutThumbCard(items[1],'is-list',1)+'</div>'+
+    '</div>';
+  }else if(kind==='hero'){
+    body='<div class="spaceLayoutMiniHeroWrap">'+
+      spaceLayoutThumbCard(items[0],'is-hero',0)+
+      '<div class="spaceLayoutMiniGrid compact">'+
+        spaceLayoutThumbCard(items[1],'',1)+
+        spaceLayoutThumbCard(items[2],'',2)+
+      '</div>'+
+    '</div>';
+  }else if(kind==='featured'){
+    body='<div class="spaceLayoutMiniFeatured">'+
+      spaceLayoutThumbCard(items[0],'is-featured',0)+
+      '<div class="spaceLayoutMiniSide">'+
+        spaceLayoutThumbCard(items[1],'is-side',1)+
+        spaceLayoutThumbCard(items[2],'is-side',2)+
+      '</div>'+
+    '</div>';
+  }else{
+    body='<div class="spaceLayoutMiniGrid">'+
+      spaceLayoutThumbCard(items[0],'',0)+
+      spaceLayoutThumbCard(items[1],'',1)+
+      spaceLayoutThumbCard(items[2],'',2)+
+      spaceLayoutThumbCard(items[3],'',3)+
+    '</div>';
+  }
+  return '<div class="spaceLayoutThumbDoc">'+
+    (bg?'<img class="spaceLayoutThumbBg" src="'+esc(bg)+'" alt="">':'')+
+    topbar+
+    body+
+  '</div>';
+}
+function spaceLayoutCardHtml(opt,selectedId){
+  var cls='stijlSlideCard'+(opt.id===selectedId?' sel':'');
+  return '<div class="'+cls+'" data-space-layout="'+esc(opt.id)+'" onclick="setSpaceLayoutMode(\''+esc(opt.id)+'\')">'+
+    '<div class="stijlSlideThumb">'+
+      spaceLayoutThumbHtml(opt.thumb)+
+    '</div>'+
+    '<div class="stijlSlideBody"><div class="stijlSlideName">'+esc(opt.label)+'</div></div>'+
+  '</div>';
+}
+function spaceLayoutStripHtml(currentId){
+  return '<div class="stijlSlideRail">'+spaceLayoutOptions().map(function(opt){
+    return spaceLayoutCardHtml(opt,currentId);
+  }).join('')+'</div>';
+}
+function spacePageBtnsHtml(active){
+  var items=[
+    {id:'space',label:'Home'},
+    {id:'info',label:'Infopagina'}
+  ];
+  var currentActive=active;
+  return '<div class="paneModeSwitcher homeSliderModeWrap spacePageSwitch" aria-label="Pagina kiezen">'+items.map(function(item){
+    var onclick='setOpmakenPane(\''+item.id+'\')';
+    return '<button class="paneMode homeSliderPaneBtn'+(currentActive===item.id?' sel':'')+'" type="button" onclick="'+onclick+'">'+esc(item.label)+'</button>';
+  }).join('')+'</div>';
+}
+function editorSettingsToggleBtnHtml(){
+  var active=S.opmPane==='inst';
+  return '<button class="stijlSliderActionBtn editorSettingsBtn'+(active?' is-active':'')+'" type="button" onclick="toggleInlineSettingsPane()" title="Instellingen" aria-label="Instellingen">'+
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'+
+  '</button>';
+}
+function openSettingsForSet(id){
+  if(id&&id!==S.activeId){ reqLoad(id); }
+  setTimeout(function(){
+    if(S.opmPane!=='inst') toggleInlineSettingsPane();
+  },id&&id!==S.activeId?200:0);
+}
+function toggleInlineSettingsPane(){
+  var isSpace=S.activeKind==='space';
+  var fallback=isSpace?'space':'vragen';
+  if(S.opmPane==='inst'){
+    setOpmakenPane(S._instBasePane||fallback);
+    return;
+  }
+  S._instBasePane=S.opmPane||fallback;
+  setOpmakenPane('inst');
+}
+function homeSliderPageGroupHtml(active,pane){
+  var layoutBtn=active==='space'?homeLayoutChipHtml(pane):'';
+  return '<div class="homePageControlGroup">'+
+    layoutBtn+spacePageBtnsHtml(active)+
+  '</div>';
+}
+function homeCardsViewSwitchHtml(){
+  var pane=normalizeHomeSliderPane(S.homeSliderPane);
+  var active=(pane==='grid')?'grid':'hero';
+  var heroOpen=!!S.homeHeroExpanded;
+  var gridOpen=!!S.homeGridExpanded;
+  var chevUp='<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 6.5L5 3.5L8 6.5"/></svg>';
+  var chevDown='<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>';
+  var iconHero='<svg class="homeCardsPaneIcon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="8" rx="1.5"/><circle cx="5.5" cy="13.2" r=".55" fill="currentColor" stroke="none"/><circle cx="8" cy="13.2" r=".55" fill="currentColor" stroke="none" opacity=".35"/><circle cx="10.5" cy="13.2" r=".55" fill="currentColor" stroke="none" opacity=".35"/></svg>';
+  var iconGrid='<svg class="homeCardsPaneIcon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="2.5" width="5.5" height="4" rx="1"/><rect x="9" y="2.5" width="5.5" height="4" rx="1"/><rect x="1.5" y="9.5" width="5.5" height="4" rx="1"/><rect x="9" y="9.5" width="5.5" height="4" rx="1"/></svg>';
+  return '<div class="homeCardsSwitch">'+
+    '<div class="homeCardsPaneSplit'+(active==='hero'?' sel':'')+'" >'+
+      '<button class="homeCardsPaneMain" type="button" onclick="selectHomeCardsPane(\'hero\')" title="Uitgelicht">'+iconHero+'Uitgelicht</button>'+
+      '<button class="homeCardsPaneChevron" type="button" onclick="toggleHomeHeroExpanded()" title="'+(heroOpen?'Inklappen':'Uitklappen')+'">'+  (heroOpen?chevUp:chevDown)+'</button>'+
+    '</div>'+
+    '<div class="homeCardsPaneSplit'+(active==='grid'?' sel':'')+'" >'+
+      '<button class="homeCardsPaneMain" type="button" onclick="selectHomeCardsPane(\'grid\')" title="Lijst">'+iconGrid+'Lijst</button>'+
+      '<button class="homeCardsPaneChevron" type="button" onclick="toggleHomeGridExpanded()" title="'+(gridOpen?'Inklappen':'Uitklappen')+'">'+  (gridOpen?chevUp:chevDown)+'</button>'+
+    '</div>'+
+  '</div>';
+}
+
+function homeSliderActionsHtml(){
+  var pane=normalizeHomeSliderPane(S.homeSliderPane);
+  var showCards=pane==='hero'||pane==='grid';
+  var cardSwitch=showCards?homeCardsViewSwitchHtml():'';
+  var sortBtn=showCards?homeSortDropdownHtml(pane):'';
+  var settingsMode=S.opmPane==='inst';
+  return '<div class="homeSliderHeaderControls">'+
+    '<div class="homeSliderLeftControls">'+homeLayoutChipHtml(pane)+editorSettingsToggleBtnHtml()+spacePageBtnsHtml('space')+'</div>'+
+    '<div class="homeSliderRightControls'+(settingsMode?' slider-controls-dimmed':'')+'">'+((showCards?'<span class="homeCardsSlideLabel">Kaarten</span>':'')+cardSwitch+sortBtn)+'</div>'+
+  '</div>';
+}
+function infoModeHeaderActionsHtml(){
+  var addPageBtn='<button class="stijlSliderActionBtn stijlSliderActionPrimary" type="button" onclick="addInfoCustomPage()"><span class="stijlSliderActionPlus">+</span><span>Pagina</span></button>';
+  var orderMenu=setEditorInfoOrderMenuHtml();
+  return '<div class="homeSliderHeaderControls info-mode-header">'+
+    '<div class="homeSliderLeftControls">'+homeLayoutChipHtml('info')+editorSettingsToggleBtnHtml()+spacePageBtnsHtml('info')+'</div>'+
+    '<div class="homeSliderRightControls">'+
+      '<span class="homeCardsSlideLabel">Pagina&apos;s</span>'+
+      addPageBtn+
+      orderMenu+
+    '</div>'+
+  '</div>';
+}
+function setEditorLayoutChipHtml(){
+  var active=SET_EDITOR_PANE==='format';
+  var fmtId=getCardFormatIdForMeta(S.d&&S.d.meta);
+  var fmtLabel=(CARD_FORMATS.find(function(f){return f.id===fmtId;})||{}).label||'Formaat';
+  return '<button class="stijlSliderActionBtn homeLayoutChip'+(active?' is-active':'')+'" type="button" onclick="setEditorSliderPane(\''+(active?'themes':'format')+'\')" title="Kaartformaat: '+esc(fmtLabel)+'" aria-label="Kaartformaat wijzigen">'+
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11M6.3 6.5V13"/></svg>'+
+  '</button>';
+}
+function setEditorSliderPane(pane){
+  SET_EDITOR_PANE=pane||'themes';
+  buildStijlPreserveBg(g('pw'));
+}
+function setCardFormatFromSlider(id){
+  setCardFormat(id);
+  SET_EDITOR_PANE='themes';
+  buildStijlPreserveBg(g('pw'));
+}
+function setEditorPageBtnsHtml(active){
+  var items=[{id:'vragen',label:'Set'},{id:'info',label:'Infopagina'}];
+  var currentActive=active;
+  return '<div class="paneModeSwitcher homeSliderModeWrap spacePageSwitch" aria-label="Weergave kiezen">'+
+    items.map(function(item){
+      var onclick='setOpmakenPane(\''+item.id+'\')';
+      return '<button class="paneMode homeSliderPaneBtn'+(currentActive===item.id?' sel':'')+'" type="button" onclick="'+onclick+'">'+esc(item.label)+'</button>';
+    }).join('')+
+  '</div>';
+}
+function setEditorSortDropdownHtml(){
+  var items=[
+    {v:'manual',      l:'Eigen volgorde'},
+    {v:'alpha-asc',   l:'A-Z'},
+    {v:'alpha-desc',  l:'Z-A'}
+  ];
+  return '<div class="stijlSliderActionsWrap homeOrderWrap"><details class="textToolbarMenu homeToolbarMenu homeOrderMenu">'+
+    '<summary class="textToolbarMenuBtn homeToolbarMenuBtn homeOrderMenuBtn" title="Thema\'s ordenen">'+
+      '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h7M3 12h4"/></svg>'+
+      '<span>Ordenen</span>'+
+      '<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>'+
+    '</summary>'+
+    '<div class="textToolbarMenuPop homeToolbarMenuPop">'+
+      items.map(function(opt){
+        return '<button class="textToolbarMenuItem" type="button" onclick="this.closest(\'details\').removeAttribute(\'open\')">'+esc(opt.l)+'</button>';
+      }).join('')+
+    '</div>'+
+  '</details></div>';
+}
+function toggleSetThemeExpanded(){
+  S.setThemeExpanded=!S.setThemeExpanded;
+  buildStijlPreserveBg(g('pw'));
+}
+function focusSetThemeSliderRail(showOrderHint){
+  SET_EDITOR_PANE='themes';
+  S.setThemeExpanded=true;
+  buildStijlPreserveBg(g('pw'));
+  setTimeout(function(){
+    var rail=document.querySelector('#stijl-kaart .stijlSlideRail');
+    if(rail){
+      rail.classList.add('is-focused');
+      setTimeout(function(){rail.classList.remove('is-focused');},1200);
+      rail.scrollIntoView({block:'nearest',behavior:'smooth'});
+    }
+    if(showOrderHint)toast('Sleep thema\'s in de balk om de volgorde te wijzigen','green');
+  },60);
+}
+function setEditorThemeActionHtml(){
+  return '<button class="stijlSliderActionBtn stijlSliderActionPrimary" type="button" onclick="addThemeFromStyle()" title="Thema toevoegen"><span class="stijlSliderActionPlus">+</span><span>Thema</span></button>';
+}
+function setEditorThemeToggleHtml(){
+  var expanded=!!S.setThemeExpanded;
+  var chevron=expanded
+    ?'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 6.5L5 3.5L8 6.5"/></svg>'
+    :'<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>';
+  return '<button class="setThemeRailChevronBtn'+(expanded?' is-open':'')+'" type="button" onclick="toggleSetThemeExpanded()" title="Thema-overzicht in/uitklappen" aria-label="Thema-overzicht" aria-expanded="'+(expanded?'true':'false')+'">'+chevron+'</button>';
+}
+function setEditorActionsHtml(){
+  var active=S.opmPane==='info'?'info':(S.opmPane==='inst'?'inst':'vragen');
+  var sortItems=[{v:'manual',l:'Eigen volgorde'},{v:'alpha-asc',l:'A-Z'},{v:'alpha-desc',l:'Z-A'}];
+  var addBtn=setEditorThemeActionHtml();
+  var dupBtn='<button class="stijlSliderActionBtn" type="button" onclick="dupSet()" title="Set dupliceren"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>';
+  var sortMenu='<div class="stijlSliderActionsWrap homeOrderWrap"><details class="textToolbarMenu homeToolbarMenu homeOrderMenu">'+
+    '<summary class="textToolbarMenuBtn homeToolbarMenuBtn homeOrderMenuBtn" title="Thema\'s ordenen">'+
+      '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h7M3 12h4"/></svg>'+
+      '<span>Ordenen</span>'+
+      '<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>'+
+    '</summary>'+
+    '<div class="textToolbarMenuPop homeToolbarMenuPop">'+
+      sortItems.map(function(opt){return '<button class="textToolbarMenuItem" type="button" onclick="this.closest(\'details\').removeAttribute(\'open\')">'+esc(opt.l)+'</button>';}).join('')+
+    '</div>'+
+  '</details></div>';
+  var settingsMode=S.opmPane==='inst';
+  return '<div class="homeSliderHeaderControls">'+
+    '<div class="homeSliderLeftControls">'+setEditorLayoutChipHtml()+editorSettingsToggleBtnHtml()+setEditorPageBtnsHtml(active)+'</div>'+
+    '<div class="homeSliderRightControls'+(settingsMode?' slider-controls-dimmed':'')+'">'+addBtn+dupBtn+sortMenu+'</div>'+
+  '</div>';
+}
+function setEditorInfoOrderMenuHtml(){
+  return '<div class="stijlSliderActionsWrap homeOrderWrap"><details class="textToolbarMenu homeToolbarMenu homeOrderMenu">'+
+    '<summary class="textToolbarMenuBtn homeToolbarMenuBtn homeOrderMenuBtn" title="Pagina\'s ordenen">'+
+      '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h7M3 12h4"/></svg>'+
+      '<span>Ordenen</span>'+
+      '<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>'+
+    '</summary>'+
+    '<div class="textToolbarMenuPop homeToolbarMenuPop">'+
+      '<button class="textToolbarMenuItem sel" type="button" onclick="this.closest(\'details\').removeAttribute(\'open\')">Eigen volgorde</button>'+
+      '<button class="textToolbarMenuItem" type="button" onclick="includeAllInfoThemes();this.closest(\'details\').removeAttribute(\'open\')">Alles tonen</button>'+
+    '</div>'+
+  '</details></div>';
+}
+function setEditorInfoActionsHtml(){
+  var addPageBtn='<button class="stijlSliderActionBtn stijlSliderActionPrimary" type="button" onclick="addInfoCustomPage()"><span class="stijlSliderActionPlus">+</span><span>Pagina</span></button>';
+  var orderMenu=setEditorInfoOrderMenuHtml();
+  return '<div class="homeSliderHeaderControls infoSliderHeaderControls">'+
+    '<div class="homeSliderLeftControls">'+setEditorLayoutChipHtml()+editorSettingsToggleBtnHtml()+setEditorPageBtnsHtml('info')+'</div>'+
+    '<div class="homeSliderRightControls">'+
+      addPageBtn+
+      orderMenu+
+    '</div>'+
+  '</div>';
+}
+function homeToolbarDropdownHtml(label,current,items){
+  return '<details class="textToolbarMenu homeToolbarMenu">'+
+    '<summary class="textToolbarMenuBtn homeToolbarMenuBtn" title="'+esc(label)+'">'+
+      '<span class="homeToolbarMenuLabel">'+esc(label)+'</span>'+
+      '<span class="homeToolbarMenuValue">'+esc(current)+'</span>'+
+      '<span class="textToolbarCaret">▾</span>'+
+    '</summary>'+
+    '<div class="textToolbarMenuPop homeToolbarMenuPop">'+items.join('')+'</div>'+
+  '</details>';
+}
+function homeLayoutChipHtml(pane){
+  var layoutMode=currentSpaceLayoutMode();
+  var label=(spaceLayoutOptions().find(function(opt){return opt.id===layoutMode;})||{}).label||'Indeling';
+  return '<button class="stijlSliderActionBtn homeLayoutChip'+(pane==='layout'?' is-active':'')+'" type="button" onclick="setHomeSliderPane(\'layout\')" title="Indeling: '+esc(label)+'" aria-label="Indeling wijzigen">'+
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11M6.3 6.5V13"/></svg>'+
+  '</button>';
+}
+function homeSortDropdownHtml(pane){
+  pane=normalizeHomeSliderPane(pane);
+  var sortMode=pane==='hero'?currentHomeHeroSortMode():currentHomeSortMode();
+  var items=homeSortOptions().map(function(opt){
+    return '<button class="textToolbarMenuItem'+(sortMode===opt.v?' sel':'')+'" type="button" onclick="setHomeOrderModeFromSlider(\''+esc(opt.v)+'\',\''+esc(pane)+'\');this.closest(\'details\').removeAttribute(\'open\')">'+esc(opt.l)+'</button>';
+  });
+  return '<div class="stijlSliderActionsWrap homeOrderWrap"><details class="textToolbarMenu homeToolbarMenu homeOrderMenu">'+
+    '<summary class="textToolbarMenuBtn homeToolbarMenuBtn homeOrderMenuBtn" title="Kaartsets ordenen">'+
+      '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h7M3 12h4"/></svg>'+
+      '<span>Ordenen</span>'+
+      '<svg class="heroChevronIcon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5"/></svg>'+
+    '</summary>'+
+    '<div class="textToolbarMenuPop homeToolbarMenuPop">'+items.join('')+'</div>'+
+  '</details></div>';
+}
+function homeSetSlideCardHtml(set,idx,opts){
+  opts=opts||{};
+  var pane=opts.pane||'sets';
+  var selectedIds=opts.selectedIds||[];
+  var selectedIdx=selectedIds.indexOf(set.id);
+  var isSelected=selectedIdx>=0;
+  var bundle=spacePreviewSetBundle(set);
+  var meta=(bundle&&bundle.meta)||{};
+  var cssVars=meta.cssVars||{};
+  var cover=spacePreviewSliderThumbDataUrl(set,bundle);
+  var bg=cardBgForKey(meta,'cover')||cssVars['--pk-set-card']||cssVars['--pk-set-bg']||'#d9ecef';
+  var thumb=cover
+    ?'<img src="'+esc(cover)+'" alt="">'
+    :'<div class="homeSetThumbFallback" style="--home-set-bg:'+esc(bg)+'"></div>';
+  var draggable=opts.draggable!==undefined?opts.draggable:(pane==='hero'?isSelected:true);
+  var title=pane==='hero'?(isSelected?'Verwijderen uit Uitgelicht':'Toevoegen aan Uitgelicht'):(pane==='grid'?'Sleep om de volgorde te wijzigen':'Sleep om de volgorde te wijzigen');
+  var heroToggleBtn=pane==='hero'&&isSelected
+    ?'<button class="homeHeroToggleBtn is-sel" type="button" title="'+title+'" onclick="event.stopPropagation();toggleHomeHeroSet(\''+esc(set.id)+'\')">'+
+        '<span class="heroRemoveMinus" aria-hidden="true">−</span>'+
+      '</button>'
+    :'';
+  return '<div class="homeSetSlideCard homeSetSlideCard-'+pane+(isSelected?' sel is-picked':'')+(idx===0&&pane==='sets'?' sel':'')+'" draggable="'+(draggable?'true':'false')+'" data-home-pane="'+esc(pane)+'" data-home-set-id="'+esc(set.id)+'" title="'+title+'">'+
+    '<div class="homeSetSlideThumb">'+thumb+heroToggleBtn+'</div>'+
+    '<div class="homeSetSlideLabelWrap" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" ondragstart="event.preventDefault();event.stopPropagation()" ondblclick="event.stopPropagation();startHomeSetRename(\''+esc(set.id)+'\',this.querySelector(\'.homeSetSlideNameLabel\'))"><div class="homeSetSlideNameLabel" draggable="false" title="Dubbelklik om naam te wijzigen">'+esc(set.title||set.id||'Naamloos')+'</div></div>'+
+  '</div>';
+}
+function spacePreviewSliderThumbDataUrl(set,bundle){
+  return svgDataUrlFromMarkup(spacePreviewSyntheticCoverSvg(bundle));
+}
+function homeSetSliderStripHtml(){
+  var sets=sortedHomeSets();
+  var empty=!sets.length?'<div class="homeSetSliderEmpty">Nog geen sets.</div>':'';
+  return '<div class="homeSetSlideRail">'+
+    (sets.length?sets.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'sets'});}).join(''):empty)+
+  '</div>';
+}
+function homeLayoutSliderStripHtml(){
+  var strip = '<div class="stijlSlideRail homeOptionSlideRail">'+
+    spaceLayoutOptions().map(function(opt){
+      return spaceLayoutCardHtml(opt, currentSpaceLayoutMode());
+    }).join('')+
+  '</div>';
+  return strip;
+}
+function setMakerBgVariant(id){
+  if(S._profile) S._profile.bg_variant=id;
+  var swatches=document.querySelectorAll('.makerBgSwatch');
+  swatches.forEach(function(btn){
+    var sel=btn.dataset.bgId===id;
+    btn.classList.toggle('sel',sel);
+    btn.innerHTML=sel?'<svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg>':'';
+  });
+  if(typeof window.saveMakerBgVariant==='function') window.saveMakerBgVariant(id);
+}
+var MAKER_BG_VARIANTS=[
+  {id:'licht', label:'Licht',  color:'#f4f6f7'},
+  {id:'wit',   label:'Wit',    color:'#ffffff'},
+  {id:'warm',  label:'Warm',   color:'#fdf8f0'},
+  {id:'koel',  label:'Koel',   color:'#f0f4f8'},
+  {id:'groen', label:'Groen',  color:'#f0f6f1'},
+  {id:'paars', label:'Paars',  color:'#f4f0f8'}
+];
+function makerBgColor(variant){
+  var v=(MAKER_BG_VARIANTS.find(function(b){return b.id===variant;})||MAKER_BG_VARIANTS[0]);
+  return v.color;
+}
+var HOME_SJABLONEN=[
+  {id:'s-1',bg:'#d4eaf0'},{id:'s-2',bg:'#e6dff5'},{id:'s-3',bg:'#fdf0d5'},{id:'s-4',bg:'#dff5e8'},
+  {id:'s-5',bg:'#fde8e0'},{id:'s-6',bg:'#f5e8df'},{id:'s-7',bg:'#e8f0df'},{id:'s-8',bg:'#f0e8f5'},
+];
+function sjabloonTileHtml(s,idx){
+  return '<button class="homeSetSlideCard homeSetSlideCard-hero sjabloonTile" type="button" onclick="addHeroPlaceholder(\''+esc(s.bg)+'\')" title="Lege kaart '+(idx+1)+' toevoegen">'+
+    '<div class="homeSetSlideThumb"><div class="homeSetThumbFallback" style="--home-set-bg:'+esc(s.bg)+'"></div></div>'+
+    '<div class="homeSetSlideLabelWrap"></div>'+
+  '</button>';
+}
+function createSetFromSjabloon(id){
+  var s=HOME_SJABLONEN.find(function(x){return x.id===id;});
+  if(!s)return;
+  showNewSetModalWithBg(s.bg);
+}
+function pickLegeKaartColor(el,bg){
+  document.querySelectorAll('.legeKaartSwatch').forEach(function(s){s.classList.remove('sel');});
+  el.classList.add('sel');
+  var inp=g('ns_bg');if(inp)inp.value=bg;
+}
+function showNewSetModalWithBg(initBg){
+  var _ph=_setNames[Math.floor(Math.random()*_setNames.length)];
+  var swatchesHtml=HOME_SJABLONEN.map(function(s,i){
+    return '<button type="button" class="legeKaartSwatch'+(s.bg===initBg?' sel':'')+'" style="background:'+esc(s.bg)+'" onclick="pickLegeKaartColor(this,\''+esc(s.bg)+'\')" title="Kleur '+(i+1)+'"></button>';
+  }).join('');
+  showModal('<h3>Nieuwe kaartenset</h3>'+
+    '<div class="field"><label>Setnaam</label><input id="ns_title" type="text" placeholder="'+_ph+'" class="fIn" autofocus></div>'+
+    '<div class="field"><label>Kaartkleur</label>'+
+      '<div class="legeKaartSwatches">'+swatchesHtml+'</div>'+
+      '<input type="hidden" id="ns_bg" value="'+(initBg||'')+'">'+
+    '</div>'+
+    '<div class="field"><label>Kaartformaat</label>'+
+      fmtStripHtml(DEFAULT_CARD_FORMAT,'pickNewFmt')+
+      '<input type="hidden" id="ns_fmt" value="'+DEFAULT_CARD_FORMAT+'">'+
+    '</div>'+
+    '<div class="mAct"><button class="mCa" onclick="closeModal()">Annuleren</button><button class="mOk" onclick="createSet()">Aanmaken</button></div>',
+    'newSetModal');
+  setTimeout(function(){var n=g('ns_title');if(n)n.focus();},50);
+}
+function homeHeroSliderStripHtml(){
+  var selectedIds=currentHomeHeroSetIds();
+  var orderIds=resolvedHomeHeroSetIds();
+  var all=sortedHomeSets();
+  var byId={};
+  all.forEach(function(set){byId[set.id]=set;});
+  var selected=orderIds.map(function(id){return byId[id];}).filter(Boolean);
+  var rest=all.filter(function(set){return orderIds.indexOf(set.id)<0;});
+  var sets=selected.concat(rest);
+  var expanded=!!S.homeHeroExpanded;
+
+  if(expanded){
+    var uitgelichtItems=orderIds.map(function(id){
+      if(isHeroPlaceholder(id))return{_ph:id};
+      return byId[id]?{_set:byId[id]}:null;
+    }).filter(Boolean);
+    var uitgelichtHtml=uitgelichtItems.length
+      ?uitgelichtItems.map(function(item,idx){
+          return item._ph?heroPlaceholderCardHtml(item._ph):homeSetSlideCardHtml(item._set,idx,{pane:'hero',selectedIds:orderIds,orderIds:orderIds});
+        }).join('')
+      :'<div class="homeHeroTrayEmpty">Druk op + bij een kaart hieronder om hem toe te voegen</div>';
+    var eigenHtml=rest.length
+      ?rest.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'hero',selectedIds:orderIds,orderIds:orderIds,draggable:true});}).join('')
+      :'<div class="homeSetSliderEmpty">Alle sets zijn al uitgelicht.</div>';
+    var sjablonenHtml=HOME_SJABLONEN.map(function(s,i){return sjabloonTileHtml(s,i);}).join('');
+    return '<div class="homeSliderExpandWrap homeHeroPickerOpen">'+
+      '<div class="homeHeroPickerSection homeHeroUitgelichtTray">'+
+        '<div class="homeHeroPickerLabel">Uitgelicht</div>'+
+        '<div class="homeSetSlideRail homeHeroPickerRail homeHeroTrayRail" data-hero-tray="true">'+uitgelichtHtml+'</div>'+
+      '</div>'+
+      '<div class="homeHeroPickerSection">'+
+        '<div class="homeHeroPickerLabel">Eigen kaarten</div>'+
+        '<div class="homeSetSlideRail homeHeroPickerRail">'+eigenHtml+'</div>'+
+      '</div>'+
+      '<div class="homeHeroPickerSection">'+
+        '<div class="homeHeroPickerLabel">Lege kaarten</div>'+
+        '<div class="homeSetSlideRail homeHeroPickerRail">'+sjablonenHtml+'</div>'+
+      '</div>'+
+    '</div>';
+  }
+
+  var railClass='homeSetSlideRail homeHeroSlideRail';
+  var empty=!sets.length?'<div class="homeSetSliderEmpty">Nog geen sets.</div>':'';
+  return '<div class="homeSliderExpandWrap">'+
+    '<div class="'+railClass+'">'+
+      (sets.length?sets.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'hero',selectedIds:selectedIds,orderIds:orderIds});}).join(''):empty)+
+    '</div>'+
+  '</div>';
+}
+function homeGridSliderStripHtml(){
+  var resolvedIds=resolvedHomeGridSetIds();
+  var allSets=sortedHomeSets();
+  var byId={};
+  allSets.forEach(function(set){byId[set.id]=set;});
+  var inList=resolvedIds.map(function(id){return byId[id];}).filter(Boolean);
+  var rest=allSets.filter(function(set){return resolvedIds.indexOf(set.id)<0;});
+  var expanded=!!S.homeGridExpanded;
+
+  if(expanded){
+    var lijstItems=resolvedIds.map(function(id){return byId[id];}).filter(Boolean);
+    var lijstHtml=lijstItems.length
+      ?lijstItems.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'grid',draggable:true});}).join('')
+      :'<div class="homeGridTrayEmpty">Sleep kaarten hier naartoe of gebruik + om toe te voegen</div>';
+    var eigenHtml=rest.length
+      ?rest.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'grid',draggable:true});}).join('')
+      :'<div class="homeSetSliderEmpty">Alle sets staan al in de lijst.</div>';
+    var sjablonenHtml=HOME_SJABLONEN.map(function(s,i){return sjabloonTileHtml(s,i);}).join('');
+    return '<div class="homeSliderExpandWrap homeGridPickerOpen">'+
+      '<div class="homeGridPickerSection homeGridListTray">'+
+        '<div class="homeGridPickerLabel">Lijst</div>'+
+        '<div class="homeSetSlideRail homeGridPickerRail homeGridTrayRail" data-grid-tray="true">'+lijstHtml+'</div>'+
+      '</div>'+
+      '<div class="homeGridPickerSection">'+
+        '<div class="homeGridPickerLabel">Eigen kaarten</div>'+
+        '<div class="homeSetSlideRail homeGridPickerRail">'+eigenHtml+'</div>'+
+      '</div>'+
+      '<div class="homeGridPickerSection">'+
+        '<div class="homeGridPickerLabel">Lege kaarten</div>'+
+        '<div class="homeSetSlideRail homeGridPickerRail">'+sjablonenHtml+'</div>'+
+      '</div>'+
+    '</div>';
+  }
+
+  var sets=inList.concat(rest);
+  var railClass='homeSetSlideRail homeGridSlideRail';
+  var empty=!sets.length?'<div class="homeSetSliderEmpty">Nog geen sets.</div>':'';
+  return '<div class="homeSliderExpandWrap">'+
+    '<div class="'+railClass+'">'+
+      (sets.length?sets.map(function(set,idx){return homeSetSlideCardHtml(set,idx,{pane:'grid'});}).join(''):empty)+
+    '</div>'+
+  '</div>';
+}
+function persistSetTitle(setId,val){
+  var idx=S.sets.findIndex(function(s){return s.id===setId;});
+  if(idx>=0)S.sets[idx].title=val;
+  renderSidebar();
+  saveIndex('Rename: '+setId).catch(function(){});
+  getFile('sets/'+setId+'/meta.json').then(function(r){
+    r.data.title=val;
+    return saveFile('sets/'+setId+'/meta.json',r.data,r.sha,'Rename set: '+val);
+  }).catch(function(){});
+}
+function startInlineSetRename(setId,el,inputClass){
+  if(el.querySelector('input'))return;
+  var current=el.textContent;
+  var card=el.closest('.stijlSlideCard');
+  if(card)card.classList.add('editing-name');
+  el.classList.add('is-editing');
+  el.innerHTML='';
+  var inp=document.createElement('input');
+  inp.type='text';
+  inp.value=current;
+  inp.className=inputClass||'homeSetRenameInput';
+  inp.onclick=function(e){e.stopPropagation();};
+  inp.onkeydown=function(e){
+    if(e.key==='Enter'){e.preventDefault();inp.blur();}
+    if(e.key==='Escape'){inp.value=current;inp.blur();}
+  };
+  inp.onblur=function(){
+    var val=inp.value.trim()||current;
+    el.textContent=val;
+    el.classList.remove('is-editing');
+    if(card)card.classList.remove('editing-name');
+    if(val===current)return;
+    persistSetTitle(setId,val);
+  };
+  el.appendChild(inp);
+  inp.focus();
+  inp.select();
+}
+function startHomeSetRename(setId,el){
+  startInlineSetRename(setId,el,'homeSetRenameInput');
+}
+function startSidebarSetRename(setId,el){
+  startInlineSetRename(setId,el,'sidebarSetRenameInput');
+}
+function updateGridExpandBtnVisibility(){
+  if(S.homeGridExpanded)return;
+  var rail=document.querySelector('.homeGridSlideRail');
+  if(!rail)return;
+  var btn=rail.parentElement&&rail.parentElement.querySelector('.homeSliderExpandCornerBtn');
+  if(!btn)return;
+  btn.style.display=(rail.scrollWidth>rail.clientWidth+8)?'':'none';
+}
+function homeSliderStripHtml(){
+  var pane=normalizeHomeSliderPane(S.homeSliderPane);
+  if(pane==='layout')return homeLayoutSliderStripHtml();
+  if(pane==='hero')return homeHeroSliderStripHtml();
+  if(pane==='grid')return homeGridSliderStripHtml();
+  return homeSetSliderStripHtml();
+}
+var HOME_SET_DND=null;
+function initHomeSetSliderDnd(){
+  function clearHomeDropState(){
+    document.querySelectorAll('.homeSetSlideCard').forEach(function(el){
+      el.classList.remove('dragover','drop-before','drop-after');
+    });
+  }
+  function homeDropTargetFromEvent(e,rail){
+    var card=e.target&&e.target.closest?e.target.closest('.homeSetSlideCard'):null;
+    if(card&&rail.contains(card))return card;
+    var cards=Array.prototype.slice.call(rail.querySelectorAll('.homeSetSlideCard'));
+    return cards.length?cards[cards.length-1]:null;
+  }
+  function dropAfterCard(e,card){
+    if(!card)return false;
+    var r=card.getBoundingClientRect();
+    return e.clientX>r.left+(r.width/2);
+  }
+  document.querySelectorAll('.homeSetSlideRail').forEach(function(rail){
+    var isTray=!!rail.dataset.heroTray||!!rail.dataset.gridTray;
+    var trayClass=rail.dataset.heroTray?'hero-tray-dragover':'grid-tray-dragover';
+    rail.addEventListener('dragover',function(e){
+      if(!HOME_SET_DND)return;
+      e.preventDefault();
+      if(e.dataTransfer)e.dataTransfer.dropEffect='move';
+      clearHomeDropState();
+      if(isTray&&!HOME_SET_DND.picked){
+        rail.classList.add(trayClass);
+        return;
+      }
+      var target=homeDropTargetFromEvent(e,rail);
+      if(target&&target.dataset.homePane===HOME_SET_DND.pane&&target.dataset.homeSetId!==HOME_SET_DND.id){
+        target.classList.add('dragover',dropAfterCard(e,target)?'drop-after':'drop-before');
+      }
+    });
+    rail.addEventListener('dragleave',function(e){
+      if(!rail.contains(e.relatedTarget)){clearHomeDropState();rail.classList.remove(trayClass);}
+    });
+    rail.addEventListener('drop',function(e){
+      if(!HOME_SET_DND)return;
+      e.preventDefault();
+      rail.classList.remove(trayClass);
+      var fromId=HOME_SET_DND.id||'';
+      var pane=HOME_SET_DND.pane||'grid';
+      clearHomeDropState();
+      if(isTray&&!HOME_SET_DND.picked){
+        if(rail.dataset.heroTray)toggleHomeHeroSet(fromId);
+        else if(rail.dataset.gridTray)toggleHomeGridSet(fromId);
+        return;
+      }
+      var target=homeDropTargetFromEvent(e,rail);
+      var toId=target?(target.dataset.homeSetId||''):'';
+      var after=dropAfterCard(e,target);
+      if(!toId||fromId===toId)return;
+      if(pane==='hero')reorderHomeHeroSet(fromId,toId,after);
+      else if(pane==='grid')reorderHomeGridSet(fromId,toId,after);
+      else reorderHomeSet(fromId,toId,after);
+    });
+  });
+  document.querySelectorAll('.homeSetSlideCard').forEach(function(card){
+    card.addEventListener('click',function(e){
+      if(this.dataset.homePane==='hero'){
+        e.preventDefault();
+        if(this.dataset.homeDragClickGuard==='1'){
+          this.dataset.homeDragClickGuard='';
+          return;
+        }
+        toggleHomeHeroSet(this.dataset.homeSetId||'');
+      }
+    });
+    card.addEventListener('dragstart',function(e){
+      if(this.getAttribute('draggable')==='false'){
+        e.preventDefault();
+        return;
+      }
+      this.classList.add('dragging');
+      this.dataset.homeDragClickGuard='1';
+      HOME_SET_DND={id:this.dataset.homeSetId||'',pane:this.dataset.homePane||'grid',picked:this.classList.contains('is-picked')};
+      e.dataTransfer.effectAllowed='move';
+      e.dataTransfer.setData('text/plain',this.dataset.homeSetId||'');
+      document.querySelectorAll('.homeSetSlideRail').forEach(function(r){r.classList.add('reordering');});
+    });
+    card.addEventListener('dragend',function(){
+      this.classList.remove('dragging');
+      HOME_SET_DND=null;
+      clearHomeDropState();
+      document.querySelectorAll('.homeSetSlideRail').forEach(function(r){r.classList.remove('reordering');});
+      var self=this;
+      setTimeout(function(){self.dataset.homeDragClickGuard='';},0);
+    });
+  });
+}
+function spacePreviewBgMode(){
+  var settings=((S.space&&S.space.settings)||{});
+  var publicPage=(settings&&typeof settings.publicPage==='object')?settings.publicPage:{};
+  return String(publicPage.background||'zacht');
+}
+function spacePreviewText(str,fallback){
+  var out=String(str||'').trim();
+  return out||fallback||'';
+}
+function spacePreviewCountQuestions(bundle){
+  var questions=(bundle&&bundle.questions)||{};
+  return Object.keys(questions).reduce(function(total,key){
+    return total+(Array.isArray(questions[key])?questions[key].length:0);
+  },0);
+}
+function spacePreviewCountThemes(bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  return Array.isArray(meta.themes)?meta.themes.length:0;
+}
+function spacePreviewLeadTheme(bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  var themes=Array.isArray(meta.themes)?meta.themes:[];
+  var first=themes[0]||null;
+  return spacePreviewText(first&&(first.label||first.title),'Kaartenset');
+}
+function spacePreviewNormalizeText(value){
+  return String(value||'')
+    .replace(/[*_`>#-]+/g,' ')
+    .replace(/\[(.*?)\]\((.*?)\)/g,'$1')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+function spacePreviewTrimText(value){
+  var text=spacePreviewNormalizeText(value);
+  if(text.length<=160)return text;
+  return text.slice(0,157).trim()+'...';
+}
+function spacePreviewDescription(bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  var uitleg=(bundle&&bundle.uitleg)||{};
+  return spacePreviewTrimText(meta.description||meta.subtitle||meta.tagline||uitleg.cover||uitleg.intro||'Open deze set om de thema\'s en vragen te bekijken.');
+}
+function spacePreviewLeadQuestion(bundle){
+  var questions=(bundle&&bundle.questions)||{};
+  var keys=Object.keys(questions);
+  for(var i=0;i<keys.length;i++){
+    var arr=Array.isArray(questions[keys[i]])?questions[keys[i]]:[];
+    if(!arr.length)continue;
+    var q=arr[0];
+    var txt=spacePreviewText(q&&(q.front||q.text||q.question),'');
+    if(txt)return txt;
+  }
+  return '';
+}
+function spacePreviewSetBundle(set){
+  if(set&&set.id&&SC[set.id])return SC[set.id];
+  return (set&&set.bundle)||null;
+}
+function spacePreviewCoverTextBlocks(bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  var ui=(meta&&meta.ui&&typeof meta.ui==='object')?meta.ui:{};
+  var cssVars=meta.cssVars||{};
+  var baseFont=String(cssVars['--pk-font']||'IBM Plex Sans');
+  var baseColor=normalizeHexInput(cssVars['--pk-set-text'])||'#1a1a2e';
+  var list=Array.isArray(ui.coverTexts)?ui.coverTexts.slice(0,6).map(function(item,idx){
+    item=item&&typeof item==='object'?item:{};
+    return {
+      text:String(item.text||'').trim(),
+      x:isFinite(Number(item.x))?Number(item.x):50,
+      y:isFinite(Number(item.y))?Number(item.y):50,
+      size:Math.max(8,Math.min(48,parseInt(item.size,10)||(idx===0?18:12))),
+      align:(item.align==='center'||item.align==='right')?item.align:'left',
+      valign:(item.valign==='top'||item.valign==='bottom')?item.valign:'center',
+      weight:(item.weight==='medium'||item.weight==='semibold'||item.weight==='bold')?item.weight:'regular',
+      italic:!!item.italic,
+      underline:!!item.underline,
+      font:String(item.font||baseFont),
+      color:normalizeHexInput(item.color)||baseColor
+    };
+  }).filter(function(item){return !!item.text;}):[];
+  return list;
+}
+function spacePreviewShapeLayers(bundle,key){
+  var meta=(bundle&&bundle.meta)||{};
+  var ui=(meta&&meta.ui&&typeof meta.ui==='object')?meta.ui:{};
+  var cardShapes=(ui&&ui.cardShapes&&typeof ui.cardShapes==='object')?ui.cardShapes:{};
+  return Array.isArray(cardShapes[key])?cardShapes[key]:[];
+}
+function previewThumbViewportForMeta(meta){
+  var fmt=getCardFormatObjForMeta(meta);
+  var width=100;
+  var height=100*(fmt.h/fmt.w);
+  return {width:width,height:height,scaleY:height/100};
+}
+function previewThumbY(value,viewport){
+  var y=Number(value);
+  if(!isFinite(y))y=50;
+  return y*((viewport&&viewport.scaleY)||1);
+}
+function previewThumbClampY(value,viewport,padding){
+  var pad=isFinite(Number(padding))?Number(padding):6;
+  var max=((viewport&&viewport.height)||100)-pad;
+  return Math.max(pad,Math.min(max,previewThumbY(value,viewport)));
+}
+function spacePreviewCoverTextSvg(block){
+  if(!block||!String(block.text||'').trim())return '';
+  var viewport=arguments[1]||{height:100,scaleY:1};
+  var lines=String(block.text||'').split(/\r?\n/).map(function(line){return String(line||'').trim();}).filter(Boolean);
+  if(!lines.length)return '';
+  var fontSize=Math.max(3,Math.min(15,Number(block.size||12)*0.24));
+  var lineStep=fontSize*1.2;
+  var anchor=block.align==='center'?'middle':(block.align==='right'?'end':'start');
+  var baseline=block.valign==='top'?'hanging':(block.valign==='bottom'?'text-after-edge':'middle');
+  var weight=block.weight==='bold'?'700':block.weight==='semibold'?'600':block.weight==='medium'?'500':'400';
+  var centerY=previewThumbClampY(block.y,viewport,6);
+  var startY=baseline==='middle'?(centerY-((lines.length-1)*lineStep)/2):centerY;
+  return '<text x="'+Math.max(6,Math.min(94,Number(block.x)||50))+'" y="'+startY.toFixed(2)+'" text-anchor="'+anchor+'" dominant-baseline="'+baseline+'" font-family="'+esc(block.font||'IBM Plex Sans')+'" font-size="'+fontSize.toFixed(2)+'" font-weight="'+weight+'" font-style="'+(block.italic?'italic':'normal')+'" text-decoration="'+(block.underline?'underline':'none')+'" fill="'+esc(block.color||'#1a1a2e')+'">'+
+    lines.map(function(line,idx){
+      return '<tspan x="'+Math.max(6,Math.min(94,Number(block.x)||50))+'"'+(idx?(' dy="'+lineStep.toFixed(2)+'"'):'')+'>'+esc(line)+'</tspan>';
+    }).join('')+
+  '</text>';
+}
+function spacePreviewSyntheticCoverSvg(bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  var viewport=previewThumbViewportForMeta(meta);
+  var cssVars=meta.cssVars||{};
+  var cardBg=cardBgForKey(meta,'cover')||cssVars['--pk-set-card']||cssVars['--pk-set-bg']||DEFAULT_CARD_SURFACE;
+  var coverShapes=spacePreviewShapeLayers(bundle,'cover').map(function(layer){
+    if(isTextLayerItem(layer))return '';
+    if(isGroupLayer(layer)){
+      var gx=Number(layer.x);if(!isFinite(gx))gx=50;
+      var gy=previewThumbY(layer.y,viewport);
+      var gs=Math.max(1,Number(layer.size)||42);
+      var gr=Number(layer.rotate)||0;
+      return (Array.isArray(layer.groupChildren)?layer.groupChildren:[]).map(function(child){
+        if(isTextLayerItem(child))return '';
+        var cx=Number(child.x);if(!isFinite(cx))cx=50;
+        var cy=Number(child.y);if(!isFinite(cy))cy=50;
+        var cs=Math.max(1,Number(child.size)||42);
+        var tx=gx+(cx-50)*gs/100;
+        var ty=gy+((cy-50)*gs/100)*viewport.scaleY;
+        var size=cs*gs/100;
+        var es=size*Math.min(1,viewport.scaleY||1);
+        var rot=gr+(Number(child.rotate)||0);
+        return '<g transform="translate('+tx.toFixed(2)+' '+ty.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(child,'preview')+'</g>';
+      }).join('');
+    }
+    var size=Math.max(1,Number(layer.size)||42);
+    var es=size*Math.min(1,viewport.scaleY||1);
+    var x=Number(layer.x);if(!isFinite(x))x=50;
+    var y=previewThumbY(layer.y,viewport);
+    var rot=Number(layer.rotate)||0;
+    return '<g transform="translate('+x.toFixed(2)+' '+y.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(layer,'preview')+'</g>';
+  }).join('');
+  var coverTexts=spacePreviewCoverTextBlocks(bundle).map(function(block){return spacePreviewCoverTextSvg(block,viewport);}).join('');
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+viewport.width+' '+viewport.height.toFixed(3)+'" preserveAspectRatio="none" aria-hidden="true">'+
+    '<rect width="'+viewport.width+'" height="'+viewport.height.toFixed(3)+'" rx="3.5" fill="'+esc(cardBg)+'"/>'+
+    coverShapes+
+    coverTexts+
+  '</svg>';
+}
+function spacePreviewSetCoverDataUrl(set,bundle){
+  var meta=(bundle&&bundle.meta)||{};
+  var coverMode=cardBuildModeForKey(meta,'cover');
+  if(coverMode!=='self'){
+    var coverHit=cachedCardAssetForFile(set.id,'voorkant.svg')||cachedCardAssetForFile(set.id,'kaart.svg');
+    if(coverHit&&coverHit.asset&&coverHit.asset.dataUrl)return coverHit.asset.dataUrl;
+  }
+  return svgDataUrlFromMarkup(spacePreviewSyntheticCoverSvg(bundle));
+}
+function previewThemeTintPalette(meta,key){
+  meta=meta||{};
+  var source=
+    normalizeHexInput(cardBgBaseForKey(meta,key))||
+    normalizeHexInput((((meta.cssVars||{})['--pk-set-card'])||''))||
+    normalizeHexInput((((meta.cssVars||{})['--pk-set-bg'])||''))||
+    normalizeHexInput((((meta.cssVars||{})['--pk-set-accent'])||''))||
+    '#A8E1DD';
+  var tealBase='#8FBFAF';
+  var paper='#FAFAF8';
+  var accent=mixHexAdmin(source,tealBase,0.72);
+  return {
+    source:source,
+    paper:paper,
+    accent:mixHexAdmin(accent,'#ffffff',0.18),
+    accentSoft:mixHexAdmin(accent,'#ffffff',0.42),
+    accentDeep:mixHexAdmin(accent,'#5e9ca5',0.18),
+    stroke:mixHexAdmin('#5e9ca5','#ffffff',0.12)
+  };
+}
+function spacePreviewTilePalette(meta,key){
+  return previewThemeTintPalette(meta,key);
+}
+function homeMainIndexBaseBg(meta){
+  meta=meta||{};
+  var cssVars=meta.cssVars||{};
+  var explicit=normalizeHexInput(cssVars['--setsBaseBg'])||normalizeHexInput(cssVars['--setsHeaderBg']);
+  if(explicit)return explicit;
+  return sharedPreviewBaseVar('--pk-main-index-bg','#F4F7F5');
+}
+function previewMainIndexBaseFill(isNight){
+  if(isNight)return sharedPreviewBaseVar('--pk-main-index-dark-bg','#18123c');
+  return homeMainIndexBaseBg((S.d&&S.d.meta)||{});
+}
+function previewCardsBaseFill(isNight){
+  if(isNight)return sharedPreviewBaseVar('--pk-cards-index-dark-bg','#1b1840');
+  var bg=bgCfg();
+  if(bg&&bg.autoTint===false)return '#F8FAFA';
+  var meta=(S.d&&S.d.meta)||{};
+  var cssVars=meta.cssVars||{};
+  return normalizeHexInput(cssVars['--cardsPageBg'])||sharedPreviewBaseVar('--pk-cards-index-bg','#FAFAF8');
+}
+function focusPreviewSurfacePalette(isNight,key){
+  if(isNight){
+    return {
+      shell:previewCardsBaseFill(true),
+      canvas:previewCardsBaseFill(true),
+      window:'rgba(18,30,44,.78)',
+      border:'rgba(108,132,164,.16)'
+    };
+  }
+  var meta=(S.d&&S.d.meta)||{};
+  return {
+    shell:homeMainIndexBaseBg(meta),
+    canvas:previewCardsBaseFill(false),
+    window:'#FFFFFF',
+    border:'rgba(120,140,160,.08)'
+  };
+}
+function applyFocusPreviewSurfaceVars(palette){
+  var root=g('stijl-kaart');
+  if(!root)return;
+  if(!palette){
+    root.style.removeProperty('--focus-preview-shell-base');
+    root.style.removeProperty('--focus-preview-canvas-base');
+    root.style.removeProperty('--focus-preview-window-surface');
+    root.style.removeProperty('--focus-preview-border');
+    return;
+  }
+  root.style.setProperty('--focus-preview-shell-base',palette.shell||'#FBFBFC');
+  root.style.setProperty('--focus-preview-canvas-base',palette.canvas||'#FFFFFF');
+  root.style.setProperty('--focus-preview-window-surface',palette.window||'#FFFFFF');
+  root.style.setProperty('--focus-preview-border',palette.border||'rgba(120,140,160,.06)');
+}
+function sharedPreviewBaseVar(name,fallback){
+  if(window.PK&&window.PK.previewBackground&&typeof window.PK.previewBackground.baseVar==='function'){
+    return window.PK.previewBackground.baseVar(name,fallback,document.documentElement);
+  }
+  try{
+    var value=getComputedStyle(document.documentElement).getPropertyValue(name)||'';
+    var hex=normalizeHexInput(value);
+    if(hex)return hex;
+  }catch(_e){}
+  return fallback;
+}
+var ADMIN_BG_SHAPE_WEIGHT={organic:1,circle:1,rounded:.95,oval:.9,pill:.9,triangle:.9,diamond:.82,star:.52,heart:.46,hexagon:.8,octagon:.78,cloud:.58,leaf:.62,drop:.62,arch:.7,spark:.56,burst:.42,grid:.35};
+var ADMIN_BG_SHAPE_GROUP={organic:'base',circle:'base',rounded:'base',oval:'base',pill:'base',triangle:'structural',diamond:'structural',hexagon:'structural',octagon:'structural',arch:'structural',cloud:'accent',leaf:'accent',drop:'accent',star:'accent',heart:'accent',spark:'accent',burst:'accent',grid:'structural'};
+function normalizeAdminBgShapeType(type){
+  var v=String(type||'').toLowerCase().trim();
+  if(!v)return '';
+  var map={blob:'organic',band:'rounded',bar:'rounded',column:'pill',side:'oval',hill:'arch',star4:'star',spark4:'spark',petal:'leaf',crescent:'organic',slope:'triangle',cornerwide:'rounded',corner:'rounded',shield:'rounded',parallelogram:'diamond',plus:'diamond',wave:'organic',arrow:'diamond'};
+  return map[v]||v;
+}
+function adminBgShapeWeight(type){
+  var key=normalizeAdminBgShapeType(type);
+  return Object.prototype.hasOwnProperty.call(ADMIN_BG_SHAPE_WEIGHT,key)?ADMIN_BG_SHAPE_WEIGHT[key]:0;
+}
+function adminBgShapeGroup(type){
+  var key=normalizeAdminBgShapeType(type);
+  return ADMIN_BG_SHAPE_GROUP[key]||'base';
+}
+function adminExpandWeightedBgShapes(shapeCount){
+  var entries=Object.keys(shapeCount||{}).map(function(key){
+    var normalized=normalizeAdminBgShapeType(key);
+    return {shape:normalized,count:shapeCount[key]||0,weight:adminBgShapeWeight(normalized),group:adminBgShapeGroup(normalized)};
+  }).filter(function(item){return !!item.shape&&item.weight>0&&item.count>0;});
+  entries.sort(function(a,b){return (b.count*b.weight)-(a.count*a.weight);});
+  var grouped={base:[],structural:[],accent:[]};
+  entries.forEach(function(item){(grouped[item.group]||grouped.base).push(item);});
+  var ordered=entries.map(function(item){return item.shape;}).filter(function(shape,idx,arr){return arr.indexOf(shape)===idx;});
+  if(!ordered.length)ordered=['organic'];
+  var totalSlots=24,expanded=[];
+  ordered.forEach(function(shape){expanded.push(shape);});
+  entries.forEach(function(item){
+    var factor=item.group==='accent'?2.6:(item.group==='structural'?3.1:3.6);
+    var repeats=Math.max(1,Math.min(7,Math.round(item.count*item.weight*factor)));
+    for(var i=0;i<repeats;i++)expanded.push(item.shape);
+  });
+  var basePool=grouped.base.map(function(item){return item.shape;});
+  var structuralPool=grouped.structural.map(function(item){return item.shape;});
+  while(expanded.length<totalSlots){
+    if(basePool.length)expanded.push(basePool[expanded.length%basePool.length]);
+    if(expanded.length>=totalSlots)break;
+    if(structuralPool.length)expanded.push(structuralPool[expanded.length%structuralPool.length]);
+    if(!basePool.length&&!structuralPool.length)expanded.push('organic');
+  }
+  expanded=expanded.slice(0,totalSlots);
+  if(!expanded.length)expanded=['organic'];
+  return {ordered:ordered,expanded:expanded};
+}
+function spacePreviewMutedShapeLayer(layer,palette,depth){
+  if(!layer||typeof layer!=='object')return layer;
+  if(isTextLayerItem(layer))return cloneJson(layer);
+  var level=Math.max(0,Number(depth)||0);
+  if(isGroupLayer(layer)){
+    var group=cloneJson(layer);
+    group.groupChildren=(Array.isArray(layer.groupChildren)?layer.groupChildren:[]).map(function(child){
+      return spacePreviewMutedShapeLayer(child,palette,level+1);
+    });
+    return group;
+  }
+  var next=cloneJson(layer);
+  var fillChoice=level%3===0?palette.accent:(level%3===1?palette.accentSoft:palette.accentDeep);
+  if(next.fill&&next.fill!=='transparent')next.fill=fillChoice;
+  if(next.stroke&&next.stroke!=='transparent')next.stroke=palette.stroke;
+  if(next.type==='imported'){
+    if(next.importedHasFill!==false)next.fill=fillChoice;
+    if(next.importedHasStroke!==false)next.stroke=palette.stroke;
+  }
+  return next;
+}
+function spacePreviewThemeImageDataUrl(set,bundle,key,file){
+  var meta=(bundle&&bundle.meta)||{};
+  var viewport=previewThumbViewportForMeta(meta);
+  var mode=cardBuildModeForKey(meta,key||'algemeen');
+  if(mode!=='self'&&file){
+    var hit=cachedCardAssetForFile(set.id,file);
+    if(hit&&hit.asset&&hit.asset.dataUrl)return hit.asset.dataUrl;
+  }
+  var palette=spacePreviewTilePalette(meta,key||'algemeen');
+  return svgDataUrlFromMarkup(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+viewport.width+' '+viewport.height.toFixed(3)+'" preserveAspectRatio="none" aria-hidden="true">'+
+      '<rect width="'+viewport.width+'" height="'+viewport.height.toFixed(3)+'" fill="'+esc(palette.paper)+'"/>'+
+      spacePreviewShapeLayers(bundle,key||'algemeen').map(function(layer){
+        var muted=spacePreviewMutedShapeLayer(layer,palette,0);
+        if(isTextLayerItem(layer))return '';
+        if(isGroupLayer(muted)){
+          var gx=Number(muted.x);if(!isFinite(gx))gx=50;
+          var gy=previewThumbY(muted.y,viewport);
+          var gs=Math.max(1,Number(muted.size)||42);
+          var gr=Number(muted.rotate)||0;
+          return (Array.isArray(muted.groupChildren)?muted.groupChildren:[]).map(function(child){
+            if(isTextLayerItem(child))return '';
+            var cx=Number(child.x);if(!isFinite(cx))cx=50;
+            var cy=Number(child.y);if(!isFinite(cy))cy=50;
+            var cs=Math.max(1,Number(child.size)||42);
+            var tx=gx+(cx-50)*gs/100;
+            var ty=gy+((cy-50)*gs/100)*viewport.scaleY;
+            var size=cs*gs/100;
+            var es=size*Math.min(1,viewport.scaleY||1);
+            var rot=gr+(Number(child.rotate)||0);
+            return '<g transform="translate('+tx.toFixed(2)+' '+ty.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(child,'preview')+'</g>';
+          }).join('');
+        }
+        var size=Math.max(1,Number(muted.size)||42);
+        var es=size*Math.min(1,viewport.scaleY||1);
+        var x=Number(muted.x);if(!isFinite(x))x=50;
+        var y=previewThumbY(muted.y,viewport);
+        var rot=Number(muted.rotate)||0;
+        return '<g transform="translate('+x.toFixed(2)+' '+y.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(muted,'preview')+'</g>';
+      }).join('')+
+    '</svg>'
+  );
+}
+function styleThemeThumbDataUrl(bundle,key,file){
+  var meta=(bundle&&bundle.meta)||{};
+  var viewport=previewThumbViewportForMeta(meta);
+  var mode=cardBuildModeForKey(meta,key||'algemeen');
+  if(mode!=='self'&&S.activeId&&file){
+    var hit=cachedCardAssetForFile(S.activeId,file);
+    if(hit&&hit.asset&&hit.asset.dataUrl)return hit.asset.dataUrl;
+  }
+  var cardBg=cardBgForKey(meta,key||'algemeen')||((meta.cssVars||{})['--pk-set-card'])||((meta.cssVars||{})['--pk-set-bg'])||DEFAULT_CARD_SURFACE;
+  return svgDataUrlFromMarkup(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+viewport.width+' '+viewport.height.toFixed(3)+'" preserveAspectRatio="none" aria-hidden="true">'+
+      '<rect width="'+viewport.width+'" height="'+viewport.height.toFixed(3)+'" fill="'+esc(cardBg)+'"/>'+
+      spacePreviewShapeLayers(bundle,key||'algemeen').map(function(layer){
+        if(isTextLayerItem(layer))return '';
+        if(isGroupLayer(layer)){
+          var gx=Number(layer.x);if(!isFinite(gx))gx=50;
+          var gy=previewThumbY(layer.y,viewport);
+          var gs=Math.max(1,Number(layer.size)||42);
+          var gr=Number(layer.rotate)||0;
+          return (Array.isArray(layer.groupChildren)?layer.groupChildren:[]).map(function(child){
+            if(isTextLayerItem(child))return '';
+            var cx=Number(child.x);if(!isFinite(cx))cx=50;
+            var cy=Number(child.y);if(!isFinite(cy))cy=50;
+            var cs=Math.max(1,Number(child.size)||42);
+            var tx=gx+(cx-50)*gs/100;
+            var ty=gy+((cy-50)*gs/100)*viewport.scaleY;
+            var size=cs*gs/100;
+            var es=size*Math.min(1,viewport.scaleY||1);
+            var rot=gr+(Number(child.rotate)||0);
+            return '<g transform="translate('+tx.toFixed(2)+' '+ty.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(child,'preview')+'</g>';
+          }).join('');
+        }
+        var size=Math.max(1,Number(layer.size)||42);
+        var es=size*Math.min(1,viewport.scaleY||1);
+        var x=Number(layer.x);if(!isFinite(x))x=50;
+        var y=previewThumbY(layer.y,viewport);
+        var rot=Number(layer.rotate)||0;
+        return '<g transform="translate('+x.toFixed(2)+' '+y.toFixed(2)+') rotate('+rot.toFixed(2)+') translate('+(-es/2).toFixed(2)+' '+(-es/2).toFixed(2)+') scale('+(es/100).toFixed(4)+')">'+shapeLayerRenderMarkup(layer,'preview')+'</g>';
+      }).join('')+
+    '</svg>'
+  );
+}
+function spacePreviewThemeRecords(set){
+  var bundle=spacePreviewSetBundle(set);
+  var meta=(bundle&&bundle.meta)||{};
+  var questions=(bundle&&bundle.questions)||{};
+  var themes=Array.isArray(meta.themes)?meta.themes:[];
+  return themes.map(function(theme,idx){
+    var key=theme&&theme.key?theme.key:('thema-'+idx);
+    var file=theme&&theme.card?theme.card:(key+'.svg');
+    var list=Array.isArray(questions[key])?questions[key]:[];
+    var first=list[0]||{};
+    return {
+      key:key,
+      label:spacePreviewText((theme&&theme.label)||key,'Thema'),
+      thumb:spacePreviewThemeImageDataUrl(set,bundle,key,file),
+      img:spacePreviewThemeImageDataUrl(set,bundle,key,file),
+      frontText:spacePreviewText(first&&((first.voorkant||first.front||first.q||first.text||first.question)||''),''),
+      backText:spacePreviewText(first&&((first.achterkant||first.back)||''),'')
+    };
+  });
+}
+function spacePreviewPageData(){
+  return spacePreviewSets().filter(function(item){return item&&!item.placeholder;}).map(function(item){
+    var set=(S.sets||[]).find(function(candidate){return candidate&&candidate.id===item.id;})||null;
+    var bundle=spacePreviewSetBundle(set||{id:item.id,bundle:item.bundle||null});
+    return {
+      id:item.id||'',
+      title:item.title||'Kaartenset',
+      cover:item.coverDataUrl||'',
+      menuThumb:item.coverDataUrl||'',
+      infoText:spacePreviewInfoBodyText(),
+      themes:spacePreviewThemeRecords(set||{id:item.id,title:item.title,bundle:bundle})
+    };
+  });
+}
+function spacePreviewItemForSet(set){
+  var bundle=spacePreviewSetBundle(set);
+  var meta=(bundle&&bundle.meta)||{};
+  var cssVars=meta.cssVars||{};
+  return {
+    id:set.id||'',
+    title:spacePreviewText(set.title||meta.title,'Kaartenset'),
+    theme:spacePreviewLeadTheme(bundle),
+    lead:spacePreviewLeadQuestion(bundle)||spacePreviewDescription(bundle),
+    themes:spacePreviewCountThemes(bundle),
+    questions:spacePreviewCountQuestions(bundle),
+    isPublic:set.isPublic!==false,
+    cardFormat:spacePreviewCardFormatLabel(meta.cardFormat),
+    cardBg:spacePreviewText(cardBgForKey(meta,'cover')||cssVars['--pk-set-card']||cssVars['--pk-set-bg'],''),
+    accent:spacePreviewText(cssVars['--pk-set-accent'],''),
+    coverDataUrl:spacePreviewSetCoverDataUrl(set,bundle)
+  };
+}
+function spacePreviewItemsForSets(sets,limit,withPlaceholders){
+  var source=(Array.isArray(sets)?sets:[]).filter(Boolean);
+  var items=source.slice(0,limit||source.length).map(spacePreviewItemForSet);
+  return withPlaceholders?spacePreviewAppendPlaceholders(items):items;
+}
+function spacePreviewSets(){
+  return spacePreviewItemsForSets(homeGridOrderedSets(),6,true);
+}
+function spacePreviewAppendPlaceholders(items){
+  var list=(items||[]).slice();
+  var count=currentHomePlaceholderCount();
+  var palette=spacePreviewPalette();
+  for(var i=0;i<count&&list.length<8;i++){
+    list.push({
+      title:'',
+      theme:'',
+      lead:'',
+      themes:0,
+      questions:0,
+      isPublic:true,
+      cardFormat:'',
+      coverDataUrl:'',
+      placeholder:true,
+      placeholderColor:palette[(list.length+i)%palette.length]||'#E5EDF0'
+    });
+  }
+  return list;
+}
+function spacePreviewPalette(){
+  var cfg=bgCfg();
+  var palette=(cfg&&Array.isArray(cfg.palette)&&cfg.palette.length?cfg.palette:null)||['#9CCAB8','#D7E4F7','#F4EEF9','#F5D9DF','#FBE9D7','#E0E8C9'];
+  return palette.slice(0,6);
+}
+function spacePreviewCardFormatLabel(value){
+  var id=String(value||'').toLowerCase();
+  if(id==='portrait-63x88')return 'Speelkaart';
+  if(id==='square-88x88')return 'Vierkant';
+  if(id==='portrait-70x120')return 'Tarot';
+  return 'Standaard';
+}
+function spacePreviewResolveLayout(mode){
+  mode=String(mode||'grid').toLowerCase();
+  if(mode==='list')return 'list';
+  if(mode==='featured')return 'featured';
+  if(mode==='hero-grid')return 'hero-grid';
+  return 'grid';
+}
+function getPreviewIframe(){return document.querySelector('.spaceLiveFrame');}
+function reloadPreviewHome(){
+  var f=getPreviewIframe();
+  if(!f)return;
+  f.removeAttribute('src');
+  var doc=spaceSitePreviewDocumentHtml();
+  f.srcdoc=doc;
+}
+function openSpacePreviewCards(id){
+  if(!id)return;
+  SPACE_PREVIEW_CARDS_MODE=true;
+  SPACE_PREVIEW_CURRENT_SET_ID=id;
+  var f=getPreviewIframe();
+  if(!f)return;
+  f.src='/kaarten/index.html?set='+encodeURIComponent(id);
+}
+function closeSpacePreviewCards(){
+  SPACE_PREVIEW_CARDS_MODE=false;
+  SPACE_PREVIEW_CURRENT_SET_ID='';
+  reloadPreviewHome();
+}
+function previewNavBack(){
+  if(SPACE_PREVIEW_CARDS_MODE){
+    var data=spacePreviewPageData();
+    var idx=-1;for(var i=0;i<data.length;i++){if(data[i]&&data[i].id===SPACE_PREVIEW_CURRENT_SET_ID){idx=i;break;}}
+    if(idx>0){openSpacePreviewCards(data[idx-1].id);}else{closeSpacePreviewCards();}
+    return;
+  }
+  var f=getPreviewIframe();
+  if(!f||!f.contentWindow)return;
+  if(typeof f.contentWindow.previewGoBack==='function'){f.contentWindow.previewGoBack();}
+  else{reloadPreviewHome();}
+}
+function previewNavForward(){
+  if(SPACE_PREVIEW_CARDS_MODE){
+    var data=spacePreviewPageData();
+    var idx=-1;for(var i=0;i<data.length;i++){if(data[i]&&data[i].id===SPACE_PREVIEW_CURRENT_SET_ID){idx=i;break;}}
+    if(idx>=0&&idx<data.length-1){openSpacePreviewCards(data[idx+1].id);}
+    return;
+  }
+  var f=getPreviewIframe();
+  if(!f||!f.contentWindow)return;
+  if(typeof f.contentWindow.previewGoForward==='function')f.contentWindow.previewGoForward();
+}
+function previewNavHome(){
+  if(SPACE_PREVIEW_CARDS_MODE){closeSpacePreviewCards();return;}
+  var f=getPreviewIframe();
+  if(!f||!f.contentWindow)return;
+  if(typeof f.contentWindow.previewGoHome==='function'){f.contentWindow.previewGoHome();}
+  else{reloadPreviewHome();}
+}
+function spaceSitePreviewHtml(){
+  var doc=spaceSitePreviewDocumentHtml();
+  return '<div class="spaceLiveFrameScale" id="spaceLiveFrameScale">'+
+    '<iframe class="spaceLiveFrame" title="Ruimte-preview" loading="lazy" referrerpolicy="no-referrer" srcdoc="'+esc(doc)+'"></iframe>'+
+  '</div>';
+}
+function spacePreviewMenuSettings(){
+  var ui=((S.d&&S.d.meta&&S.d.meta.ui)||{});
+  return ui.menu&&typeof ui.menu==='object'?ui.menu:{showInfo:true,showShuffle:true,showAllSets:true};
+}
+function spacePreviewDocLayoutMode(){
+  var mode=spacePreviewResolveLayout(currentSpaceLayoutMode());
+  if(mode==='featured')return 'carousel';
+  if(mode==='list')return 'list-preview';
+  return mode;
+}
+function spacePreviewMenuToolsHtml(){
+  var menu=spacePreviewMenuSettings();
+  var contrastBtn='<button id="menuContrastToggle" class="menuMiniBtn" type="button" aria-label="Contrastmodus" aria-pressed="'+((previewNightMode()||adminNightMode())?'true':'false')+'"><svg class="gmIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18"></path><path d="M12 3v18"></path></svg></button>';
+  var infoBtn=menu.showInfo!==false
+    ?'<button id="menuInfoBtn" class="menuMiniBtn" type="button" aria-label="Informatie"><svg class="gmIcon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 10v7"></path><path d="M12 7h.01"></path></svg></button>'
+    :'';
+  var shuffleBtn=menu.showShuffle!==false
+    ?'<button id="menuShuffleToggle" class="menuMiniBtn" type="button" aria-label="Shuffle" aria-pressed="false"><svg class="gmIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3h5v5"></path><path d="M4 20l16-16"></path><path d="M4 4l8 8"></path><path d="M12 12l8 8"></path><path d="M21 16v5h-5"></path></svg></button>'
+    :'';
+  return '<div class="menuHeaderTools" aria-label="Acties">'+contrastBtn+infoBtn+shuffleBtn+'</div>';
+}
+function spacePreviewCardSurfaceHtml(item,idx,kind){
+  var palette=spacePreviewPalette();
+  var bg=(item&&item.cardBg?String(item.cardBg):'')||(palette[idx%palette.length]||'#CFE6D8');
+  var cover=item&&item.coverDataUrl?String(item.coverDataUrl):'';
+  if(cover){
+    return '<div class="spaceIndexCardSurface'+(kind==='hero'?' is-hero':'')+'" style="--space-card-bg:'+esc(bg)+'">'+
+      '<img class="spaceIndexCardImage" src="'+esc(cover)+'" alt="">'+
+    '</div>';
+  }
+  return '<div class="spaceIndexCardSurface'+(kind==='hero'?' is-hero':'')+'" style="--space-card-bg:'+esc(bg)+'"></div>';
+}
+function spacePreviewMenuItemHtml(item,idx){
+  return '<button class="menuItem" type="button" data-preview-order="'+idx+'">'+
+    '<span class="miLabel">'+esc(item.title||'Kaartenset')+'</span>'+
+    '<span class="miThumbRight"><span class="menuThumbCard">'+spacePreviewCardSurfaceHtml(item,idx,'menu')+'</span></span>'+
+  '</button>';
+}
+function publicMenuListHtml(items,renderItem){
+  return '<div class="menuList">'+items.map(function(item,idx){
+    return renderItem(item,idx);
+  }).join('')+'</div>';
+}
+function publicSetsMainHtml(heroHtml,gridHtml){
+  return window.PublicIndexShell.setsMainHtml({
+    heroHtml:heroHtml||'',
+    gridHtml:gridHtml||''
+  });
+}
+function publicSetsHeroHtml(heroItems){
+  return window.PublicIndexShell.setsHeroShellHtml({
+    carouselHtml:'<div id="setsCarousel" class="setsHeroCarousel" aria-label="Kaartenset carrousel">'+heroItems.map(function(item,idx){return spacePreviewHeroSlideHtml(item,idx);}).join('')+'</div>',
+    dotsHtml:'<div id="setsDots" class="setsDots" aria-hidden="true">'+heroItems.map(function(_,idx){return '<span class="setsDot'+(idx===0?' is-active':'')+'" data-preview-order="'+idx+'"></span>';}).join('')+'</div>'
+  });
+}
+function publicSetsGridHtml(gridItems){
+  return window.PublicIndexShell.setsGridShellHtml({
+    gridHtml:'<div id="setsGrid" class="setsGrid">'+gridItems.map(function(item,idx){return spacePreviewGridCardHtml(item,idx);}).join('')+'</div>'
+  });
+}
+function publicIndexShellHtml(opts){
+  opts=opts||{};
+  var mode=opts.mode||'grid';
+  var items=opts.items||[];
+  var menuItems=opts.menuItems||items;
+  var heroItems=opts.heroItems||[];
+  var gridItems=opts.gridItems||[];
+  return window.PublicIndexShell.indexShellHtml({
+    brandText:opts.brandText||'Uitgesproken',
+    iconSrc:'/assets/logo-icons/masters/master-transparent.svg',
+    topBarAriaLabel:'Menu',
+    menuHtml:spacePreviewThemeMenuHtml(menuItems),
+    infoSheetHtml:publicInfoSheetShellHtml({
+      title:opts.infoTitle||'Uitgesproken',
+      sub:opts.infoSub||'',
+      body:opts.infoBody||''
+    }),
+    mainHtml:publicSetsMainHtml(
+      (mode!=='grid'&&mode!=='list-preview')?publicSetsHeroHtml(heroItems):'',
+      publicSetsGridHtml(gridItems)
+    )
+  });
+}
+function spacePreviewThemeMenuHtml(items){
+  var menu=spacePreviewMenuSettings();
+  var realItems=(items||[]).filter(function(item){ return item && !item.placeholder; });
+  return window.PublicIndexShell.menuShellHtml({
+    title:'Kaartensets',
+    toolsHtml:spacePreviewMenuToolsHtml(),
+    listHtml:publicMenuListHtml(realItems.slice(0,4),spacePreviewMenuItemHtml),
+    showAllSets:menu.showAllSets
+  });
+}
+function spacePreviewHeroSlideHtml(item,idx){
+  var clickable=!(item&&item.placeholder);
+  return '<div class="setsHeroSlide"'+(clickable?' data-set-order="'+idx+'"':'')+'>'+
+    '<div class="setsHeroSlideInner">'+
+      '<a class="setsHeroCard" href="#">'+
+        '<div class="cardInner">'+spacePreviewCardSurfaceHtml(item,idx,'hero')+'</div>'+
+      '</a>'+
+    '</div>'+
+  '</div>';
+}
+function spacePreviewGridCardHtml(item,idx){
+  var clickable=!(item&&item.placeholder);
+  return '<a class="setGridCard" href="#" style="--card-i:'+idx+'"'+(clickable?' data-set-order="'+idx+'"':'')+'>'+
+    '<div class="cardInner">'+spacePreviewCardSurfaceHtml(item,idx,'grid')+'</div>'+
+  '</a>';
+}
+function spacePreviewInfoBodyText(){
+  if(!isInfoSlideEnabled((S.d&&S.d.meta)||{},'cover'))return '';
+  var slides=((S.d&&S.d.intro&&S.d.intro.slides)||[]);
+  var coverSlide=slides.find(function(sl){return sl&&(sl.key==='cover'||sl.source==='cover');})||slides[0]||null;
+  var raw=(coverSlide&&coverSlide.body)||((S.d&&S.d.uitleg&&S.d.uitleg.cover)||'');
+  return String(raw||'').trim();
+}
+function infoCoverFile(){
+  return S.activeKind==='space'?'info_cover.svg':'voorkant.svg';
+}
+function publicInfoSheetCoverHtml(title,sub){
+  return window.PublicIndexShell.infoSheetCoverHtml({
+    title:title,
+    sub:sub,
+    iconSrc:'/assets/logo-icons/masters/logo-ballon-gradient.svg'
+  });
+}
+function publicInfoSheetTextHtml(body){
+  return window.PublicIndexShell.infoSheetTextHtml({body:body||''});
+}
+function publicInfoSheetShellHtml(opts){
+  opts=opts||{};
+  return window.PublicIndexShell.infoSheetShellHtml({
+    title:opts.title||'Uitgesproken',
+    sub:opts.sub||'',
+    body:opts.body||'',
+    coverHtml:opts.coverHtml||publicInfoSheetCoverHtml(opts.title||'Uitgesproken',opts.sub||''),
+    textHtml:opts.textHtml||publicInfoSheetTextHtml(opts.body||'')
+  });
+}
+function publicPreviewBehaviorScript(){
+  return '(function(){'
+    +'var dataEl=document.getElementById("spacePreviewData");'
+    +'var previewData=[];'
+    +'try{previewData=JSON.parse(dataEl&&dataEl.textContent||"[]")||[];}catch(_e){previewData=[];}'
+    +'var pill=document.getElementById("themePill");'
+    +'var themePillText=document.getElementById("themePillText");'
+    +'var menuHeaderTitle=document.getElementById("menuHeaderTitle");'
+    +'var menu=document.getElementById("themeMenu");'
+    +'var overlay=document.getElementById("themeMenuOverlay");'
+    +'var menuList=document.getElementById("menuList");'
+    +'var allSetsBtn=document.getElementById("naarOverzicht");'
+    +'var contrastBtn=document.getElementById("menuContrastToggle");'
+    +'var infoBtn=document.getElementById("menuInfoBtn");'
+    +'var shuffleBtn=document.getElementById("menuShuffleToggle");'
+    +'var infoOverlay=document.getElementById("indexInfoOverlay");'
+    +'var infoSheet=document.getElementById("indexInfoSheet");'
+    +'var infoClose=document.getElementById("indexInfoClose");'
+    +'var infoText=document.getElementById("indexInfoSlideText");'
+    +'if(!pill||!menu||!overlay)return;'
+    +'var closeTimer=0;'
+    +'var autoCloseTimer=0;'
+    +'var shuffled=false;'
+    +'var currentSetId=(previewData[0]&&previewData[0].id)||"";'
+    +'function clearClose(){if(closeTimer){clearTimeout(closeTimer);closeTimer=0;}}'
+    +'function clearAutoClose(){if(autoCloseTimer){clearTimeout(autoCloseTimer);autoCloseTimer=0;}}'
+    +'function scheduleAutoClose(){clearAutoClose();if(menu.hidden)return;autoCloseTimer=setTimeout(function(){closeMenu();},5000);}'
+    +'function formatText(value){return String(value||"").split("&").join("&amp;").split("<").join("&lt;").split(">").join("&gt;").split(\'"\').join("&quot;").split("\\\'").join("&#39;").split("\\n").join("<br>");}'
+    +'function closeInfo(immediate){if(!infoSheet||!infoOverlay)return;infoSheet.classList.remove("open");infoOverlay.classList.remove("open");if(immediate){infoSheet.hidden=true;infoOverlay.hidden=true;return;}setTimeout(function(){infoSheet.hidden=true;infoOverlay.hidden=true;},220);}'
+    +'function openMenu(){clearClose();closeInfo(true);menu.hidden=false;overlay.hidden=false;menu.classList.remove("is-closing");overlay.style.pointerEvents="auto";pill.setAttribute("aria-expanded","true");scheduleAutoClose();}'
+    +'function finishClose(){clearAutoClose();menu.hidden=true;overlay.hidden=true;overlay.style.pointerEvents="none";menu.classList.remove("is-closing");pill.setAttribute("aria-expanded","false");}'
+    +'function closeMenu(){if(menu.hidden)return;clearClose();clearAutoClose();menu.classList.add("is-closing");overlay.style.pointerEvents="none";pill.setAttribute("aria-expanded","false");closeTimer=setTimeout(finishClose,220);}'
+    +'function toggleMenu(){(menu.hidden||menu.classList.contains("is-closing"))?openMenu():closeMenu();}'
+    +'function setContrast(on){document.documentElement.setAttribute("data-contrast",on?"dark":"light");if(contrastBtn)contrastBtn.setAttribute("aria-pressed",on?"true":"false");}'
+    +'function openInfo(){if(!infoSheet||!infoOverlay)return;infoSheet.hidden=false;infoOverlay.hidden=false;requestAnimationFrame(function(){infoSheet.classList.add("open");infoOverlay.classList.add("open");});closeMenu();}'
+    +'function renderGridMenu(){if(themePillText)themePillText.textContent="Kaartensets";if(menuHeaderTitle)menuHeaderTitle.textContent="Kaartensets";if(infoText)infoText.innerHTML=\'<p class="infoTextIntro">\'+formatText("'+esc(spacePreviewInfoBodyText())+'")+\'</p>\';if(!menuList)return;menuList.innerHTML=previewData.map(function(set,idx){return \'<button class="menuItem" type="button" data-set-id="\'+set.id+\'" data-preview-order="\'+idx+\'"><span class="miLabel">\'+formatText(set.title)+\'</span><span class="miThumbRight"><span class="menuThumbCard">\' + (set.menuThumb?\'<img src="\'+set.menuThumb+\'" alt="">\':\'\') + \'</span></span></button>\';}).join("");menuList.querySelectorAll(".menuItem").forEach(function(btn){btn.addEventListener("click",function(){var sid=btn.getAttribute("data-set-id")||"";if(sid)openSet(sid);});});}'
+    +'function openSet(id){if(!id)return;currentSetId=id;window.parent.postMessage({uitgesproken:1,type:"openSet",id:id},"*");closeMenu();}'
+    +'function openSetByOrder(order){var set=previewData[order]||null;if(set)openSet(set.id);}'
+    +'function bindGridLinks(){'
+    +'document.addEventListener("click",function(e){var t=e.target;if(!t||!t.closest)return;var el=t.closest("[data-set-order]");if(!el)return;e.preventDefault();e.stopImmediatePropagation();var order=parseInt(el.getAttribute("data-set-order"),10);openSetByOrder(order);},true);'
+    +'}'
+    +'function applyShuffle(on){shuffled=!!on;if(shuffleBtn)shuffleBtn.setAttribute("aria-pressed",shuffled?"true":"false");renderGridMenu();bindGridLinks();}'
+    +'pill.addEventListener("click",function(e){e.preventDefault();toggleMenu();});'
+    +'overlay.addEventListener("click",function(){closeMenu();});'
+    +'document.addEventListener("keydown",function(e){if(e.key==="Escape"){closeMenu();closeInfo();}});'
+    +'menu.addEventListener("click",function(e){e.stopPropagation();scheduleAutoClose();});'
+    +'menu.addEventListener("pointermove",function(){scheduleAutoClose();});'
+    +'menu.addEventListener("pointerenter",function(){clearAutoClose();});'
+    +'document.addEventListener("click",function(e){if(menu.hidden)return;if(e.target===pill||pill.contains(e.target))return;if(e.target===menu||menu.contains(e.target))return;closeMenu();});'
+    +'if(contrastBtn)contrastBtn.addEventListener("click",function(){setContrast(document.documentElement.getAttribute("data-contrast")!=="dark");});'
+    +'if(infoBtn)infoBtn.addEventListener("click",function(){openInfo();});'
+    +'if(infoOverlay)infoOverlay.addEventListener("click",function(){closeInfo();});'
+    +'if(infoClose)infoClose.addEventListener("click",function(){closeInfo();});'
+    +'if(shuffleBtn)shuffleBtn.addEventListener("click",function(){applyShuffle(!shuffled);});'
+    +'renderGridMenu();bindGridLinks();'
+    +'window.previewGoHome=function(){};'
+  +'})();';
+}
+function spaceSitePreviewDocumentHtml(){
+  var mode=spacePreviewDocLayoutMode();
+  var items=spacePreviewSets();
+  var realItems=items.filter(function(item){ return item && !item.placeholder; });
+  var heroItems=spacePreviewItemsForSets(homeHeroOrderedSets(),6,false);
+  if(!heroItems.length)heroItems=items.slice(0,1);
+  var gridItems=(mode==='carousel'?[]:items.slice(0,6));
+  var bgLight=spacePreviewBackgroundDataUrl(SPACE_PREVIEW_W,SPACE_PREVIEW_H,false);
+  var bgDark=spacePreviewBackgroundDataUrl(SPACE_PREVIEW_W,SPACE_PREVIEW_H,true);
+  var previewScript=publicPreviewBehaviorScript();
+  var previewData=JSON.stringify(spacePreviewPageData());
+  var infoTitle='Uitgesproken';
+  var infoSub=spacePreviewText((S.space&&S.space.name)||'','');
+  var previewBody=publicIndexShellHtml({
+    mode:mode,
+    items:items,
+    menuItems:realItems,
+    heroItems:heroItems,
+    gridItems:gridItems,
+    brandText:'Uitgesproken',
+    infoTitle:infoTitle,
+    infoSub:infoSub,
+    infoBody:spacePreviewInfoBodyText()
+  });
+  return '<!doctype html><html lang="nl" data-contrast="'+(previewNightMode()||adminNightMode()?'dark':'light')+'"><head>'+
+    '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'+
+    '<base href="'+esc(location.origin||'/')+'/">'+
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'+
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'+
+    '<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">'+
+    '<link rel="stylesheet" href="/css/shell.css?v=4.0.72">'+
+    '<link rel="stylesheet" href="/css/sets.css?v=3.7.2.49">'+
+    '<link rel="stylesheet" href="/css/index.css?v=3.7.1.164">'+
+    '<link rel="stylesheet" href="/templates/page-background-tokens.css">'+
+    '<link rel="stylesheet" href="/templates/ui-base.css?v=3.7.1.16">'+
+    '<link rel="stylesheet" href="/templates/main-index.css?v=3.7.1.46">'+
+    '<link rel="stylesheet" href="/templates/cards-index.css?v=3.7.1.9">'+
+    '<script src="/js/shared-background-preview.js"><\/script>'+
+    '<script type="module" src="/js/components/autoBackground.js"><\/script>'+
+    '<style>'+
+      'html,body{margin:0;height:100%;overflow:auto}'+
+      'body{background:transparent !important}'+
+      (bgLight?'html{background:url('+bgLight+') top center/cover fixed no-repeat !important}':'')+
+      (bgDark?'html[data-contrast=dark]{background:url('+bgDark+') top center/cover fixed no-repeat !important}':'')+
+      'body.setsIndex{min-height:100dvh;--topBarInset:64px;--setsTopGap:12px;--setsHeroPadExtra:24px;--setsSectionStartPad:10px;--previewLayoutStartExtra:48px}'+
+      '.previewFrame{position:relative;min-height:100dvh}'+
+      'body.setsIndex[data-index-layout="list-preview"] .setsHero{display:none !important}'+
+      'body.setsIndex[data-index-layout="list-preview"] .setsGridSection{padding-top:calc(var(--setsTopOffset) + var(--setsSectionStartPad) + var(--previewLayoutStartExtra))}'+
+      'body.setsIndex[data-index-layout="list-preview"] .setsGrid{grid-template-columns:1fr !important}'+
+      'body.setsIndex[data-index-layout="grid"] .setsGridSection{padding-top:calc(var(--setsTopOffset) + var(--setsSectionStartPad) + var(--previewLayoutStartExtra)) !important}'+
+      '#indexBg{display:none !important}'+
+      '.setsHeroCarousel{overflow:hidden !important;touch-action:auto !important}'+
+      '.setsHeroSlide,.setsHeroCard,.setGridCard{cursor:pointer !important}'+
+      '.topBar{position:fixed !important;top:calc(env(safe-area-inset-top,0px) + var(--topBarInset,24px)) !important;left:16px !important;right:16px !important;z-index:100 !important}'+
+      '.setsIndexMain{position:relative !important;z-index:1 !important;padding-top:0 !important}'+
+      '.setsHero{padding-top:calc(var(--setsTopOffset) + var(--setsSectionStartPad) + var(--previewLayoutStartExtra)) !important}'+
+      '.spaceIndexCardSurface{position:relative;width:100%;height:100%;background:var(--space-card-bg,#CFE6D8);overflow:hidden}'+
+      '.spaceIndexCardSurface::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.03) 0%, rgba(0,0,0,.03) 100%)}'+
+      '.spaceIndexCardImage{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;object-position:top center;z-index:0}'+
+      '.setsHeroCard .spaceIndexCardSurface{border-radius:var(--setsHeroRadius)}'+
+      '.setGridCard .spaceIndexCardSurface{border-radius:var(--setsGridRadius)}'+
+      '.menuThumbCard .spaceIndexCardImage{object-position:center center}'+
+      'body.setsIndex #indexInfoClose.indexInfoClose.infoClose{display:inline-flex !important;visibility:visible !important}'+
+    '</style></head>'+
+    '<body data-page="grid" class="setsIndex previewFrame" data-brand-icon="1" data-index-layout="'+esc(mode)+'">'+
+      '<canvas id="indexBg" class="indexBg" aria-hidden="true"></canvas>'+
+      previewBody+
+      '<script id="spacePreviewData" type="application/json">'+esc(previewData)+'</script>'+
+      '<script>'+previewScript+'</script>'+
+    '</body></html>';
+}
+function renderEditorShell(headTitle,headActions,headCenter,opts){
+  renderChromeShell(headTitle,headActions,headCenter,opts);
   updateEditorHeaderTheme();
   renderClPanel();
   afterRender();
@@ -809,7 +5428,7 @@ function renderEditor(){
 
 function afterRender(){
   var id=S.clTab;
-  if(id==='opmaken'||id==='inst')setTimeout(loadCardPreviews,80);
+  if(id==='opmaken'||id==='inst')scheduleCardPreviewWarmup(120);
   if(id==='opmaken'){setTimeout(renderBgPreview,80);setTimeout(updateStijlPreview,120);}
 }
 function switchMode(){goChecklist();}
@@ -847,7 +5466,7 @@ function stepDone(id){
   if(id==='opmaken'){
     return cardsStepDoneForState(S.activeId,(S.d&&S.d.meta)||{}) &&
       (Object.values(S.d.questions||{}).some(function(a){return Array.isArray(a)&&a.length>0;})||!(S.d.meta&&S.d.meta.themes&&S.d.meta.themes.length)) &&
-      !!(S.d.uitleg&&S.d.uitleg.cover);
+      (isInfoSlideEnabled((S.d&&S.d.meta)||{},'cover')?!!(S.d.uitleg&&S.d.uitleg.cover):true);
   }
   return true;
 }
@@ -855,7 +5474,7 @@ function buildClWidget(){
   var items=[
     {id:'kaart',label:'Kaart',done:cardsStepDoneForState(S.activeId,(S.d&&S.d.meta)||{})},
     {id:'vragen',label:'Vragen',done:Object.values(S.d.questions||{}).some(function(a){return Array.isArray(a)&&a.length>0;})||!(S.d.meta&&S.d.meta.themes&&S.d.meta.themes.length)},
-    {id:'info',label:'Infosheet',done:!!(S.d.uitleg&&S.d.uitleg.cover)},
+    {id:'info',label:'Infopagina',done:(isInfoSlideEnabled((S.d&&S.d.meta)||{},'cover')?!!(S.d.uitleg&&S.d.uitleg.cover):true)},
     {id:'inst',label:'Instellingen',done:true}
   ];
   var n=items.filter(function(x){return x.done;}).length,pct=Math.round(n/items.length*100);
@@ -917,8 +5536,56 @@ function buildStijlPreserveBg(target){
   }
   scheduleBg();
 }
+function animateEditorPaneSwitch(){
+  var targets=Array.prototype.slice.call(document.querySelectorAll(
+    '#stijl-kaart .stijlCanvasWindow, #stijl-kaart .stijlQuestionPaneOuter, #stijl-kaart .globalTipBlock, #stijl-kaart .infoPanelShell'
+  ));
+  if(!targets.length)return;
+  targets.forEach(function(el){
+    el.classList.remove('pane-switch-in');
+  });
+  requestAnimationFrame(function(){
+    targets.forEach(function(el){
+      el.classList.add('pane-switch-in');
+    });
+    setTimeout(function(){
+      targets.forEach(function(el){
+        el.classList.remove('pane-switch-in');
+      });
+    },220);
+  });
+}
+function selectSpaceSet(id){
+  if(!id)return;
+  S.activeId=id;
+  S.activeKind='space';
+  renderSidebar();
+  renderSpaceEditor();
+}
+function normalizeSpaceQuestion(question){
+  if(question&&typeof question==='object')return question.voorkant||question.q||question.title||'';
+  return String(question||'');
+}
 function setOpmakenPane(pane){
-  S.opmPane=(pane==='info')?'info':'vragen';
+  var contentEl=document.querySelector('.content');
+  var keepScrollTop=contentEl?contentEl.scrollTop:0;
+  var keepScrollLeft=contentEl?contentEl.scrollLeft:0;
+  var isSpace=S.activeKind==='space';
+  var prevScope=canvasZoomScopeKeyForPane(S.activeKind,S.opmPane);
+  rememberCanvasZoomForScope(prevScope,CANVAS_ZOOM_PCT);
+  if(pane==='inst'){
+    if(S.opmPane&&S.opmPane!=='inst')S._instBasePane=S.opmPane;
+  }else{
+    S._instBasePane=pane;
+  }
+  S.opmPane=(pane==='info')?'info':(pane==='inst'?'inst':(isSpace?'space':'vragen'));
+  CANVAS_ZOOM_PCT=restoreCanvasZoomForScope(canvasZoomScopeKeyForPane(S.activeKind,S.opmPane),100);
+  if(S.homeSliderPane==='layout'){
+    var _lsL=null;try{_lsL=localStorage.getItem('pk_layout_chosen');}catch(e){}
+    if(currentSpacePublicPage().layoutChosen||S.spaceLayoutMode||_lsL){
+      S.homeSliderPane=S.homeCardsPane||'grid';
+    }
+  }
   var meta=S.d&&S.d.meta||{};
   if(S.opmPane==='vragen'){
     var qOpts=stylePreviewOptions(meta);
@@ -927,27 +5594,363 @@ function setOpmakenPane(pane){
       var firstTheme=qOpts.find(function(opt){return opt.key!=='cover'&&opt.key!=='algemeen';});
       STYLE_PREVIEW_KEY=(firstTheme||qOpts[0]||{}).key||'cover';
     }
-  }else{
+  }else if(S.opmPane==='info'){
     var iOpts=infoSlideOptions(meta).filter(function(opt){return !opt.excluded;});
     var iKeys=iOpts.map(function(opt){return opt.key;});
     if(iKeys.indexOf(INFO_SLIDE_KEY)<0)INFO_SLIDE_KEY=(iOpts[0]||{}).key||'cover';
   }
   if(S.clTab==='opmaken'){
-    buildStijlPreserveBg(g('pw'));
-    updateEditorHeaderTheme();
-    setTimeout(loadCardPreviews,50);
+    var slideWrap=document.querySelector('.homeCardsSlideWrap');
+    var doRender=function(){
+      buildStijlPreserveBg(g('pw'));
+      animateEditorPaneSwitch();
+      updateEditorHeaderTheme();
+      scheduleCardPreviewWarmup(120);
+      if(contentEl){
+        requestAnimationFrame(function(){
+          contentEl.scrollTop=keepScrollTop;
+          contentEl.scrollLeft=keepScrollLeft;
+          if(S.opmPane==='space'){
+            var sw=document.querySelector('.homeCardsSlideWrap');
+            if(sw)requestAnimationFrame(function(){sw.classList.add('is-visible');});
+          }
+        });
+      }
+    };
+    if(slideWrap&&slideWrap.classList.contains('is-visible')&&S.opmPane!=='space'){
+      slideWrap.classList.remove('is-visible');
+      setTimeout(doRender,200);
+    }else{
+      doRender();
+    }
   }
 }
-function opmakenPaneTabsHtml(active){
-  var panes=[
-    {id:'vragen', label:'Vragen',     desc:'Kaartinhoud'},
-    {id:'info',   label:'Infosheet',  desc:'Uitleg per thema'}
+function inlineSettingsToggleHtml(id,label,checked,sub){
+  return '<div class="togRow inlineSettingsToggle">'+
+    '<div><label for="'+id+'">'+esc(label)+'</label>'+(sub?'<span class="togRowSub">'+esc(sub)+'</span>':'')+'</div>'+
+    '<label class="tog"><input type="checkbox" id="'+id+'"'+(checked?' checked':'')+'><span class="togSl"></span></label>'+
+  '</div>';
+}
+function buildInlineSettingsSliderHtml(spaceMode){
+  if(spaceMode){
+    var placeholders=currentHomePlaceholderCount();
+    var menu=spacePreviewMenuSettings();
+    return '<div class="homeSliderExpandWrap inlineSettingsExpand">'+
+      '<div class="inlineSettingsGrid inlineSettingsGrid-space">'+
+        '<section class="inlineSettingsCard">'+
+          '<div class="inlineSettingsLabel">Home</div>'+
+          '<div class="inlineSettingsRangeRow">'+
+            '<div class="inlineSettingsRangeLabel">Lege kaartslots <span id="inline_sp_ph_val">— '+placeholders+'</span></div>'+
+            '<input type="range" class="spRange inlineSettingsRange" id="inline_sp_placeholders" min="0" max="8" step="1" value="'+placeholders+'">'+
+            '<div class="spRangeLabels"><span>0</span><span>8</span></div>'+
+          '</div>'+
+        '</section>'+
+        '<section class="inlineSettingsCard inlineSettingsCardWide">'+
+          '<div class="inlineSettingsLabel">Menu</div>'+
+          '<div class="togGroup inlineSettingsToggleGroup">'+
+            inlineSettingsToggleHtml('inline_sp_info','Informatieknop',menu.showInfo!==false,'Toon de infosheetknop in de viewer')+
+            inlineSettingsToggleHtml('inline_sp_shuf','Shuffelknop',menu.showShuffle!==false,'Kaarten in willekeurige volgorde')+
+            inlineSettingsToggleHtml('inline_sp_sets','Knop "Alle sets"',menu.showAllSets!==false,'Navigeer terug naar het overzicht')+
+          '</div>'+
+        '</section>'+
+        '<section class="inlineSettingsCard inlineSettingsCardWide">'+
+          '<div class="inlineSettingsLabel">Uitgesproken</div>'+
+          inlineSettingsToggleHtml('inline_sp_collections','Uitgesproken mag mijn sets gebruiken',!!(S._profile&&S._profile.allow_platform_collections!==false),'Bijvoorbeeld in collecties die Uitgesproken samenstelt')+
+        '</section>'+
+      '</div>'+
+    '</div>';
+  }
+  var m=S.d.meta||{};
+  var menuSet=m.ui&&m.ui.menu||{};
+  var sheet=m.ui&&m.ui.sheet||{};
+  var setMeta=(S.sets||[]).find(function(s){return s.id===S.activeId;})||{};
+  var pubStatus=setMeta.status||'draft';
+  var pubVis=setMeta.visibility||'private';
+  var pubAllow=!!setMeta.allowCollections;
+  var visOpts=[
+    {val:'private',  label:'Private'},
+    {val:'unlisted', label:'Unlisted'},
+    {val:'public',   label:'Public'}
   ];
+  return '<div class="homeSliderExpandWrap inlineSettingsExpand">'+
+    '<div class="inlineSettingsGrid">'+
+      '<section class="inlineSettingsCard inlineSettingsCardWide pubSection">'+
+        '<div class="inlineSettingsLabel">Publicatie</div>'+
+        '<div class="pubStatusRow">'+
+          '<span class="pubStatusLabel">Status</span>'+
+          '<div class="pubStatusToggle">'+
+            '<button class="pubStatusBtn'+(pubStatus==='draft'?' sel':'')+'" type="button" data-val="draft" onclick="setPubStatus(\'draft\')">Draft</button>'+
+            '<button class="pubStatusBtn'+(pubStatus==='live'?' sel':'')+'" type="button" data-val="live" onclick="setPubStatus(\'live\')">Live</button>'+
+          '</div>'+
+        '</div>'+
+        '<div class="pubVisRow">'+
+          '<span class="pubVisLabel">Zichtbaarheid</span>'+
+          '<div class="pubVisGroup" id="pubVisGroup">'+
+            visOpts.map(function(o){
+              return '<button class="pubVisBtn'+(pubVis===o.val?' sel':'')+
+                (pubStatus==='draft'?' disabled':'')+'" type="button" data-val="'+o.val+
+                '" onclick="setPubVis(\''+o.val+'\')"'+
+                (pubStatus==='draft'?' disabled':'')+'>'+o.label+'</button>';
+            }).join('')+
+          '</div>'+
+        '</div>'+
+      '</section>'+
+      '<section class="inlineSettingsCard inlineSettingsCardWide collabSection">'+
+        '<div class="inlineSettingsLabel">Samenwerking</div>'+
+        '<div class="collabList" id="collabList"><span class="collabLoading">Laden…</span></div>'+
+        '<div class="collabInviteRow">'+
+          '<span class="collabAtSign">@</span>'+
+          '<input class="collabInviteInput" id="collabInviteInput" type="text" placeholder="gebruikersnaam" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="30">'+
+          '<button class="collabInviteBtn" id="collabInviteBtn" type="button" onclick="collabInvite()">Uitnodigen</button>'+
+        '</div>'+
+        '<div class="collabNote">Maximaal '+planLimits().maxCollaborators+' medewerkers per set.</div>'+
+      '</section>'+
+      '<section class="inlineSettingsCard">'+
+        '<div class="inlineSettingsLabel">Infosheet</div>'+
+        inlineSettingsToggleHtml('inline_i_sfirst','Tonen bij eerste bezoek',sheet.showOnFirst!==false,'Infosheet opent automatisch bij het eerste bezoek')+
+      '</section>'+
+      '<section class="inlineSettingsCard">'+
+        '<div class="inlineSettingsLabel">Viewer</div>'+
+        '<div class="togGroup inlineSettingsToggleGroup">'+
+          inlineSettingsToggleHtml('inline_i_anim','Flip-animatie',m.flipAnim!==false,'Kaart draait om bij klikken')+
+          inlineSettingsToggleHtml('inline_i_flip','Achterkant actief',m.doubleSided!==false,'Kaart heeft een achterkant')+
+        '</div>'+
+      '</section>'+
+      '<section class="inlineSettingsCard inlineSettingsCardWide">'+
+        '<div class="inlineSettingsLabel">Menu</div>'+
+        '<div class="togGroup inlineSettingsToggleGroup">'+
+          inlineSettingsToggleHtml('inline_i_info','Informatieknop',menuSet.showInfo!==false,'Opent de infosheet')+
+          inlineSettingsToggleHtml('inline_i_shuf','Shuffelknop',menuSet.showShuffle!==false,'Kaarten in willekeurige volgorde')+
+          inlineSettingsToggleHtml('inline_i_sets','Knop "Alle sets"',menuSet.showAllSets!==false,'Navigeer terug naar het overzicht')+
+        '</div>'+
+      '</section>'+
+    '</div>'+
+  '</div>';
+}
+function wireInlineSettingsSlider(spaceMode){
+  if(spaceMode){
+    var collEl=g('inline_sp_collections');
+    if(collEl)collEl.onchange=function(){window.saveCollectionsOptOut&&window.saveCollectionsOptOut(!!this.checked);};
+    var phEl=g('inline_sp_placeholders');
+    var phVal=g('inline_sp_ph_val');
+    if(phEl){
+      phEl.oninput=function(){
+        if(phVal)phVal.textContent='— '+this.value;
+        setHomePlaceholderCount(parseInt(this.value,10));
+      };
+    }
+    [['inline_sp_info','showInfo'],['inline_sp_shuf','showShuffle'],['inline_sp_sets','showAllSets']].forEach(function(pair){
+      var el=g(pair[0]);if(!el)return;
+      el.onchange=function(){
+        var meta=S.d.meta=S.d.meta||{};
+        meta.ui=meta.ui&&typeof meta.ui==='object'?meta.ui:{};
+        meta.ui.menu=meta.ui.menu&&typeof meta.ui.menu==='object'?meta.ui.menu:{};
+        meta.ui.menu[pair[1]]=this.checked;
+        markDirty();
+        updateStijlPreview();
+      };
+    });
+    return;
+  }
+  [['inline_i_info','ui.menu.showInfo'],['inline_i_shuf','ui.menu.showShuffle'],['inline_i_sets','ui.menu.showAllSets'],['inline_i_sfirst','ui.sheet.showOnFirst'],['inline_i_anim','flipAnim'],['inline_i_flip','doubleSided']].forEach(function(pair){
+    var el=g(pair[0]);if(!el)return;
+    el.onchange=function(){
+      var parts=pair[1].split('.');
+      var obj=S.d.meta=S.d.meta||{};
+      for(var i=0;i<parts.length-1;i++){obj[parts[i]]=obj[parts[i]]||{};obj=obj[parts[i]];}
+      obj[parts[parts.length-1]]=this.checked;
+      markDirty();
+      updateStijlPreview();
+    };
+  });
+  // Laad medewerkers async
+  collabLoadMembers();
+  var invInp=g('collabInviteInput');
+  if(invInp)invInp.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();collabInvite();}};
+}
+function collabRenderList(members){
+  var list=g('collabList');
+  if(!list)return;
+  if(!members.length){
+    list.innerHTML='<span class="collabEmpty">Nog geen medewerkers.</span>';
+    return;
+  }
+  list.innerHTML=members.map(function(m){
+    var uname=(m.profiles&&m.profiles.username)||m.user_id;
+    return '<div class="collabItem">'+
+      '<span class="collabItemName">@'+esc(uname)+'</span>'+
+      '<button class="collabRemoveBtn" type="button" onclick="collabRemove(\''+esc(m.id)+'\')">×</button>'+
+    '</div>';
+  }).join('');
+}
+async function collabLoadMembers(){
+  if(!S.activeId||!window.loadSetMembers)return;
+  var members=await window.loadSetMembers(S.activeId);
+  collabRenderList(members);
+}
+async function collabInvite(){
+  var inp=g('collabInviteInput');
+  if(!inp)return;
+  var username=inp.value.replace(/^@/,'').toLowerCase().trim();
+  if(!username)return;
+  var btn=g('collabInviteBtn');
+  if(btn)btn.disabled=true;
+  var ok=await window.inviteCollaborator(S.activeId,username);
+  if(ok){ inp.value=''; collabLoadMembers(); }
+  if(btn)btn.disabled=false;
+}
+async function collabRemove(memberId){
+  var ok=await window.removeCollaborator(memberId);
+  if(ok)collabLoadMembers();
+}
+function _pubSaveActive(){
+  var set=(S.sets||[]).find(function(s){return s.id===S.activeId;});
+  if(!set)return;
+  window.savePublicationSettings&&window.savePublicationSettings(
+    set.id, set.status, set.visibility
+  );
+}
+function _pubUpdateDisabled(isLive){
+  document.querySelectorAll('.pubVisBtn').forEach(function(b){
+    b.disabled=!isLive;
+    b.classList.toggle('disabled',!isLive);
+  });
+  var cb=g('inline_pub_collect');
+  if(cb)cb.disabled=!isLive;
+}
+function setPubStatus(val){
+  var set=(S.sets||[]).find(function(s){return s.id===S.activeId;});
+  if(!set)return;
+  set.status=val;
+  document.querySelectorAll('.pubStatusBtn').forEach(function(b){
+    b.classList.toggle('sel',b.getAttribute('data-val')===val);
+  });
+  _pubUpdateDisabled(val==='live');
+  _pubSaveActive();
+}
+function setPubVis(val){
+  var set=(S.sets||[]).find(function(s){return s.id===S.activeId;});
+  if(!set||set.status!=='live')return;
+  set.visibility=val;
+  document.querySelectorAll('.pubVisBtn').forEach(function(b){
+    b.classList.toggle('sel',b.getAttribute('data-val')===val);
+  });
+  _pubSaveActive();
+}
+function setPubCollect(checked){
+  var set=(S.sets||[]).find(function(s){return s.id===S.activeId;});
+  if(!set||set.status!=='live')return;
+  set.allowCollections=!!checked;
+  _pubSaveActive();
+}
+function opmakenPaneTabsHtml(active){
+  var panes=S.activeKind==='space'
+    ? [
+        {id:'space', label:'Home', desc:'Jouw ruimte'},
+        {id:'info',  label:'Infopagina', desc:'Uitleg'}
+      ]
+    : [
+        {id:'vragen', label:'Vragen', desc:'Kaartinhoud'},
+        {id:'info',   label:'Infopagina', desc:'Uitleg per thema'}
+      ];
   return '<div class="paneModeSwitcher">'+panes.map(function(item){
     return '<button class="paneMode'+(active===item.id?' sel':'')+'" type="button" onclick="setOpmakenPane(\''+item.id+'\')">'
       +'<span class="paneModeLabel">'+esc(item.label)+'</span>'
       +'</button>';
   }).join('')+'</div>';
+}
+function buildSidePanelShell(opts){
+  opts=opts||{};
+  var panelClass='questionsPanel'+(opts.panelClass?' '+opts.panelClass:'');
+  var shellClass='questionsPanelShell'+(opts.shellClass?' '+opts.shellClass:'');
+  var beforeShellHtml=opts.beforeShellHtml||'';
+  var afterShellHtml=opts.afterShellHtml||'';
+  var contentHtml=opts.contentHtml||'';
+  var headerHtml='';
+  if(opts.metaHtml||opts.actionsHtml){
+    headerHtml=
+      '<div class="questionsPanelHead">'+
+        '<div class="questionsMeta">'+(opts.metaHtml||'')+'</div>'+
+        (opts.actionsHtml||'')+
+      '</div>';
+  }
+  if(opts.bodyClass){
+    contentHtml='<div class="'+opts.bodyClass+'">'+contentHtml+'</div>';
+  }
+  return '<div class="'+panelClass+'">'+
+    beforeShellHtml+
+    '<div class="'+shellClass+'">'+
+      headerHtml+
+      contentHtml+
+    '</div>'+
+    afterShellHtml+
+  '</div>';
+}
+function buildSidePanelEmpty(message){
+  return buildSidePanelShell({
+    contentHtml:'<div class="questionsEmptyState">'+message+'</div>'
+  });
+}
+function buildSidePanelCoverState(){
+  var iconText='<svg class="coverTextGlyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>';
+  var panelOpen=storedOpenState(QUESTION_SIDE_PANEL_OPEN,'cover',true);
+  var metaHtml='<div class="questionsMetaText"><div class="questionsTheme">Cover</div></div>';
+  var actionsHtml=
+    '<div class="questionsHeadActions questionsHeadActions-compact">'+
+      '<button class="questionCollapseBtn" type="button" onclick="toggleQuestionSidePanel(\'cover\')" title="'+(panelOpen?'Inklappen':'Uitklappen')+'" aria-label="Cover" aria-expanded="'+(panelOpen?'true':'false')+'">'+buildSectionChevronSvg(panelOpen)+'</button>'+
+    '</div>';
+  return buildSidePanelShell({
+    shellClass:'coverDisabledShell'+(panelOpen?'':' questionPanelShellCollapsed'),
+    metaHtml:metaHtml,
+    actionsHtml:actionsHtml,
+    contentHtml:panelOpen?'<div class="coverQuestionsState">'+
+      '<div class="qListEmptyIcon">'+iconText+'</div>'+
+      '<p>Voeg tekst op de cover toe via de typografiebar bovenaan.</p>'+
+      '<div class="coverQuestionsGhost" aria-hidden="true">'+
+        '<div class="coverQuestionsGhostBtn">+ Vraag toevoegen</div>'+
+        '<div class="coverQuestionsGhostBtn coverQuestionsGhostBtnSecondary">Meerdere vragen importeren</div>'+
+      '</div>'+
+    '</div>':''
+  });
+}
+// ── Hero set helpers ──────────────────────────────────────────
+function currentHomeHeroSetIds(){
+  var v=currentSpacePublicPage().heroSetIds;
+  return Array.isArray(v)?v:[];
+}
+function setHomeHeroSetIds(ids){
+  setSpacePublicPageField('heroSetIds',Array.isArray(ids)?ids:[]);
+}
+function toggleHomeHeroSetId(id,checked){
+  var ids=currentHomeHeroSetIds();
+  if(checked){if(ids.indexOf(id)<0)ids.push(id);}
+  else{ids=ids.filter(function(x){return x!==id;});}
+  setHomeHeroSetIds(ids);
+}
+
+// ── Build Space Pane (rechter paneel Home-tab) ────────────────
+function buildSpacePane(target){
+  var placeholders=currentHomePlaceholderCount();
+
+  // ── Placeholders slider ──
+  var phHtml='<div class="spHeroGroup">'+
+    '<div class="spHeroLabel">Lege kaartslots <span class="spHeroHint" id="sp_ph_val"> — '+placeholders+'</span></div>'+
+    '<input type="range" class="spRange" id="sp_placeholders" min="0" max="8" step="1" value="'+placeholders+'">'+
+    '<div class="spRangeLabels"><span>0</span><span>8</span></div>'+
+  '</div>';
+
+  target.innerHTML=buildSidePanelShell({
+    contentHtml:'<div class="spacePane">'+phHtml+'</div>'
+  });
+
+  var phEl=g('sp_placeholders');
+  var phVal=g('sp_ph_val');
+  if(phEl){
+    phEl.oninput=function(){
+      if(phVal)phVal.textContent=' — '+this.value;
+      setHomePlaceholderCount(parseInt(this.value,10));
+    };
+  }
 }
 function setInfoSlideFocus(idx){
   var slides=ensureIntroSlides();
@@ -965,6 +5968,25 @@ function deleteInfoCustomPage(key){
     var opts=infoSlideOptions(meta).filter(function(o){return !o.excluded;});
     INFO_SLIDE_KEY=(opts[0]||{}).key||'cover';
   }
+  buildStijlPreserveBg(g('pw'));
+}
+function isInfoSlideEnabled(meta,key){
+  var excluded=(meta&&meta.infoExcluded)||[];
+  return excluded.indexOf(key)<0;
+}
+function setInfoCoverEnabled(enabled){
+  var meta=S.d.meta=S.d.meta||{};
+  meta.infoExcluded=Array.isArray(meta.infoExcluded)?meta.infoExcluded:[];
+  if(enabled)meta.infoExcluded=meta.infoExcluded.filter(function(k){return k!=='cover';});
+  else if(meta.infoExcluded.indexOf('cover')<0)meta.infoExcluded.push('cover');
+  markDirty();
+  buildStijlPreserveBg(g('pw'));
+  updateEditorHeaderTheme();
+}
+function setInfoStandardCoverEnabled(enabled){
+  if(!S.d||!S.d.meta)return;
+  S.d.meta.infoCoverSkip=!enabled;
+  markDirty();
   buildStijlPreserveBg(g('pw'));
 }
 function updateInfoCustomPageLabel(key,val){
@@ -1074,8 +6096,8 @@ function syncInfoPreviewExtent(){
   var needsBgRerender=false;
   document.querySelectorAll('.infoPreviewSingle').forEach(function(wrap){
     var slide=wrap.querySelector('.adminInfoSlide');
-    var text=wrap.querySelector('.adminInfoSlideText');
-    if(!slide||!text)return;
+    var text=wrap.querySelector('.adminInfoPreviewTextShell, .adminInfoSlideText');
+    if(!text)return;
     var measured=Math.ceil(text.offsetHeight||0);
     var baseline=Number(wrap.dataset.infoBaseHeight||0);
     if(!baseline||baseline<1){
@@ -1084,7 +6106,7 @@ function syncInfoPreviewExtent(){
     }
     var extra=Math.max(0,measured-baseline);
     wrap.style.setProperty('--info-preview-extra',extra+'px');
-    slide.style.setProperty('--info-preview-extra',extra+'px');
+    if(slide)slide.style.setProperty('--info-preview-extra',extra+'px');
     var win=wrap.closest('.stijlCanvasWindow.info-preview');
     if(win)win.style.setProperty('--info-preview-extra',extra+'px');
     var stage=wrap.closest('.stijlCanvasStage.info-preview-stage');
@@ -1097,21 +6119,36 @@ function syncInfoPreviewExtent(){
 }
 function buildInfoPane(target){
   var key=INFO_SLIDE_KEY||'cover';
-  var themes=S.d.meta.themes||[];
-  var infoPages=S.d.meta.infoPages||[];
+  var meta=S.d.meta||{};
+  var themes=meta.themes||[];
+  var infoPages=meta.infoPages||[];
   var u=S.d.uitleg||{};
+  var isSpace=S.activeKind==='space';
   var isCover=key==='cover';
+  var coverEnabled=isInfoSlideEnabled(meta,'cover');
+  var standardCoverEnabled=meta.infoCoverSkip!==true;
   var th=isCover?null:themes.find(function(t){return t.key===key;});
   var cp=(!isCover&&!th)?infoPages.find(function(p){return p.key===key;}):null;
   var label=isCover?'Cover':(th?esc(th.label||th.key):(cp?esc(cp.label||cp.key):''));
-  var emptyHint='<p class="infoFieldHint">Laat leeg als je geen infopagina voor je kaartenset wilt.</p>';
+  var subtitle=isCover
+    ?''
+    :(cp?'Extra infopagina':'Infotekst en kaarttitel');
   var fieldHtml='';
+  var toggleHtml='';
   if(isCover){
-    fieldHtml=buildRichTextarea('u_cover',u.cover||'',9,'Omschrijf de set — doel, gebruik, context')+emptyHint;
+    toggleHtml='<div class="infoToggleStrip">'+
+      '<div class="togRow infoToggleMini"><div class="infoToggleMiniText"><label for="info_cover_enabled" title="Bepaal of deze cover in de infosheet wordt gebruikt.">Infopagina</label></div><label class="tog"><input type="checkbox" id="info_cover_enabled"'+(coverEnabled?' checked':'')+'><span class="togSl"></span></label></div>'+
+      (isSpace?'<div class="togRow infoToggleMini"><div class="infoToggleMiniText"><label for="info_standard_cover" title="Gebruik de automatische cover met logo en titel.">Standaard cover</label></div><label class="tog"><input type="checkbox" id="info_standard_cover"'+(standardCoverEnabled?' checked':'')+'><span class="togSl"></span></label></div>':'')+
+    '</div>';
+  }
+  if(isCover){
+    fieldHtml=(coverEnabled
+      ?buildRichTextarea('u_cover',u.cover||'',9,(isSpace?'Omschrijf de pagina':'Omschrijf de set')+' — doel, gebruik, context')
+      :'<p class="infoFieldHint">Deze infopagina staat uit.</p>');
   }else if(th){
-    fieldHtml=buildRichTextarea('u_'+th.key,u[th.key]||'',9,'Toelichting bij '+(th.label||th.key))+emptyHint;
+    fieldHtml=buildRichTextarea('u_'+th.key,u[th.key]||'',9,'Toelichting bij '+(th.label||th.key));
   }else if(cp){
-    fieldHtml=buildRichTextarea('u_'+cp.key,u[cp.key]||'',9,'Tekst voor '+(cp.label||cp.key))+emptyHint;
+    fieldHtml=buildRichTextarea('u_'+cp.key,u[cp.key]||'',9,'Tekst voor '+(cp.label||cp.key));
   }else{
     fieldHtml='<p class="emptyHint">Kies een kaart in de slider hierboven.</p>';
   }
@@ -1119,9 +6156,14 @@ function buildInfoPane(target){
     fieldHtml+='<hr class="sep">'+
       fR('Titel op kaart','text','info_mid_title',infoMidTitleText((th||cp).key),'Leeg laten om de titel te verbergen');
   }
-  target.innerHTML=
-    '<div class="infoTopBar">'+(label?'<span class="fLbl">'+label+'</span>':'')+'</div>'+
-    '<div class="infoContent">'+fieldHtml+'</div>';
+  target.innerHTML=buildSidePanelShell({
+    shellClass:'infoPanelShell',
+    metaHtml:
+      (label?'<div class="questionsTheme">'+label+'</div>':'')+
+      (subtitle?'<div class="questionsCount">'+subtitle+'</div>':''),
+    bodyClass:'infoPanelBody',
+    contentHtml:(toggleHtml?'<div class="infoToggleArea">'+toggleHtml+'</div>':'')+'<div class="infoContent">'+fieldHtml+'</div>'
+  });
   function wireRichCe(el,storeKey){
     if(!el)return;
     el.oninput=function(){
@@ -1136,6 +6178,10 @@ function buildInfoPane(target){
   wireRichCe(g('u_cover'),'cover');
   themes.forEach(function(thm){wireRichCe(g('u_'+thm.key),thm.key);});
   infoPages.forEach(function(p){wireRichCe(g('u_'+p.key),p.key);});
+  var coverToggle=g('info_cover_enabled');
+  if(coverToggle)coverToggle.onchange=function(){setInfoCoverEnabled(!!this.checked);};
+  var standardCoverToggle=g('info_standard_cover');
+  if(standardCoverToggle)standardCoverToggle.onchange=function(){setInfoStandardCoverEnabled(!!this.checked);};
   if(th||cp){
     var mt=g('info_mid_title');
     if(mt)mt.oninput=function(){setInfoMidTitleText((th||cp).key,this.value);};
@@ -1178,7 +6224,7 @@ function buildBasis(target){
       '<button class="bs rd" data-action="delth" data-i="'+i+'">✕</button></div>';
   }).join('');
   target.innerHTML='<div class="panel">'+
-    fR('Naam van de set','text','b_title',m.title||'','bijv. "Samen onderzoeken"')+
+    fR('Naam van de set','text','b_title',m.title||'','bijv. "Teamreflectie"')+
     '<hr class="sep">'+
     '<div class="sLbl" style="margin-top:0">Thema\'s <span style="font-weight:400;color:var(--k3);font-size:11px">(optioneel)</span></div>'+
     '<p style="font-size:12px;color:var(--k2);margin-bottom:10px;line-height:1.6">Groepeer je kaarten in thema\'s. Heb je maar één kaartenset? Dan hoef je geen thema\'s toe te voegen.</p>'+
@@ -1188,7 +6234,17 @@ function buildBasis(target){
   g('b_title').oninput=function(){S.d.meta.title=this.value;markDirty();};
   initThDrag();
 }
-function setCV(k,v){S.d.meta.cssVars=S.d.meta.cssVars||{};S.d.meta.cssVars[k]=v;markDirty();}
+function setCV(k,v){
+  var meta=S.d.meta=S.d.meta||{};
+  var key=activeStyleEditKey();
+  var store=(key===BACK_STYLE_KEY)
+    ?backStyleCssVarStore(meta)
+    :(String(key||'').indexOf('__back_card__:')===0
+      ?backStyleCardEntry(meta,key).cssVars
+      :(meta.cssVars=meta.cssVars||{}));
+  store[k]=v;
+  markDirty();
+}
 
 // ═══════════════════════════════════════════
 // STEP: THEMA'S
@@ -1217,9 +6273,9 @@ function updThLabel(i,v){
 }
 function addTh(){
   S.d.meta.themes=S.d.meta.themes||[];
-  var idx=S.d.meta.themes.length+1;
+  var idx=nextThemeOrdinal(S.d.meta||{});
   var key='thema-'+idx;
-  S.d.meta.themes.push({key:key,label:'',card:key+'.svg'});
+  S.d.meta.themes.push({key:key,label:themeOrdinalLabel(idx),card:key+'.svg'});
   markDirty();
   rebuildThemas();
 }
@@ -1520,7 +6576,7 @@ function moveLibraryFileToTarget(srcPath,destPath,successMsg){
       clearFolderCache(destPath);
       refreshLibGrid(S.activeId);
       refreshAdminPanel();
-      setTimeout(loadCardPreviews,50);
+      scheduleCardPreviewWarmup(120);
       toast(successMsg||'Bijgewerkt','green');
     });
   }).catch(function(err){toast('Fout: '+err.message,'red');});
@@ -1572,7 +6628,7 @@ function assignToTheme(ti,fname){
       markDirty();
       toast('Kaartafbeelding ingesteld: '+fname,'green');
       var pw=g('pw');if(pw)renderClPanel();
-      setTimeout(loadCardPreviews,50);
+      scheduleCardPreviewWarmup(120);
     }).catch(function(e){toast('Fout: '+e.message,'red');});
     return;
   }
@@ -1580,7 +6636,7 @@ function assignToTheme(ti,fname){
   t.card=fname;markDirty();
   cardBuildStore(S.d.meta||{})[t.key]='image';
   var pw=g('pw');if(pw)renderClPanel();
-  setTimeout(loadCardPreviews,50);toast('Gekoppeld: '+fname,'green');
+  scheduleCardPreviewWarmup(120);toast('Gekoppeld: '+fname,'green');
 }
 function assignCover(srcPath){
   // Copy file to voorkant.svg (or just reuse same name if already voorkant.svg)
@@ -1597,13 +6653,218 @@ function assignCover(srcPath){
     CC[destPath]={sha:(res.content||{}).sha,dataUrl:ca.dataUrl};
     toast('Cover bijgewerkt','green');
     var pw=g('pw');if(pw)renderClPanel();
-    setTimeout(loadCardPreviews,50);
+    scheduleCardPreviewWarmup(120);
   }).catch(function(e){toast('Fout: '+e.message,'red');});
 }
 function deleteGhFile(path,message){
   return api('/contents/'+path).then(function(info){
     return api('/contents/'+path,'DELETE',{message:message||('Remove: '+path),sha:info.sha});
   });
+}
+function infoCoverTitleInput(el){
+  var txt=(el.innerText||'').trim();
+  if(!S.d||!S.d.meta)return;
+  if(S.d.meta.infoCoverTitle!==txt){S.d.meta.infoCoverTitle=txt;markDirty();}
+}
+function infoCoverSubInput(el){
+  var txt=(el.innerText||'').trim();
+  if(!S.d||!S.d.meta)return;
+  if(S.d.meta.infoCoverSub!==txt){S.d.meta.infoCoverSub=txt;markDirty();}
+}
+function removeCoverLogo(){
+  if(!S.d||!S.d.meta)return;
+  S.d.meta.infoCoverLogoRemoved=true;
+  markDirty();
+  buildStijlPreserveBg(g('pw'));
+}
+function skipAutoInfoCover(){
+  if(!S.d||!S.d.meta)return;
+  if(!confirm('Automatische cover verwijderen? Je kunt daarna zelf een cover uploaden of opbouwen.'))return;
+  S.d.meta.infoCoverSkip=true;
+  markDirty();
+  buildStijlPreserveBg(g('pw'));
+}
+function removeCoverSub(){
+  if(!S.d||!S.d.meta)return;
+  S.d.meta.infoCoverSub='';
+  markDirty();
+  buildStijlPreserveBg(g('pw'));
+}
+function removeCoverTitle(){
+  if(!S.d||!S.d.meta)return;
+  S.d.meta.infoCoverTitle='';
+  markDirty();
+  buildStijlPreserveBg(g('pw'));
+}
+function selectCoverElem(type){
+  COVER_ELEM_SEL=(COVER_ELEM_SEL===type)?null:type;
+  setShapeSelection('cover',[],-1);
+  COVER_TEXT_SELECTED_MULTI=[];
+  COVER_TEXT_ACTIVE=-1;
+  COVER_TEXT_DESELECTED=true;
+  patchCoverElemTargets();
+  refreshShapeEditors('cover');
+}
+function removeSelectedCoverElem(){
+  if(COVER_ELEM_SEL==='logo')removeCoverLogo();
+  else if(COVER_ELEM_SEL==='title')removeCoverTitle();
+  else if(COVER_ELEM_SEL==='sub')removeCoverSub();
+  COVER_ELEM_SEL=null;
+  refreshShapeEditors('cover');
+}
+function infoCoverDefaultSubText(){
+  return spacePreviewText((S.space&&S.space.name)||((S.d&&S.d.meta&&S.d.meta.title)||''),'');
+}
+function infoCoverTitleText(){
+  var meta=(S.d&&S.d.meta)||{};
+  return String(meta.infoCoverTitle||'Uitgesproken');
+}
+function infoCoverSubText(){
+  var meta=(S.d&&S.d.meta)||{};
+  return String(meta.infoCoverSub!=null?meta.infoCoverSub:(infoCoverDefaultSubText()||''));
+}
+function coverElemStore(){
+  if(!S.d)S.d={};
+  var meta=S.d.meta=S.d.meta||{};
+  meta.ui=meta.ui||{};
+  meta.ui.infoCoverElems=meta.ui.infoCoverElems||{};
+  return meta.ui.infoCoverElems;
+}
+function coverElemDefaultLayout(type){
+  if(type==='logo')return{x:50,y:34,size:22};
+  if(type==='title')return{x:50,y:63};
+  if(type==='sub')return{x:50,y:74};
+  return{x:50,y:50};
+}
+function getCoverElemLayout(type){
+  var base=coverElemDefaultLayout(type);
+  var raw=coverElemStore()[type]||{};
+  var x=Number(raw.x); if(!isFinite(x))x=base.x;
+  var y=Number(raw.y); if(!isFinite(y))y=base.y;
+  var out={x:Math.max(8,Math.min(92,Math.round(x))),y:Math.max(8,Math.min(92,Math.round(y)))};
+  if(typeof base.size==='number'){
+    var size=Number(raw.size); if(!isFinite(size))size=base.size;
+    out.size=Math.max(12,Math.min(42,Math.round(size)));
+  }
+  return out;
+}
+function getCoverElemThumbLayout(type){
+  var layout=getCoverElemLayout(type);
+  if(type==='logo'&&typeof layout.size==='number'){
+    var size=Math.max(12,Math.min(28,Number(layout.size)||22));
+    var half=size/2;
+    layout.size=size;
+    layout.x=Math.max(half+4,Math.min(96-half,layout.x));
+    layout.y=Math.max(half+6,Math.min(94-half,layout.y));
+  }else{
+    layout.x=Math.max(12,Math.min(88,layout.x));
+    layout.y=Math.max(12,Math.min(88,layout.y));
+  }
+  return layout;
+}
+function setCoverElemSelection(type){
+  COVER_ELEM_SEL=type||null;
+  setShapeSelection('cover',[],-1);
+  COVER_TEXT_SELECTED_MULTI=[];
+  COVER_TEXT_ACTIVE=-1;
+  COVER_TEXT_DESELECTED=true;
+  patchCoverElemTargets();
+  refreshShapeEditors('cover');
+}
+function patchCoverElemTargets(){
+  ['logo','title','sub'].forEach(function(type){
+    var node=coverEditorQuery('.adminInfoCoverElem[data-cover-elem="'+type+'"]');
+    if(!node)return;
+    var layout=getCoverElemLayout(type);
+    node.classList.toggle('is-selected',COVER_ELEM_SEL===type);
+    node.style.left=layout.x+'%';
+    node.style.top=layout.y+'%';
+    if(type==='logo'){
+      node.style.width=layout.size+'%';
+      node.style.height=layout.size+'%';
+    }
+  });
+}
+var COVER_ELEM_DRAG=null;
+var COVER_ELEM_EDITING=null;
+function updateCoverElemPosition(type,x,y,silent){
+  var store=coverElemStore();
+  var item=store[type]=store[type]||{};
+  item.x=Math.max(8,Math.min(92,Math.round(Number(x)||50)));
+  item.y=Math.max(8,Math.min(92,Math.round(Number(y)||50)));
+  markDirty();
+  patchCoverElemTargets();
+  if(!silent)refreshShapeEditors('cover');
+}
+function dragCoverElemTo(clientX,clientY){
+  if(!COVER_ELEM_DRAG||!COVER_ELEM_DRAG.hostEl)return;
+  var rect=COVER_ELEM_DRAG.hostEl.getBoundingClientRect();
+  if(!rect.width||!rect.height)return;
+  var rawX=((clientX-(COVER_ELEM_DRAG.offsetX||0))-rect.left)/rect.width*100;
+  var rawY=((clientY-(COVER_ELEM_DRAG.offsetY||0))-rect.top)/rect.height*100;
+  COVER_ELEM_DRAG.moved=true;
+  updateCoverElemPosition(COVER_ELEM_DRAG.type,rawX,rawY,true);
+}
+function startCoverElemDrag(ev,type){
+  var node=ev.currentTarget||ev.target.closest('.adminInfoCoverElem[data-cover-elem]');
+  if(!node)return;
+  if(COVER_ELEM_EDITING===type||node.classList.contains('is-editing'))return;
+  if(type!=='logo'&&(ev.detail||0)>1)return;
+  if(ev&&ev.button===2){
+    setCoverElemSelection(type);
+    ev.preventDefault();
+    ev.stopPropagation();
+    return;
+  }
+  if(ev&&ev.button!==0)return;
+  setCoverElemSelection(type);
+  var host=node.closest('.adminInfoCardFill.is-space-default');
+  if(!host)return;
+  var rect=host.getBoundingClientRect();
+  var layout=getCoverElemLayout(type);
+  var px=rect.left+(layout.x/100)*rect.width;
+  var py=rect.top+(layout.y/100)*rect.height;
+  COVER_ELEM_DRAG={type:type,hostEl:host,elemEl:node,offsetX:ev.clientX-px,offsetY:ev.clientY-py,moved:false};
+  node.classList.add('dragging');
+  ev.preventDefault();
+  ev.stopPropagation();
+}
+function startCoverElemInlineEdit(ev,type){
+  if(type==='logo')return false;
+  if(ev){
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+  setCoverElemSelection(type);
+  var node=coverEditorQuery('.adminInfoCoverElem[data-cover-elem="'+type+'"]');
+  if(!node)return false;
+  var text=node.querySelector(type==='title'?'.adminInfoBrandTitle':'.adminInfoBrandSub');
+  if(!text)return false;
+  node.classList.add('is-editing');
+  text.setAttribute('contenteditable','true');
+  text.spellcheck=false;
+  COVER_ELEM_EDITING=type;
+  try{
+    text.focus();
+    var range=document.createRange();
+    range.selectNodeContents(text);
+    range.collapse(false);
+    var sel=window.getSelection();
+    if(sel){sel.removeAllRanges();sel.addRange(range);}
+  }catch(_e){}
+  return false;
+}
+function finishCoverElemInlineEdit(type,el){
+  var node=(el&&el.closest)?el.closest('.adminInfoCoverElem'):coverEditorQuery('.adminInfoCoverElem[data-cover-elem="'+type+'"]');
+  var text=el||(node&&node.querySelector(type==='title'?'.adminInfoBrandTitle':'.adminInfoBrandSub'));
+  if(text)text.setAttribute('contenteditable','false');
+  if(node)node.classList.remove('is-editing');
+  if(COVER_ELEM_EDITING===type)COVER_ELEM_EDITING=null;
+  if(S.clTab==='opmaken')buildStijlPreserveBg(g('pw'));
+  else{
+    patchCoverElemTargets();
+    refreshShapeEditors('cover');
+  }
 }
 function toggleThumbAdv(){
   S.thumbsOpen=!S.thumbsOpen;
@@ -1704,7 +6965,7 @@ function startLooseUpload(file,folderName){
         uploadDataUrlToPath(path,dataUrl,'Upload: '+fn,function(){
           refreshLibGrid(id);
           refreshAdminPanel();
-          setTimeout(loadCardPreviews,80);
+          scheduleCardPreviewWarmup(140);
         }).then(function(){
           resolve();
         }).catch(function(err){
@@ -1754,6 +7015,7 @@ function buildCTile(card,folder,path){
   '</div>';
 }
 function loadCardPreviews(){
+  if(S.activeKind!=='set'||!S.activeId||!S.d||!S.d.meta)return;
   var id=S.activeId,themes=S.d.meta.themes||[];
   var toLoad=stylePreviewCandidates(S.d.meta).reduce(function(list,file){
     cardAssetFolders().forEach(function(folder){
@@ -2114,7 +7376,7 @@ function confirmCrop(){
       renderSidebar();
       refreshLibGrid(S.activeId);
       refreshAdminPanel();
-      setTimeout(loadCardPreviews,50);
+      scheduleCardPreviewWarmup(120);
     }).catch(function(err){toast('Fout: '+err.message,'red');if(ldSvg.parentNode)ldSvg.remove();});
     return;
   }
@@ -2140,7 +7402,7 @@ function confirmCrop(){
         if(ld.parentNode)ld.remove();updateTile(path,dataUrl);toast('✓ Bijgesneden en geüpload','green');renderSidebar();
         refreshLibGrid(S.activeId);
         refreshAdminPanel();
-        setTimeout(loadCardPreviews,50);
+        scheduleCardPreviewWarmup(120);
       }).catch(function(err){toast('Fout: '+err.message,'red');if(ld.parentNode)ld.remove();});
     };
     reader.readAsBinaryString(blob);
@@ -2194,7 +7456,7 @@ function openLinkPopup(ev,ti,folder){
   });
   setTimeout(function(){document.addEventListener('click',closeLpOut);},10);
 }
-function linkCard(ti,folder,fn){var theme=S.d.meta.themes[ti];if(!theme)return;theme.card=fn;markDirty();closeLp();var pw=g('pw');if(pw)renderClPanel();setTimeout(loadCardPreviews,50);toast('Gekoppeld: '+fn);}
+function linkCard(ti,folder,fn){var theme=S.d.meta.themes[ti];if(!theme)return;theme.card=fn;markDirty();closeLp();var pw=g('pw');if(pw)renderClPanel();scheduleCardPreviewWarmup(120);toast('Gekoppeld: '+fn);}
 function uploadAndLink(input,ti,folder){
   var files=Array.from(input.files||[]);if(!files.length)return;
   closeLp();
@@ -2205,7 +7467,7 @@ function uploadAndLink(input,ti,folder){
     theme.card=last.name.replace(/[^a-zA-Z0-9._-]/g,'-');
     markDirty();
     refreshAdminPanel();
-    setTimeout(loadCardPreviews,50);
+    scheduleCardPreviewWarmup(120);
     toast('Bestanden toegevoegd — laatste upload gekoppeld','green');
   }
   input.value='';
@@ -2214,6 +7476,132 @@ function uploadAndLink(input,ti,folder){
 // ═══════════════════════════════════════════
 // STEP: VRAGEN
 // ═══════════════════════════════════════════
+var TIP_CURRENT_PANE='vragen';
+var TIP_HOVER_TIMER=null;
+var TIP_HOVERS_WIRED=false;
+function getTipBlock(){return document.getElementById('globalTipBlock');}
+function initTipHovers(){
+  if(TIP_HOVERS_WIRED)return;
+  TIP_HOVERS_WIRED=true;
+  document.addEventListener('mouseover',function(e){
+    var tb=getTipBlock();
+    // Entering the tip block → cancel any pending reset, keep current tip
+    if(tb&&(e.target===tb||tb.contains(e.target))){
+      if(TIP_HOVER_TIMER){clearTimeout(TIP_HOVER_TIMER);TIP_HOVER_TIMER=null;}
+      return;
+    }
+    var el=e.target&&e.target.closest?e.target.closest('[data-tip]'):null;
+    if(!el)return;
+    var id=el.dataset.tip;
+    if(!id||!TIP_TIPS[id])return;
+    if(TIP_HOVER_TIMER){clearTimeout(TIP_HOVER_TIMER);TIP_HOVER_TIMER=null;}
+    renderGlobalTip(id,true);
+  });
+  document.addEventListener('mouseout',function(e){
+    var el=e.target&&e.target.closest?e.target.closest('[data-tip]'):null;
+    if(!el)return;
+    var rel=e.relatedTarget;
+    if(rel&&el.contains(rel))return; // still inside zone
+    // Moving to the tip block → don't reset
+    var tb=getTipBlock();
+    if(tb&&rel&&(rel===tb||tb.contains(rel)))return;
+    if(TIP_HOVER_TIMER)clearTimeout(TIP_HOVER_TIMER);
+    TIP_HOVER_TIMER=setTimeout(function(){
+      renderGlobalTip(TIP_CURRENT_PANE,true);
+      TIP_HOVER_TIMER=null;
+    },120);
+  });
+}
+var TIP_TIPS={
+  vragen:[
+    'Stel open vragen die uitnodigen tot gesprek. Vermijd ja/nee-vragen — hoe opener, hoe rijker de reacties.',
+    'Groepeer vragen per thema voor meer structuur. Deelnemers kunnen zo gerichter een kaart kiezen.',
+    'Kort is krachtig — één heldere zin nodigt meer uit dan een lange omschrijving.'
+  ],
+  info:[
+    'De infopagina verschijnt vóór de kaarten. Gebruik hem om context te geven of spelregels uit te leggen.',
+    'Voeg per thema een korte toelichting toe — dat helpt deelnemers om de juiste kaart te kiezen.',
+    'Houd de tekst beknopt: twee à drie zinnen per thema is genoeg om richting te geven.'
+  ],
+  space:[
+    'De homepage toont al je sets op één plek. Kies een lay-out die past bij jouw presentatiestijl.',
+    'Zet je meest gebruikte sets bovenaan — je kunt ze eenvoudig herschikken via slepen in de zijbalk.',
+    'Een publieke set is zichtbaar voor iedereen met de link. Privé sets zijn alleen zichtbaar in het dashboard.'
+  ],
+  vormen:[
+    'Kies vormen die passen bij de sfeer van je set. Minder is meer — twee of drie vormen geven al karakter.',
+    'Combineer een grote achtergrondvorm met kleinere accenten voor diepte en variatie op elke kaart.'
+  ],
+  achtergrond:[
+    'De achtergrond volgt automatisch de kleuren van je vormen. Zet de intensiteit lager voor een subtielere look.',
+    'Een effen kleur als achtergrond werkt goed voor sets waarbij de tekst centraal staat.'
+  ],
+  tekst:[
+    'Gebruik lettergrootte en gewicht om hiërarchie aan te brengen. Een grote, vette vraag trekt meteen de aandacht.',
+    'Kies een lettertype dat past bij de toon van je set — speels, zakelijk of warm en persoonlijk.'
+  ],
+  kleur:[
+    'De kaartkleur bepaalt de sfeer van je set. Kies kleuren die bij je merk of thema passen.',
+    'Combineer een donkerdere kaartkleur met lichte vormen voor een rustig, stijlvol contrast.'
+  ],
+  cover:[
+    'Voeg tekst op de cover toe via de typografiebar bovenaan.',
+    'Houd de cover krachtig en rustig: een korte titel en genoeg witruimte werkt vaak het best.'
+  ]
+};
+var TIP_INDEX={};
+function tipBlockHtml(id){
+  try{if(localStorage.getItem('tip_dismissed_'+id)==='1')return'';}catch(e){}
+  var tips=TIP_TIPS[id];
+  if(!Array.isArray(tips)||!tips.length)return'';
+  var idx=TIP_INDEX[id]||0;
+  if(idx>=tips.length)idx=0;
+  TIP_INDEX[id]=idx;
+  var total=tips.length;
+  var tekst=tips[idx];
+  var tipIcon='<svg class="tipBlockSvgIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21h6"/><path d="M9 18h6"/><path d="M9 15c0-1-.4-1.9-1.2-2.6a6 6 0 1 1 8.4 0C15.4 13.1 15 14 15 15H9z"/></svg>';
+  var closeIcon='<svg viewBox="0 0 10 10"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>';
+  var navHtml='';
+  if(total>1){
+    var prevSvg='<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6.5,1.5 3,5 6.5,8.5"/></svg>';
+    var nextSvg='<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3.5,1.5 7,5 3.5,8.5"/></svg>';
+    navHtml='<div class="tipBlockNav">'+
+      '<button class="tipNavBtn" type="button" onclick="tipNav(\''+esc(id)+'\',-1)" title="Vorige tip"'+(idx===0?' disabled':'')+'>'+prevSvg+'</button>'+
+      '<span class="tipNavCount">'+(idx+1)+' / '+total+'</span>'+
+      '<button class="tipNavBtn" type="button" onclick="tipNav(\''+esc(id)+'\',1)" title="Volgende tip"'+(idx===total-1?' disabled':'')+'>'+nextSvg+'</button>'+
+    '</div>';
+  }
+  return'<div class="tipBlock" id="tipBlock_'+esc(id)+'">'+
+    '<div class="tipBlockHead">'+
+      '<span class="tipBlockIcon">'+tipIcon+'</span>'+
+      '<span class="tipBlockLabel">Tip</span>'+
+      navHtml+
+      '<button class="tipBlockClose" type="button" onclick="dismissTip(\''+esc(id)+'\')" title="Sluiten">'+closeIcon+'</button>'+
+    '</div>'+
+    '<div class="tipBlockText">'+esc(tekst)+'</div>'+
+  '</div>';
+}
+function tipNav(id,dir){
+  var tips=TIP_TIPS[id];
+  if(!Array.isArray(tips)||tips.length<=1)return;
+  var idx=(TIP_INDEX[id]||0)+dir;
+  if(idx<0)idx=tips.length-1;
+  if(idx>=tips.length)idx=0;
+  TIP_INDEX[id]=idx;
+  renderGlobalTip(id);
+}
+function dismissTip(id){
+  try{localStorage.setItem('tip_dismissed_'+id,'1');}catch(e){}
+  var el=document.getElementById('tipBlock_'+id);
+  if(el)el.classList.add('dismissed');
+}
+function renderGlobalTip(paneId,isHover){
+  var el=document.getElementById('globalTipBlock');
+  if(!el)return;
+  if(!isHover)TIP_CURRENT_PANE=paneId||'vragen';
+  el.innerHTML=tipBlockHtml(paneId||TIP_CURRENT_PANE);
+}
+
 function buildVragen(target,opts){
   opts=opts||{};
   var filterKey=opts.filterKey||'';
@@ -2227,12 +7615,12 @@ function buildVragen(target,opts){
   if(meta.useDefaultGroup){
     // No hint needed — default group behaviour is self-explanatory
   }
-  if(meta.isCover&&meta.hasThemes){
-    target.innerHTML='<div class="questionsPanel"><div class="questionsEmptyState">Kies een thema in de slider om de bijbehorende vragen te bewerken.</div></div>';
+  if(meta.isCover){
+    target.innerHTML=buildSidePanelCoverState();
     return;
   }
   if(!theme){
-    target.innerHTML='<div class="questionsPanel"><div class="questionsEmptyState">Geen vragen gevonden voor deze selectie.</div></div>';
+    target.innerHTML=buildSidePanelEmpty('Geen vragen gevonden voor deze selectie.');
     return;
   }
   var key=theme.key;
@@ -2240,38 +7628,57 @@ function buildVragen(target,opts){
   var selectedIdx=ensureQuestionSelection(key);
   var selected=qs[selectedIdx]||null;
   var isBackOpen=!!QUESTION_EDITOR_BACK_OPEN[key];
-  html+='<div class="questionsPanel">';
   var showBacks=!!QUESTION_BACKS_EDITOR_OPEN[key];
+  var bulkOpen=!!QUESTION_BULK_IMPORT_OPEN[key];
+  var panelOpen=storedOpenState(QUESTION_SIDE_PANEL_OPEN,key,true);
   var iconBulk='<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5v10"/><path d="M8.5 9 12 5.5 15.5 9"/><path d="M7 18.5h10"/></svg>';
-  var iconBacks='<svg class="flipIconStd" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6.5h6a4.75 4.75 0 0 1 0 9.5H6.75"/><path d="M9 4 5.25 6.75 9 9.5"/></svg>';
+  var iconBacks='<span style="font-size:14px;line-height:1;display:block;transform:scaleX(-1)" aria-hidden="true">↺</span>';
   var iconAdd='<svg viewBox="0 0 16 16"><path d="M8 2.5v11M2.5 8h11"/></svg>';
   var themeIdxQ=(S.d.meta.themes||[]).map(function(t){return t.key;}).indexOf(theme.key);
-  var themeNameHtml=(themeIdxQ>=0&&theme.key!=='algemeen')
-    ?'<input class="questionsTheme questionsThemeInput" type="text" value="'+esc(theme.label||theme.key)+'" placeholder="Naam van het thema" oninput="updateStyleThemeName('+themeIdxQ+',this.value)">'
-    :'<div class="questionsTheme">'+esc(theme.label||theme.key)+'</div>';
-  html+='<div class="questionsPanelShell">'+
-    '<div class="questionsPanelHead">'+
-      '<div class="questionsMeta">'+themeNameHtml+'<div class="questionsCount">'+qs.length+' '+(qs.length===1?'vraag':'vragen')+'</div></div>'+
-      '<div class="questionsHeadActions">'+
-        '<button class="qHeadBtn" type="button" onclick="showBulkImport(\''+esc(key)+'\')" title="Vragen in bulk importeren" aria-label="Vragen in bulk importeren">'+iconBulk+'</button>'+
-        '<button class="qHeadBtn'+(showBacks?' sel':'')+'" type="button" onclick="toggleBacksEditor(\''+esc(key)+'\')" title="Achterkanten tonen/verbergen">'+iconBacks+'</button>'+
-        '<button class="qHeadBtn qHeadBtnAdd" type="button" onclick="addQ(\''+esc(key)+'\')" title="Vraag toevoegen">'+iconAdd+'</button>'+
+  var themeNameValue=themeIdxQ>=0?themeLabelForIndex(themeIdxQ,theme.label):(theme.key==='algemeen'?nextThemeLabel(S.d.meta||{}):(theme.label||theme.key));
+  var themeNameHtml='<div class="questionsTheme">'+esc(themeNameValue)+'</div>';
+  var themeMetaHtml='<div class="questionsMetaText">'+themeNameHtml+'<div class="questionsCount">'+qs.length+' '+(qs.length===1?'vraag':'vragen')+'</div></div>';
+  var questionsHeaderActions=
+    '<div class="questionsHeadActions">'+
+      '<button class="qHeadBtn qHeadBtnSecondary'+(showBacks?' sel':'')+'" type="button" onclick="toggleBacksEditor(\''+esc(key)+'\')" title="'+(showBacks?'Verberg achterkanttekst':'Toon achterkanttekst')+'" aria-label="'+(showBacks?'Verberg achterkanttekst':'Toon achterkanttekst')+'">'+iconBacks+'</button>'+
+      '<div class="questionsHeadActionsGroup">'+
+        '<button class="qHeadBtn qHeadBtnPrimary'+(bulkOpen?' sel':'')+'" type="button" onclick="toggleBulkImport(\''+esc(key)+'\')" title="Meerdere vragen importeren" aria-label="Meerdere vragen importeren">'+iconBulk+'</button>'+
+        '<div class="questionsHeadActionsDivider" aria-hidden="true"></div>'+
+        '<button class="qHeadBtn qHeadBtnPrimary qHeadBtnAdd" type="button" onclick="addQ(\''+esc(key)+'\')" title="Vraag toevoegen">'+iconAdd+'</button>'+
       '</div>'+
-    '</div>'+
-    '<div class="questionListShell">';
+      '<button class="questionCollapseBtn" type="button" onclick="toggleQuestionSidePanel(\''+esc(key)+'\')" title="'+(panelOpen?'Inklappen':'Uitklappen')+'" aria-label="'+esc(themeNameValue)+'" aria-expanded="'+(panelOpen?'true':'false')+'">'+buildSectionChevronSvg(panelOpen)+'</button>'+
+    '</div>';
+  var questionListHtml='<div class="questionListShell">';
   html+='<div class="questionList">';
-  if(!qs.length){
-    html+='<div class="questionListEmpty">Nog geen vragen. Voeg er eentje toe of gebruik bulk.</div>';
-  }else{
+  if(bulkOpen){
+    html+=buildBulkImportPanel(key);
+  }
+  if(!qs.length&&!bulkOpen){
+    html+='<div class="questionListEmpty">'+
+      '<strong>Nog geen vragen.</strong>'+
+      '<div class="qListEmptyActions">'+
+        '<button class="qListEmptyBtn" type="button" onclick="addQ(\''+esc(key)+'\')">+ Vraag toevoegen</button>'+
+        '<button class="qListEmptyBtn qListEmptyBtnSecondary" type="button" onclick="showBulkImport(\''+esc(key)+'\')">'+iconBulk+'<span>Meerdere vragen importeren</span></button>'+
+      '</div>'+
+    '</div>';
+  }else if(qs.length){
     html+=qs.map(function(card,qi){
-      var line=(card.voorkant||card.q||'').trim()||'Lege vraag';
+      var lineRaw=(card.voorkant||card.q||'').trim();
+      var line=lineRaw||'Formuleer een vraag.';
       var back=card.achterkant||card.back||'';
+      var backLine=back.trim();
       if(qi===selectedIdx){
         return '<div class="questionListItem active editing">'+
           '<span class="questionListNum">'+(qi+1)+'</span>'+
           '<div class="questionItemFields">'+
-            '<div class="richCe questionRichCe" contenteditable="true" data-rich-type="question" data-rich-field="voorkant" data-rich-qkey="'+esc(key)+'" data-rich-qi="'+qi+'" data-placeholder="Voorkant…" spellcheck="false" oninput="richCeQuestionInput(this)" onfocus="syncSelectedQuestionPreview(\''+esc(key)+'\')">'+mdToHtml(line)+'</div>'+
-            (showBacks?'<textarea class="questionListBack" rows="1" placeholder="Achterkant…" oninput="updQ(\''+esc(key)+'\','+qi+',\'achterkant\',this.value);autoH(this)">'+esc(back)+'</textarea>':'')+
+            '<div class="questionItemFace questionItemFace-front">'+
+              (showBacks?'<div class="questionSideLabel">Voorkant</div>':'')+
+              '<div class="richCe questionRichCe" contenteditable="true" data-rich-type="question" data-rich-field="voorkant" data-rich-qkey="'+esc(key)+'" data-rich-qi="'+qi+'" data-placeholder="Formuleer een vraag." spellcheck="false" oninput="richCeQuestionInput(this)" onfocus="syncSelectedQuestionPreview(\''+esc(key)+'\')">'+mdToHtml(lineRaw)+'</div>'+
+            '</div>'+
+            (showBacks?'<div class="questionItemFace questionItemFace-back">'+
+              '<div class="questionSideLabel">Achterkant</div>'+
+              '<div class="richCe questionRichCe questionRichCeBackInline" contenteditable="true" data-rich-type="question" data-rich-field="achterkant" data-rich-qkey="'+esc(key)+'" data-rich-qi="'+qi+'" data-placeholder="Voeg tekst toe." spellcheck="false" oninput="richCeQuestionInput(this)" onfocus="syncSelectedQuestionPreview(\''+esc(key)+'\')">'+mdToHtml(back)+'</div>'+
+            '</div>':'')+
           '</div>'+
           '<div class="questionItemActions">'+
             '<button class="questionItemBtn" type="button" title="Dupliceren" onclick="duplicateQ(\''+esc(key)+'\','+qi+')">⧉</button>'+
@@ -2279,33 +7686,45 @@ function buildVragen(target,opts){
           '</div>'+
         '</div>';
       }
-      return '<div class="questionListItem" onclick="setSelectedQuestion(\''+esc(key)+'\','+qi+')">'+
+      return '<div class="questionListItem'+(showBacks?' has-back':'')+'" onclick="setSelectedQuestion(\''+esc(key)+'\','+qi+')">'+
         '<span class="questionListNum">'+(qi+1)+'</span>'+
         '<div class="questionItemFields">'+
-          '<span class="questionListText">'+esc(line)+'</span>'+
-          (showBacks?'<textarea class="questionListBack" rows="1" placeholder="Achterkant…" oninput="updQ(\''+esc(key)+'\','+qi+',\'achterkant\',this.value);autoH(this)">'+esc(back)+'</textarea>':'')+
+          '<div class="questionItemFace questionItemFace-front">'+
+            (showBacks?'<div class="questionSideLabel">Voorkant</div>':'')+
+            '<span class="questionListText'+(lineRaw?'':' is-empty')+'">'+esc(line)+'</span>'+
+          '</div>'+
+          (showBacks?'<div class="questionItemFace questionItemFace-back">'+
+            '<div class="questionSideLabel">Achterkant</div>'+
+            '<span class="questionListText questionListTextBack'+(backLine?'':' is-empty')+'">'+esc(backLine||'Voeg tekst toe.')+'</span>'+
+          '</div>':'')+
         '</div>'+
       '</div>';
     }).join('');
   }
-  html+='</div></div></div>';
-  html+='<div class="questionEditor">';
+  questionListHtml+=html+'</div></div>';
+  var questionEditorHtml='<div class="questionEditor">';
   if(!selected){
-    html+='<div class="questionsEmptyState">Selecteer of voeg een vraag toe om rechts te bewerken.</div>';
+    questionEditorHtml+='<div class="questionsEmptyState">Selecteer of voeg een vraag toe om rechts te bewerken.</div>';
   }else{
     var back=selected.achterkant||selected.back||'';
     var MAX=90;
-    html+='<div class="questionEditorHead"><div class="questionEditorTitle">Vraag '+(selectedIdx+1)+'</div><div class="questionEditorActions"><button class="iconAction" type="button" title="Dupliceren" onclick="duplicateQ(\''+esc(key)+'\','+selectedIdx+')">⧉</button><button class="iconAction danger" type="button" title="Verwijderen" onclick="delQ(\''+esc(key)+'\','+selectedIdx+')">✕</button></div></div>';
-    html+='<div class="questionCounter top" id="cc-f-'+key+'-'+selectedIdx+'">'+(selected.voorkant||selected.q||'').length+'/'+MAX+'</div>';
-    html+='<div class="questionBackToggle"><button class="ghostToggle'+(isBackOpen?' open':'')+'" type="button" onclick="toggleQuestionBackEditor(\''+esc(key)+'\')">'+(isBackOpen?'Achterkant verbergen':'Achterkant bewerken')+'</button></div>';
+    questionEditorHtml+='<div class="questionEditorHead"><div class="questionEditorTitle">Vraag '+(selectedIdx+1)+'</div><div class="questionEditorActions"><button class="iconAction" type="button" title="Dupliceren" onclick="duplicateQ(\''+esc(key)+'\','+selectedIdx+')">⧉</button><button class="iconAction danger" type="button" title="Verwijderen" onclick="delQ(\''+esc(key)+'\','+selectedIdx+')">✕</button></div></div>';
+    questionEditorHtml+='<div class="questionCounter top" id="cc-f-'+key+'-'+selectedIdx+'">'+(selected.voorkant||selected.q||'').length+'/'+MAX+'</div>';
+    questionEditorHtml+='<div class="questionBackToggle"><button class="ghostToggle'+(isBackOpen?' open':'')+'" type="button" onclick="toggleQuestionBackEditor(\''+esc(key)+'\')">'+(isBackOpen?'Achterkant verbergen':'Achterkant bewerken')+'</button></div>';
     if(isBackOpen){
-      html+='<label class="questionFieldLabel">Achterkant</label>'+
-        '<div class="richCe questionRichCe questionRichCeBack" contenteditable="true" data-rich-type="question" data-rich-field="achterkant" data-rich-qkey="'+esc(key)+'" data-rich-qi="'+selectedIdx+'" data-placeholder="Optionele achterkant of toelichting" spellcheck="false" oninput="richCeQuestionInput(this)" onfocus="syncSelectedQuestionPreview(\''+esc(key)+'\')">'+mdToHtml(back)+'</div>'+
+      questionEditorHtml+='<label class="questionFieldLabel">Achterkant</label>'+
+        '<div class="richCe questionRichCe questionRichCeBack" contenteditable="true" data-rich-type="question" data-rich-field="achterkant" data-rich-qkey="'+esc(key)+'" data-rich-qi="'+selectedIdx+'" data-placeholder="Voeg tekst toe…" spellcheck="false" oninput="richCeQuestionInput(this)" onfocus="syncSelectedQuestionPreview(\''+esc(key)+'\')">'+mdToHtml(back)+'</div>'+
         '<div class="questionCounter" id="cc-b-'+key+'-'+selectedIdx+'">'+back.length+'/'+MAX+'</div>';
     }
   }
-  html+='</div></div>';
-  target.innerHTML=html;
+  questionEditorHtml+='</div>';
+  target.innerHTML=buildSidePanelShell({
+    shellClass:(panelOpen?'':'questionPanelShellCollapsed'),
+    metaHtml:themeMetaHtml,
+    actionsHtml:questionsHeaderActions,
+    contentHtml:panelOpen?questionListHtml:'',
+    afterShellHtml:panelOpen?questionEditorHtml:''
+  });
   target.querySelectorAll('.questionListBack').forEach(function(t){setTimeout(function(){autoH(t);},0);});
   if(theme)syncSelectedQuestionPreview(theme.key);
 }
@@ -2313,6 +7732,11 @@ function toggleBacksEditor(key){
   QUESTION_BACKS_EDITOR_OPEN[key]=!QUESTION_BACKS_EDITOR_OPEN[key];
   var sp=g('stijlSidePaneBody');
   if(sp)buildVragen(sp,{filterKey:key});
+}
+function toggleQuestionSidePanel(key){
+  key=String(key||'cover');
+  toggleStoredOpenState(QUESTION_SIDE_PANEL_OPEN,key,true);
+  rebuildVragen();
 }
 function saveBacksFromEditor(key,val){
   var lines=val.split('\n');
@@ -2340,9 +7764,8 @@ function cpSetSide(key,side,btn){
   // Update back text
   var backEl=g('cpback-'+key);
   if(backEl){
-    var backMode=S.d.meta.backMode||'mirror';
-    var blankColor=(S.d.meta.blankBackColors&&S.d.meta.blankBackColors[key])||S.d.meta.blankBackColor||'#F8E4D2';
-    backEl.style.background=backMode==='blank'?blankColor:'transparent';
+    var backCfg=backPreviewConfig(key);
+    backEl.style.background=(backCfg.custom&&!backCfg.seedFromFront)?backCfg.bg:'transparent';
     var backOverlay=backEl.querySelector('.cpOverlay');
     if(backOverlay)backOverlay.innerHTML=q2.achterkant?esc(q2.achterkant):'';
   }
@@ -2371,14 +7794,19 @@ function updateCardPreview(key,frontTxt,backTxt){
   }
   var backEl=g('cpback-'+key);
   if(backEl){
-    var backMode=S.d.meta.backMode||'mirror';
-    var blankColor=(S.d.meta.blankBackColors&&S.d.meta.blankBackColors[key])||S.d.meta.blankBackColor||'#F8E4D2';
-    backEl.style.background=backMode==='blank'?blankColor:'transparent';
-    backEl.style.fontFamily=font;
-    backEl.style.fontSize=fs;
-    backEl.style.color=color;
+    var backCfg=backPreviewConfig(key);
+    var backCv=backCfg.cssVars||cv;
+    var backFont="'"+(backCv['--pk-font']||cv['--pk-font']||'IBM Plex Sans')+"',sans-serif";
+    var backFs=fontSizeCss(backCv['--pk-font-size']||cv['--pk-font-size']||'12');
+    var backColor=backCv['--pk-set-text']||color;
+    var backAlign=backCv['--pk-text-align']||halign;
+    var backValign=backCv['--pk-text-valign']||valign;
+    backEl.style.background=(backCfg.custom&&!backCfg.seedFromFront)?backCfg.bg:'transparent';
+    backEl.style.fontFamily=backFont;
+    backEl.style.fontSize=backFs;
+    backEl.style.color=backColor;
     var bov=backEl.querySelector('.cpOverlay');
-    if(bov){bov.style.alignItems=valign==='top'?'flex-start':valign==='bottom'?'flex-end':'center';bov.style.justifyContent=halign==='left'?'flex-start':halign==='right'?'flex-end':'center';}
+    if(bov){bov.style.alignItems=backValign==='top'?'flex-start':backValign==='bottom'?'flex-end':'center';bov.style.justifyContent=backAlign==='left'?'flex-start':backAlign==='right'?'flex-end':'center';bov.style.textAlign=backAlign;}
     backEl.querySelector('.cpOverlay').innerHTML=backTxt?esc(backTxt):'';
   }
 }
@@ -2400,6 +7828,8 @@ var EMPTY_QUESTION_CARD_BG = '#EEF1F2';
 var QUESTION_SELECTION={};
 var QUESTION_EDITOR_BACK_OPEN={};
 var QUESTION_BACKS_EDITOR_OPEN={};
+var QUESTION_BULK_IMPORT_OPEN={};
+var QUESTION_BULK_IMPORT_DRAFT={};
 function normalizedCardSurface(v){
   var hex=normalizeHexInput(v);
   if(hex==='#ffffff'||hex==='#fcfbf8')return DEFAULT_CARD_SURFACE;
@@ -2416,9 +7846,11 @@ function cardBgBaseForKey(meta,key){
   meta=meta||{};
   var maps=cardBgMaps(meta);
   var byKey=normalizeHexInput(maps.base[key||''])||'';
+  var isBackKey=(key===BACK_STYLE_KEY||String(key||'').indexOf('__back_card__:')===0);
+  var backDefault=isBackKey?(normalizeHexInput(meta.blankBackColor||'')||''):'';
   var legacy=normalizeHexInput((((meta.ui||{}).cardBgBase)||''))||'';
   var css=normalizeHexInput((((meta.cssVars||{})['--pk-set-bg'])||''))||'';
-  return normalizedCardSurface(byKey||legacy||css||DEFAULT_CARD_SURFACE);
+  return normalizedCardSurface(byKey||backDefault||legacy||css||DEFAULT_CARD_SURFACE);
 }
 function cardBgToneForKey(meta,key){
   meta=meta||{};
@@ -2429,12 +7861,65 @@ function cardBgToneForKey(meta,key){
 function cardBgForKey(meta,key){
   return normalizedCardSurface(colorToneAdjust(cardBgBaseForKey(meta,key),cardBgToneForKey(meta,key)));
 }
+function hasExplicitBackShapeLayers(meta,key){
+  var store=((((meta||{}).ui||{}).cardShapes)||{});
+  return Array.isArray(store[key||''])&&store[key||''].length>0;
+}
+function hasExplicitBackCssVars(meta,key){
+  var vars=key===BACK_STYLE_KEY?backStyleCssVarStore(meta):backStyleCardEntry(meta,key).cssVars;
+  if(!vars||typeof vars!=='object')return false;
+  return Object.keys(vars).some(function(name){
+    return String(vars[name]==null?'':vars[name]).trim()!=='';
+  });
+}
+function hasExplicitBackBackground(meta,key,blankColor){
+  var maps=cardBgMaps(meta);
+  var safeKey=key||'';
+  if(Object.prototype.hasOwnProperty.call(maps.tone,safeKey)&&(Number(maps.tone[safeKey])||0)!==0)return true;
+  if(!Object.prototype.hasOwnProperty.call(maps.base,safeKey))return false;
+  var value=normalizedCardSurface(maps.base[safeKey]||'');
+  return !!value&&value!==normalizedCardSurface(blankColor);
+}
+function shouldSeedBlankBackFromFront(meta,styleKey,blankColor){
+  return !hasExplicitBackShapeLayers(meta,styleKey)
+    && !hasExplicitBackBackground(meta,styleKey,blankColor);
+}
 function sharedCardPreviewHtml(opts){
   opts=opts||{};
+  var viewerOnlyPreview=!!opts.viewerOnlyPreview;
   var cached=opts.file?(((cachedCardAssetForFile(S.activeId,opts.file)||{}).asset)||null):null;
   var imgSrc=cached&&cached.dataUrl?cached.dataUrl:'';
   if(opts.forceNoImage)imgSrc='';
-  var cv=(S.d.meta.cssVars||{});
+  var previewKey=opts.previewKey||'algemeen';
+  var sharedRenderer=window.PK&&window.PK.sharedCardRenderer&&typeof window.PK.sharedCardRenderer.render==='function'
+    ?window.PK.sharedCardRenderer
+    :null;
+  if(sharedRenderer&&!opts.infoRichCe){
+    return sharedRenderer.render({
+      meta:(S.d&&S.d.meta)||{},
+      wrapId:opts.wrapId||'',
+      wrapClass:opts.wrapClass||'cardPrevWrap',
+      wrapStyle:opts.wrapStyle||'',
+      faceId:opts.faceId||'',
+      frontId:opts.frontId||'',
+      backId:opts.backId||'',
+      imgSrc:imgSrc,
+      forceNoImage:!!opts.forceNoImage,
+      previewKey:previewKey,
+      themeKey:opts.themeKey||previewKey,
+      frontTxt:(opts.frontTxt!=null?opts.frontTxt:''),
+      backTxt:opts.backTxt||'',
+      flipped:!!opts.flipped,
+      cardBg:opts.cardBg,
+      emptyBg:opts.emptyBg,
+      backDesignKey:opts.backDesignKey||'',
+      label:opts.label||'',
+      showCoverTexts:!!opts.showCoverTexts,
+      coverTextsHtml:opts.showCoverTexts?coverTextLayerHtml():'',
+      suppressEmptyFrontHint:!!opts.suppressEmptyFrontHint
+    });
+  }
+  var cv=styleCssVarsForKey(S.d.meta,previewKey);
   var font=cv['--pk-font']||'IBM Plex Sans';
   var fs=fontSizeCss(cv['--pk-font-size']||'12');
   var baseFontPt=parseInt(normFontSize(cv['--pk-font-size']||'12'),10)||12;
@@ -2442,34 +7927,79 @@ function sharedCardPreviewHtml(opts){
   var textColor=cv['--pk-set-text']||'rgba(48,96,136,0.95)';
   var halign=cv['--pk-text-align']||'center';
   var valign=cv['--pk-text-valign']||'center';
-  var accentColor=cv['--pk-set-accent']||'#CFE6DF';
-  var cardBg=normalizedCardSurface(opts.cardBg||cardBgForKey(S.d.meta,opts.previewKey)||(cv['--pk-set-bg']||DEFAULT_CARD_SURFACE));
+  var accentColor=cv['--pk-set-accent']||'#A8E1DD';
+  var cardBg=normalizedCardSurface(opts.cardBg||cardBgForKey(S.d.meta,previewKey)||(cv['--pk-set-bg']||DEFAULT_CARD_SURFACE));
   var emptyBg=normalizedCardSurface(opts.emptyBg||cardBg);
-  var backMode=opts.backMode||S.d.meta.backMode||'mirror';
-  var blankColor=(S.d.meta.blankBackColors&&S.d.meta.blankBackColors[opts.themeKey])||S.d.meta.blankBackColor||'#F8E4D2';
+  var backCfg=backPreviewConfig(opts.themeKey||previewKey);
+  var backMode=opts.backMode||backCfg.mode||'mirror';
+  var backCv=backCfg.cssVars||cv;
+  var backFont=backCv['--pk-font']||font;
+  var backFs=fontSizeCss(backCv['--pk-font-size']||cv['--pk-font-size']||'12');
+  var backTextColor=backCv['--pk-set-text']||textColor;
+  var backHalign=backCv['--pk-text-align']||halign;
+  var backValign=backCv['--pk-text-valign']||valign;
+  var backAlignItems=backValign==='top'?'flex-start':backValign==='bottom'?'flex-end':'center';
+  var backJustifyContent=backHalign==='left'?'flex-start':backHalign==='right'?'flex-end':'center';
+  var backUsesFrontDesign=backCfg.mirrorImage||backCfg.seedFromFront;
+  var backShapeKey=backUsesFrontDesign?previewKey:(backCfg.styleKey||previewKey);
+  var backBgHtml=backUsesFrontDesign
+    ?(imgSrc?'<img class="cpBg'+(backCfg.reflect?' is-reflect':'')+'" src="'+imgSrc+'" alt="">':'<div class="cpBgEmpty" style="'+cardBgStyle(emptyBg)+';position:absolute;inset:0"></div>')
+    :'<div class="cpBgEmpty" style="'+cardBgStyle(backCfg.bg)+';position:absolute;inset:0"></div>';
   var alignItems=valign==='top'?'flex-start':valign==='bottom'?'flex-end':'center';
   var justifyContent=halign==='left'?'flex-start':halign==='right'?'flex-end':'center';
   var wrapCls=opts.wrapClass||'cardPrevWrap';
   var wrapStyle=opts.wrapStyle||'';
+  var isSpaceInfoCover=!!(S.activeKind==='space'&&opts.infoRichCe&&opts.previewKey==='cover'&&isInfoSlideEnabled((S.d&&S.d.meta)||{},'cover')&&!((S.d.meta||{}).infoCoverSkip));
+  var spaceInfoName=spacePreviewText((S.space&&S.space.name)||((S.d&&S.d.meta&&S.d.meta.title)||''),'');
+  var coverTitle=infoCoverTitleText();
+  var coverSub=infoCoverSubText();
+  var logoHidden=!!(S.d&&S.d.meta&&S.d.meta.infoCoverLogoRemoved);
+  var spaceInfoDefaultBg=normalizedCardSurface('#A8E1DD');
+  var logoLayout=getCoverElemLayout('logo');
+  var titleLayout=getCoverElemLayout('title');
+  var subLayout=getCoverElemLayout('sub');
+  var spaceInfoDefaultCoverHtml='<div class="adminInfoCardFill is-space-default" style="'+cardBgStyle(spaceInfoDefaultBg)+'">'
+    +(!logoHidden
+      ?'<div class="adminInfoCoverElem adminInfoCoverElem-logo'+(COVER_ELEM_SEL==='logo'?' is-selected':'')+'" data-cover-elem="logo" onmousedown="startCoverElemDrag(event,\'logo\')" style="left:'+logoLayout.x+'%;top:'+logoLayout.y+'%;width:'+logoLayout.size+'%;height:'+logoLayout.size+'%">'+
+        '<div class="adminInfoBrandMark adminInfoCoverElem-static">'+
+          '<img src="/assets/logo-icons/masters/master-transparent.svg" alt="" class="adminInfoBrandLogo" aria-hidden="true">'+
+        '</div>'+
+      '</div>'
+      :'')
+    +'<div class="adminInfoCoverElem adminInfoCoverElem-text'+(COVER_ELEM_SEL==='title'?' is-selected':'')+(COVER_ELEM_EDITING==='title'?' is-editing':'')+'" data-cover-elem="title" onmousedown="startCoverElemDrag(event,\'title\')" ondblclick="return startCoverElemInlineEdit(event,\'title\')" style="left:'+titleLayout.x+'%;top:'+titleLayout.y+'%">'+
+      '<div class="adminInfoBrandTitle" oninput="infoCoverTitleInput(this)" onblur="finishCoverElemInlineEdit(\'title\',this)">'+esc(coverTitle)+'</div>'+
+    '</div>'+
+    (coverSub
+      ?'<div class="adminInfoCoverElem adminInfoCoverElem-text'+(COVER_ELEM_SEL==='sub'?' is-selected':'')+(COVER_ELEM_EDITING==='sub'?' is-editing':'')+'" data-cover-elem="sub" onmousedown="startCoverElemDrag(event,\'sub\')" ondblclick="return startCoverElemInlineEdit(event,\'sub\')" style="left:'+subLayout.x+'%;top:'+subLayout.y+'%">'+
+        '<div class="adminInfoBrandSub" oninput="infoCoverSubInput(this)" onblur="finishCoverElemInlineEdit(\'sub\',this)">'+esc(coverSub)+'</div>'+
+      '</div>'
+      :'')+
+  '</div>';
   // In infoRichCe mode we always render the richCe text area, even on the cover slide
   var isCover=!opts.infoRichCe&&opts.previewKey==='cover'&&!!opts.showCoverTexts;
   var isCoverPreview=!opts.infoRichCe&&opts.previewKey==='cover'&&!opts.showCoverTexts;
-  // Info mode: use a single sheet-like card on the same footprint as the question preview.
+  // Info mode: keep the original sheet-style layout where the card and text area
+  // belong to one preview object. The sheet may grow downward, but the card itself
+  // should start from the same visual line as the regular card preview.
   if(opts.infoRichCe){
-    var previewLabel=opts.label||'Infosheet';
+    var previewLabel=opts.label||'Infopagina';
     var previewTitle=esc(previewLabel);
     var midTitleText=String(opts.infoMidTitleText!=null?opts.infoMidTitleText:(opts.label||'')).trim();
-    var mediaHtml=(imgSrc?'<img class="adminInfoCardImg" src="'+imgSrc+'" alt="'+previewTitle+'">':'<div class="adminInfoCardFill" style="'+cardBgStyle(emptyBg)+'"></div>')+
+    var midTitleStyle='font-family:\''+esc(font)+'\',sans-serif;color:'+esc(textColor)+';font-size:'+esc(titleFontSize)+';font-weight:700;';
+    if(!midTitleText)midTitleStyle+='display:none;';
+    var mediaHtml=(imgSrc
+      ?'<img class="adminInfoCardImg" src="'+imgSrc+'" alt="'+previewTitle+'">'
+      :(isSpaceInfoCover?spaceInfoDefaultCoverHtml:'<div class="adminInfoCardFill" style="'+cardBgStyle(emptyBg)+'"></div>'))+
       '<div class="cpShapeLayer" data-shape-key="'+esc(opts.previewKey||'algemeen')+'">'+cardShapesLayerHtml(opts.previewKey||'algemeen')+'</div>'+
       (opts.showInfoMidTitle
-        ?'<div class="infoSlideMidTitle" contenteditable="true" spellcheck="false" data-info-mid-title-key="'+esc(opts.infoMidTitleKey||'')+'" oninput="infoMidTitleInput(this)" style="font-family:\''+esc(font)+'\',sans-serif;color:'+esc(textColor)+';font-size:'+esc(titleFontSize)+';font-weight:700">'+esc(midTitleText)+'</div>'
+        ?'<div class="infoSlideMidTitle" contenteditable="'+(viewerOnlyPreview?'false':'true')+'" spellcheck="false" data-info-mid-title-key="'+esc(opts.infoMidTitleKey||'')+'" oninput="infoMidTitleInput(this)" style="'+midTitleStyle+'">'+esc(midTitleText)+'</div>'
         :'');
     return '<div class="'+wrapCls+' infoPreviewSingle"'+(opts.wrapId?' id="'+esc(opts.wrapId)+'"':'')+(wrapStyle?' style="'+esc(wrapStyle)+'"':'')+'>'+
       '<div class="infoSlide adminInfoSlide adminInfoSlideSingle">'+
         '<div class="infoSlideInner adminInfoSlideInner">'+
-          '<div class="adminInfoSlideCard"'+(opts.faceId?' id="'+esc(opts.faceId)+'"':'')+' style="'+cardBgStyle(cardBg)+'">'+mediaHtml+'</div>'+
+          '<div class="infoSlideCard adminInfoSlideCard"'+(opts.faceId?' id="'+esc(opts.faceId)+'"':'')+' style="'+cardBgStyle(cardBg)+'">'+mediaHtml+'</div>'+
           '<div class="infoSlideText adminInfoSlideText adminInfoSlideTextEdit"'+(opts.frontId?' id="'+esc(opts.frontId)+'"':'')+'>'+
-            '<div class="richCe infoRichCe" contenteditable="true" data-rich-type="info" data-rich-key="'+esc(opts.infoRichCeKey||'')+'" data-placeholder="Typ hier de infotekst..." spellcheck="false" oninput="richCeInfoInput(this)">'+(opts.frontTxt||'')+'</div>'+
+            '<div class="richCe infoRichCe" contenteditable="'+(viewerOnlyPreview?'false':'true')+'" data-rich-type="info" data-rich-key="'+esc(opts.infoRichCeKey||'')+'" data-placeholder="Typ hier je tekst om deze pagina te introduceren..." spellcheck="false" oninput="richCeInfoInput(this)" onfocus="activateRichCe(this)" onblur="deactivateRichCe()">'+(opts.frontTxt||'')+'</div>'+
           '</div>'+
         '</div>'+
       '</div>'+
@@ -2481,20 +8011,20 @@ function sharedCardPreviewHtml(opts){
       '<div class="cardFaceInner'+(opts.flipped?' flipped':'')+'"'+(opts.faceId?' id="'+esc(opts.faceId)+'"':'')+'>'+
         '<div class="cardFaceFront" style="'+cardBgStyle(cardBg)+'">'+
           (imgSrc?'<img class="cpBg" src="'+imgSrc+'" alt="'+esc(opts.label||'Kaartpreview')+'">':'<div class="cpBgEmpty" style="'+cardBgStyle(emptyBg)+';position:absolute;inset:0"></div>')+
-          '<div class="cpShapeLayer" data-shape-key="'+esc(opts.previewKey||'algemeen')+'">'+cardShapesLayerHtml(opts.previewKey||'algemeen')+'</div>'+
+          '<div class="cpShapeLayer" data-shape-key="'+esc(previewKey)+'">'+cardShapesLayerHtml(previewKey)+'</div>'+
           (isCover?'<div class="cpTextLayer" data-cover-texts="1">'+coverTextLayerHtml()+'</div>':'')+
           '<div class="cpOverlay'+(isCoverPreview?' coverPreview':'')+'" style="align-items:'+alignItems+';justify-content:'+justifyContent+'">'+
             '<div class="cpFront'+(isCoverPreview?' coverPreviewText':'')+'"'+(opts.frontId?' id="'+esc(opts.frontId)+'"':'')+' style="font-family:\''+esc(font)+'\',sans-serif;font-size:'+(isCoverPreview?'clamp(15px,1.65vw,23px)':esc(fs))+';color:'+esc(textColor)+';text-align:'+halign+'">'+
               (isCover?'':(opts.infoRichCe
-                ?'<div class="richCe infoRichCe" contenteditable="true" data-rich-type="info" data-rich-key="'+esc(opts.infoRichCeKey||'')+'" data-placeholder="Typ hier de tekst voor de infopagina..." spellcheck="false" oninput="richCeInfoInput(this)">'+(opts.frontTxt||'')+'</div>'
+                ?'<div class="richCe infoRichCe" contenteditable="true" data-rich-type="info" data-rich-key="'+esc(opts.infoRichCeKey||'')+'" data-placeholder="Typ hier je tekst om deze pagina te introduceren..." spellcheck="false" oninput="richCeInfoInput(this)" onfocus="activateRichCe(this)" onblur="deactivateRichCe()">'+(opts.frontTxt||'')+'</div>'
                 :'<span class="cpFrontInner">'+(opts.frontTxt?esc(opts.frontTxt):(opts.suppressEmptyFrontHint?'':'<span class="cpHint">Voorkant tekst</span>'))+'</span>'))+
             '</div>'+
           '</div>'+
         '</div>'+
-        '<div class="cardFaceBack'+(backMode==='reflect'?' is-reflect':'')+'"'+(opts.backId?' id="'+esc(opts.backId)+'"':'')+' style="background:'+(backMode==='blank'?esc(blankColor):'transparent')+';font-family:\''+esc(font)+'\',sans-serif;font-size:'+esc(fs)+';color:'+esc(textColor)+'">'+
-          ((backMode==='mirror'||backMode==='reflect')?(imgSrc?'<img class="cpBg'+(backMode==='reflect'?' is-reflect':'')+'" src="'+imgSrc+'" alt="">':'<div style="position:absolute;inset:0;background:'+esc(emptyBg)+'"></div>'):'')+
-          '<div class="cpShapeLayer'+(backMode==='reflect'?' is-reflect':'')+'" data-shape-key="'+esc(opts.previewKey||'algemeen')+'">'+cardShapesLayerHtml(opts.previewKey||'algemeen')+'</div>'+
-          '<div class="cpOverlay" style="position:absolute;inset:0;display:flex;align-items:'+alignItems+';justify-content:'+justifyContent+';padding:10px;text-align:'+halign+'">'+(opts.backTxt?esc(opts.backTxt):'')+'</div>'+
+        '<div class="cardFaceBack'+(backCfg.reflect?' is-reflect':'')+'"'+(opts.backId?' id="'+esc(opts.backId)+'"':'')+' style="background:'+((backCfg.custom&&!backCfg.seedFromFront)?esc(backCfg.bg):'transparent')+';font-family:\''+esc(backFont)+'\',sans-serif;font-size:'+esc(backFs)+';color:'+esc(backTextColor)+'">'+
+          backBgHtml+
+          '<div class="cpShapeLayer'+(backCfg.reflect?' is-reflect':'')+'" data-shape-key="'+esc(backShapeKey)+'">'+(backUsesFrontDesign?cardShapesLayerHtml(previewKey):cardShapesLayerHtml(backShapeKey))+'</div>'+
+          '<div class="cpOverlay" style="position:absolute;inset:0;display:flex;align-items:'+backAlignItems+';justify-content:'+backJustifyContent+';padding:10px;text-align:'+backHalign+'">'+(opts.backTxt?esc(opts.backTxt):'')+'</div>'+
         '</div>'+
       '</div>'+
     '</div>'+
@@ -2533,6 +8063,10 @@ function selectedQuestionCard(key){
 }
 function setSelectedQuestion(key,qi){
   QUESTION_SELECTION[key]=Math.max(0,parseInt(qi,10)||0);
+  if(S.clTab==='opmaken'&&S.opmPane==='vragen'&&isCustomBackMode((S.d&&S.d.meta)||{})&&backStyleScope((S.d&&S.d.meta)||{})==='card'){
+    buildStijlPreserveBg(g('pw'));
+    return;
+  }
   rebuildVragen();
 }
 function toggleQuestionBackEditor(key){
@@ -2543,7 +8077,9 @@ function duplicateQ(key,qi){
   var list=S.d.questions[key]||[];
   var src=list[qi];
   if(!src)return;
-  list.splice(qi+1,0,cloneJson(src));
+  var dup=cloneJson(src);
+  delete dup._qid;
+  list.splice(qi+1,0,dup);
   QUESTION_SELECTION[key]=qi+1;
   markDirty();
   rebuildVragen();
@@ -2552,6 +8088,83 @@ function duplicateQ(key,qi){
 function questionPreviewFrontText(key){
   var q=selectedQuestionCard(key);
   return q?(q.voorkant||q.q||''):'';
+}
+function applyPreviewTextStyles(previewKey){
+  var m=S.d.meta||{};
+  var cv=styleCssVarsForKey(m,previewKey);
+  var font=cv['--pk-font']||'IBM Plex Sans';
+  var fs=fontSizeCss(cv['--pk-font-size']||'12');
+  var color=cv['--pk-set-text']||'rgba(48,96,136,0.95)';
+  var align=cv['--pk-text-align']||'center';
+  var valign=cv['--pk-text-valign']||'center';
+  var globalWeight=cv['--pk-font-weight']||'regular';
+  var globalItalic=cv['--pk-font-italic']==='1';
+  var globalUnderline=cv['--pk-font-underline']==='1';
+  var globalTextBg=normalizeHexInput(cv['--pk-text-bg-color'])||'';
+  var letterSpacing=cv['--pk-letter-spacing']||'0';
+  var lineHeight=cv['--pk-line-height']||'1.4';
+  var backCfg=backPreviewConfig(previewKey);
+  var backCv=backCfg.cssVars||cv;
+  var backFont=backCv['--pk-font']||font;
+  var backFs=fontSizeCss(backCv['--pk-font-size']||cv['--pk-font-size']||'12');
+  var backColor=backCv['--pk-set-text']||color;
+  var backAlign=backCv['--pk-text-align']||'center';
+  var backValign=backCv['--pk-text-valign']||'center';
+  var backWeight=backCv['--pk-font-weight']||'regular';
+  var backItalic=backCv['--pk-font-italic']==='1';
+  var backUnderline=backCv['--pk-font-underline']==='1';
+  var backTextBg=normalizeHexInput(backCv['--pk-text-bg-color'])||'';
+  var backLetterSpacing=backCv['--pk-letter-spacing']||'0';
+  var backLineHeight=backCv['--pk-line-height']||'1.4';
+  ['stijlCardTxt','qedCardTxt'].forEach(function(id){
+    var txt=g(id);if(!txt)return;
+    var inner=txt.querySelector('.cpFrontInner')||txt;
+    txt.style.fontFamily="'"+font+"', sans-serif";
+    txt.style.fontSize=fs;
+    txt.style.color=color;
+    txt.style.textAlign=align;
+    txt.style.letterSpacing=letterSpacing==='0'?'':letterSpacing+'px';
+    txt.style.lineHeight=lineHeight;
+    var infoMode=(S.opmPane==='info');
+    if(infoMode){
+      txt.style.fontWeight='';txt.style.fontStyle='';txt.style.textDecoration='';
+    }else{
+      txt.style.fontWeight=globalWeight==='bold'?'700':'400';
+      txt.style.fontStyle='normal';txt.style.textDecoration='none';
+      inner.style.fontWeight=globalWeight==='bold'?'700':globalWeight==='semibold'?'600':globalWeight==='medium'?'500':'400';
+      inner.style.fontStyle=globalItalic?'italic':'normal';
+      inner.style.textDecoration=globalUnderline?'underline':'none';
+      inner.style.background=globalTextBg||'transparent';
+      inner.style.padding=globalTextBg?'4px 8px':'0';
+    }
+    var overlay=txt.parentElement;
+    if(overlay){
+      overlay.style.alignItems=valign==='top'?'flex-start':valign==='bottom'?'flex-end':'center';
+      overlay.style.justifyContent=align==='left'?'flex-start':align==='right'?'flex-end':'center';
+    }
+  });
+  ['stijlCardBack','qedCardBack'].forEach(function(id){
+    var back=g(id);if(!back)return;
+    var inner=back.querySelector('.cpOverlay')||back;
+    back.style.fontFamily="'"+backFont+"', sans-serif";
+    back.style.fontSize=backFs;
+    back.style.color=backColor;
+    back.style.letterSpacing=backLetterSpacing==='0'?'':backLetterSpacing+'px';
+    back.style.lineHeight=backLineHeight;
+    back.style.fontWeight='';
+    back.style.fontStyle='';
+    back.style.textDecoration='';
+    if(inner){
+      inner.style.alignItems=backValign==='top'?'flex-start':backValign==='bottom'?'flex-end':'center';
+      inner.style.justifyContent=backAlign==='left'?'flex-start':backAlign==='right'?'flex-end':'center';
+      inner.style.textAlign=backAlign;
+      inner.style.fontWeight=backWeight==='bold'?'700':backWeight==='semibold'?'600':backWeight==='medium'?'500':'400';
+      inner.style.fontStyle=backItalic?'italic':'normal';
+      inner.style.textDecoration=backUnderline?'underline':'none';
+      inner.style.background=backTextBg||'transparent';
+      inner.style.padding=backTextBg?'4px 8px':'10px';
+    }
+  });
 }
 function syncSelectedQuestionPreview(key){
   var q=selectedQuestionCard(key)||{voorkant:'',achterkant:''};
@@ -2562,7 +8175,7 @@ function syncSelectedQuestionPreview(key){
     var ov=back.querySelector('.cpOverlay');
     if(ov)ov.innerHTML=q.achterkant?mdToHtml(q.achterkant):'';
   }
-  updateStijlPreview();
+  applyPreviewTextStyles((S.opmPane==='info')?(INFO_SLIDE_KEY||'cover'):(STYLE_PREVIEW_KEY||'cover'));
 }
 function showQEditor(key,qi){
   Q_EDITOR_SIDE='front';
@@ -2632,34 +8245,62 @@ function buildQRow(key,qi,card){
     '<div class="qFields">'+
       '<textarea class="qIn" rows="1" placeholder="Voorkant — de vraag" oninput="updQ(\''+esc(key)+'\','+qi+',\'voorkant\',this.value);autoH(this);updCC(this,'+MAX+');liveQ(\''+esc(key)+'\','+qi+',true,this.value)">'+esc(front)+'</textarea>'+
       '<div class="charCount'+(fcCls?' '+fcCls:'')+'" id="cc-f-'+key+'-'+qi+'">'+fc+'/'+MAX+'</div>'+
-      '<textarea class="qInBack" rows="1" placeholder="Achterkant — toelichting of antwoord (optioneel)" oninput="updQ(\''+esc(key)+'\','+qi+',\'achterkant\',this.value);autoH(this);updCC(this,'+MAX+');liveQ(\''+esc(key)+'\','+qi+',false,this.value)">'+esc(back)+'</textarea>'+
+      '<textarea class="qInBack" rows="1" placeholder="Voeg tekst toe…" oninput="updQ(\''+esc(key)+'\','+qi+',\'achterkant\',this.value);autoH(this);updCC(this,'+MAX+');liveQ(\''+esc(key)+'\','+qi+',false,this.value)">'+esc(back)+'</textarea>'+
       (back?'<div class="charCount'+(bcCls?' '+bcCls:'')+'" id="cc-b-'+key+'-'+qi+'">'+bc+'/'+MAX+'</div>':'')+
     '</div>'+
     '<button class="qEdit" type="button" onclick="showQEditor(\''+esc(key)+'\','+qi+')" title="Kaarteditor">□</button>'+
     '<button class="qDel" data-action="delq" data-key="'+esc(key)+'" data-qi="'+qi+'" title="Vraag verwijderen">✕</button></div>';
 }
+function bulkImportTextareaId(key){
+  return 'bulkTa_'+safeid(String(key||''));
+}
+function buildBulkImportPanel(key){
+  var id=bulkImportTextareaId(key);
+  var draft=QUESTION_BULK_IMPORT_DRAFT[key]||'';
+  return '<div class="questionBulkInline">'+
+    '<div class="questionBulkTitle">Meerdere vragen importeren</div>'+
+    '<div class="questionBulkHint">Elke regel wordt een vraag. Zet tekst na <code>|</code> als je die op de achterkant wilt zetten.</div>'+
+    '<textarea class="bulkArea questionBulkArea" id="'+id+'" oninput="QUESTION_BULK_IMPORT_DRAFT[\''+esc(key)+'\']=this.value" placeholder="Wat neem jij mee uit dit gesprek?\nWat doet dit met jou? | Ruimte voor reflectie\n...">'+esc(draft)+'</textarea>'+
+    '<div class="questionBulkActions">'+
+      '<button class="questionBulkCancel" type="button" onclick="cancelBulkImport(\''+esc(key)+'\')">Annuleren</button>'+
+      '<button class="questionBulkSubmit" type="button" onclick="execBulk(\''+esc(key)+'\')">Importeren</button>'+
+    '</div>'+
+  '</div>';
+}
 function showBulkImport(key){
-  var th=S.d.meta.themes.find(function(t){return t.key===key;})||{};
-  showModal('<h3>Bulk importeren — '+esc(th.label||key)+'</h3>'+
-    '<p>Plak je vragen hieronder. Elke regel = één vraag op de voorkant.<br>Voorkant en achterkant scheiden met een <code>|</code> (pipe): <em>Vraag | Antwoord</em></p>'+
-    '<textarea class="bulkArea" id="bulkTa" placeholder="Wat neem jij mee uit dit gesprek?\nWat doet dit met jou? | Ruimte voor reflectie\n…"></textarea>'+
-    '<div class="mAct"><button class="mCa" onclick="closeModal()">Annuleren</button><button class="mOk" onclick="execBulk(\''+esc(key)+'\')">Importeren</button></div>');
-  setTimeout(function(){var ta=g('bulkTa');if(ta)ta.focus();},50);
+  hideFloatingTextBar(true);
+  QUESTION_BULK_IMPORT_OPEN[key]=true;
+  rebuildVragen();
+  setTimeout(function(){var ta=g(bulkImportTextareaId(key));if(ta)ta.focus();},50);
+}
+function toggleBulkImport(key){
+  if(QUESTION_BULK_IMPORT_OPEN[key])cancelBulkImport(key);
+  else showBulkImport(key);
+}
+function cancelBulkImport(key){
+  QUESTION_BULK_IMPORT_OPEN[key]=false;
+  QUESTION_BULK_IMPORT_DRAFT[key]='';
+  rebuildVragen();
 }
 function execBulk(key){
-  var ta=g('bulkTa');if(!ta)return;
+  var ta=g(bulkImportTextareaId(key));if(!ta)return;
+  QUESTION_BULK_IMPORT_DRAFT[key]=ta.value;
   var lines=ta.value.split('\n').map(function(l){return l.trim();}).filter(function(l){return l.length>0;});
   if(!lines.length){toast('Geen regels gevonden','red');return;}
   if(!S.d.questions[key])S.d.questions[key]=[];
+  var firstIndex=S.d.questions[key].length;
   lines.forEach(function(line){
     var parts=line.split('|');
-    S.d.questions[key].push({voorkant:parts[0].trim(),achterkant:(parts[1]||'').trim(),q:parts[0].trim(),back:(parts[1]||'').trim()});
+    S.d.questions[key].push({_qid:nextQuestionEntityId(),voorkant:parts[0].trim(),achterkant:(parts[1]||'').trim(),q:parts[0].trim(),back:(parts[1]||'').trim()});
   });
-  markDirty();closeModal();rebuildVragen();toast(lines.length+' vragen toegevoegd','green');
+  QUESTION_SELECTION[key]=firstIndex;
+  QUESTION_BULK_IMPORT_OPEN[key]=false;
+  QUESTION_BULK_IMPORT_DRAFT[key]='';
+  markDirty();rebuildVragen();toast(lines.length+' vragen toegevoegd','green');
 }
 function addQ(key){
   if(!S.d.questions[key])S.d.questions[key]=[];
-  S.d.questions[key].push({voorkant:'',achterkant:'',q:'',back:''});
+  S.d.questions[key].push({_qid:nextQuestionEntityId(),voorkant:'',achterkant:'',q:'',back:''});
   QUESTION_SELECTION[key]=S.d.questions[key].length-1;
   QUESTION_EDITOR_BACK_OPEN[key]=false;
   markDirty();
@@ -2672,7 +8313,15 @@ function delQ(key,qi){
   markDirty();
   rebuildVragen();
 }
-function updQ(key,qi,field,val){var c=S.d.questions[key]&&S.d.questions[key][qi];if(c){c[field]=val;if(field==='voorkant')c.q=val;if(field==='achterkant')c.back=val;}markDirty();}
+function updQ(key,qi,field,val,opts){
+  var c=S.d.questions[key]&&S.d.questions[key][qi];
+  if(c){
+    c[field]=val;
+    if(field==='voorkant')c.q=val;
+    if(field==='achterkant')c.back=val;
+  }
+  markDirty(opts&&opts.soft?'soft':undefined);
+}
 function richCeInfoInput(el){
   var key=el.dataset.richKey||'';if(!key)return;
   S.d.uitleg=S.d.uitleg||{};
@@ -2686,8 +8335,18 @@ function richCeInfoInput(el){
 function richCeQuestionInput(el){
   var qkey=el.dataset.richQkey,qi=parseInt(el.dataset.richQi,10),field=el.dataset.richField||'voorkant';
   if(!qkey||isNaN(qi))return;
+  // Instant preview update — directly patch the DOM before any async work
+  var rawTxt=el.textContent||'';
+  if(field==='voorkant'){
+    var frontLive=g('stijlCardTxt');
+    if(frontLive)frontLive.innerHTML=rawTxt?('<span class="cpFrontInner">'+esc(rawTxt)+'</span>'):'';
+  } else {
+    var backLive=g('stijlCardBack');
+    if(backLive){var ovL=backLive.querySelector('.cpOverlay');if(ovL)ovL.textContent=rawTxt;}
+  }
+  // Save state + thumbnail update
   var md=htmlToMd(el.innerHTML);
-  updQ(qkey,qi,field,md);
+  updQ(qkey,qi,field,md,{soft:true});
   var q2=S.d.questions[qkey]&&S.d.questions[qkey][qi];
   if(q2){
     var front=field==='voorkant'?md:(q2.voorkant||q2.q||'');
@@ -2696,7 +8355,7 @@ function richCeQuestionInput(el){
     if((STYLE_PREVIEW_KEY||'cover')===qkey)syncSelectedQuestionPreview(qkey);
   }
   var cc=g('cc-'+(field==='voorkant'?'f':'b')+'-'+qkey+'-'+qi);
-  if(cc)cc.textContent=(el.textContent||'').length+'/90';
+  if(cc)cc.textContent=rawTxt.length+'/90';
 }
 function liveQ(key,qi,isFront,val){
   QUESTION_SELECTION[key]=qi;
@@ -2705,7 +8364,7 @@ function liveQ(key,qi,isFront,val){
   if((STYLE_PREVIEW_KEY||'cover')===key)syncSelectedQuestionPreview(key);
 }
 function updCC(el,max){var n=el.value.length,p=el.nextElementSibling;if(p&&p.classList.contains('charCount')){p.textContent=n+'/'+max;p.className='charCount'+(n>max?' over':n>max*.8?' warn':'');}}
-function rebuildVragen(){var pw=g('pw');if(pw)renderClPanel();setTimeout(loadCardPreviews,50);}
+function rebuildVragen(){var pw=g('pw');if(pw)renderClPanel();scheduleCardPreviewWarmup(120);}
 function autoH(el){el.style.height='auto';el.style.height=el.scrollHeight+'px';}
 function editorSkin(){
   var cv=(S.d&&S.d.meta&&S.d.meta.cssVars)||{};
@@ -2807,7 +8466,7 @@ function normalizeInfoSlide(slide,i){
   if(out.source==='theme'&&!out.themeKey&&themeMatch)out.themeKey=themeMatch.key;
   if(out.source==='cover'){
     out.key=out.key||'cover';
-    if(!out.img||/^cards\//.test(out.img))out.img='cards/voorkant.svg';
+    if(!out.img||/^cards\//.test(out.img))out.img='cards/'+infoCoverFile();
   }else if(out.source==='theme'){
     if(!out.themeKey&&themes[0])out.themeKey=themes[0].key;
     if(out.themeKey&&(!out.img||/^cards\//.test(out.img))){
@@ -2828,7 +8487,7 @@ function ensureIntroSlides(){
       source:'cover',
       title:(S.d.meta&&S.d.meta.title)||'',
       body:((S.d.uitleg||{}).cover)||'',
-      img:'cards/voorkant.svg',
+      img:'cards/'+infoCoverFile(),
       alt:(S.d.meta&&S.d.meta.title)||''
     });
   }
@@ -2841,7 +8500,7 @@ function ensureIntroSlides(){
   if(S.d.intro.slides[0]){
     S.d.intro.slides[0].source='cover';
     S.d.intro.slides[0].key='cover';
-    S.d.intro.slides[0].img='cards/voorkant.svg';
+    S.d.intro.slides[0].img='cards/'+infoCoverFile();
     if((S.d.uitleg||{}).cover!=null)S.d.intro.slides[0].body=(S.d.uitleg||{}).cover||'';
     if(!S.d.intro.slides[0].alt)S.d.intro.slides[0].alt=(S.d.meta&&S.d.meta.title)||'';
   }
@@ -2854,7 +8513,7 @@ function getInfoAdminMode(){
 }
 function getInfoSlidePreviewPath(slide){
   var sl=normalizeInfoSlide(slide,0);
-  if(sl.source==='cover')return cardAssetPathForSet(S.activeId,'voorkant.svg');
+  if(sl.source==='cover')return cardAssetPathForSet(S.activeId,infoCoverFile());
   if(sl.source==='theme'&&sl.themeKey)return infoThemeCardPath(sl.themeKey);
   if(!sl.img)return '';
   if(/^sets\//.test(sl.img))return sl.img;
@@ -2863,7 +8522,7 @@ function getInfoSlidePreviewPath(slide){
 }
 function getInfoSlideSourceLabel(slide){
   var sl=normalizeInfoSlide(slide,0);
-  if(sl.source==='cover')return 'Koppeling: cover';
+  if(sl.source==='cover')return S.activeKind==='space'?'Standaard infosheet-cover':'Koppeling: cover';
   if(sl.source==='theme'&&sl.themeKey)return 'Koppeling: '+infoThemeLabel(sl.themeKey);
   return sl.img?'Eigen afbeelding':'Klik of sleep afbeelding';
 }
@@ -2885,7 +8544,7 @@ function setInfoSlideSource(i,source){
   sl.source=source;
   if(source==='cover'){
     sl.themeKey='';
-    sl.img='cards/voorkant.svg';
+    sl.img='cards/'+infoCoverFile();
     if(!sl.key||/^page-/.test(sl.key))sl.key='cover';
     if(!sl.alt)sl.alt=(S.d.meta&&S.d.meta.title)||'';
   }else if(source==='theme'){
@@ -3041,7 +8700,7 @@ function applyTextFormat(id,fmt){
   syncFloatingTextBar();
 }
 function isTextToolbarTarget(el){
-  return !!(el&&el.matches&&el.matches('textarea.richTa, textarea.bulkArea'));
+  return !!(el&&el.matches&&el.matches('textarea.richTa'));
 }
 function ensureTextTargetId(el){
   if(!el.id){RT.seed+=1;el.id='rt_auto_'+RT.seed;}
@@ -3056,8 +8715,9 @@ function syncFloatingTextBar(){
   bar.querySelectorAll('[data-action="fmt"]').forEach(function(btn){btn.dataset.target=id;});
   var rect=ta.getBoundingClientRect();
   var bw=bar.offsetWidth||170,bh=bar.offsetHeight||42;
-  var top=Math.max(12,rect.top-bh-10);
-  if(top<16)top=Math.min(window.innerHeight-bh-12,rect.top+10);
+  var spaceAbove=rect.top-bh-10;
+  var top=spaceAbove>=12?spaceAbove:Math.min(window.innerHeight-bh-12,rect.bottom+8);
+  top=Math.max(4,top);
   var left=Math.min(window.innerWidth-bw-12,Math.max(12,rect.left));
   bar.style.top=top+'px';
   bar.style.left=left+'px';
@@ -3314,15 +8974,30 @@ function stylePreviewAsset(meta){
 function stylePreviewDisplayFile(file){
   return file==='voorkant.svg'?'cover.svg':(file||'kaart.svg');
 }
+function themeOrdinalLabel(n){
+  var idx=parseInt(n,10);
+  if(!isFinite(idx)||idx<1)idx=1;
+  return 'Thema-'+idx;
+}
+function nextThemeOrdinal(meta){
+  var themes=(meta&&meta.themes)||[];
+  return themes.length+1;
+}
+function nextThemeLabel(meta){
+  return themeOrdinalLabel(nextThemeOrdinal(meta));
+}
+function themeLabelForIndex(index,label){
+  return label||themeOrdinalLabel(index+1);
+}
 function stylePreviewOptions(meta){
   var themes=(meta&&meta.themes)||[];
   var opts=[{key:'cover',label:'Cover',file:'voorkant.svg'}];
   if(!themes.length){
-    opts.push({key:'algemeen',label:'Kaart',file:'kaart.svg'});
+    opts.push({key:'algemeen',label:nextThemeLabel(meta),file:'kaart.svg'});
     return opts;
   }
   themes.forEach(function(t,i){
-    opts.push({key:t.key,label:t.label||('Thema '+(i+1)),file:t.card||(t.key+'.svg')});
+    opts.push({key:t.key,label:themeLabelForIndex(i,t.label),file:t.card||(t.key+'.svg')});
   });
   return opts;
 }
@@ -3331,9 +9006,9 @@ function infoSlideOptions(meta){
   var themes=(meta&&meta.themes)||[];
   var infoPages=(meta&&meta.infoPages)||[];
   var excluded=(meta&&meta.infoExcluded)||[];
-  var all=[{key:'cover',label:'Cover',file:'voorkant.svg',isCustom:false}];
+  var all=[{key:'cover',label:'Cover',file:infoCoverFile(),isCustom:false}];
   themes.forEach(function(t,i){
-    all.push({key:t.key,label:t.label||('Thema '+(i+1)),file:t.card||(t.key+'.svg'),isCustom:false});
+    all.push({key:t.key,label:themeLabelForIndex(i,t.label),file:t.card||(t.key+'.svg'),isCustom:false});
   });
   infoPages.forEach(function(p){
     all.push({key:p.key,label:p.label||'Pagina',file:'info_'+p.key+'.svg',isCustom:true});
@@ -3370,7 +9045,7 @@ function infoSlideCardHtml(opt,selectedKey){
   var pictureIcon='<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.3"/><path d="M5 16l4.5-4.5 3 3 2.8-2.8L19 16"/></svg>';
   var isCover=opt.key==='cover';
   var isTheme=!isCover&&!opt.isCustom;
-  var cardPath=opt.isCustom?cardAssetPathForSet(S.activeId,'info_'+opt.key+'.svg'):(!isCover?styleCardPathForKey(opt.key):styleCardPathForKey('cover'));
+  var cardPath=opt.isCustom?cardAssetPathForSet(S.activeId,'info_'+opt.key+'.svg'):(!isCover?styleCardPathForKey(opt.key):cardAssetPathForSet(S.activeId,infoCoverFile()));
   var cardSid=safeid(cardPath);
   var hit=((cachedCardAssetForFile(S.activeId,opt.file)||{}).asset)||null;
   var cardLabel=isCover?'Cover':(opt.label||'Pagina');
@@ -3378,16 +9053,33 @@ function infoSlideCardHtml(opt,selectedKey){
     ?((opt.label&& !/^Pagina(?:\s+\d+)?$/i.test(String(opt.label).trim()))?String(opt.label):'')
     :'';
   // Thumbnail
+  var isAutoCoverThumb=isCover&&S.activeKind==='space'&&!((S.d.meta||{}).infoCoverSkip);
+  var _thumbMeta=(S.d&&S.d.meta)||{};
+  var _thumbLogoHidden=!!_thumbMeta.infoCoverLogoRemoved;
+  var _thumbTitle=infoCoverTitleText();
+  var _thumbSub=infoCoverSubText();
+  var _thumbLogoLayout=getCoverElemThumbLayout('logo');
+  var _thumbTitleLayout=getCoverElemThumbLayout('title');
+  var _thumbSubLayout=getCoverElemThumbLayout('sub');
   var thumbContent=hit&&hit.dataUrl
     ?'<img src="'+hit.dataUrl+'" alt="'+esc(cardLabel)+'">'
-    :'<div class="stijlSlidePlaceholder">'+pictureIcon+'<span>'+(isCover||opt.isCustom?'Achtergrond toevoegen':'Afbeelding kiezen')+'</span></div>';
+    :isAutoCoverThumb
+      ?'<div class="infoCoverThumbSheet">'+
+          '<div class="infoCoverThumbCard" style="'+cardBgStyle(normalizedCardSurface('#A8E1DD'))+'">'+
+            (!_thumbLogoHidden?'<div class="infoCoverThumbElem infoCoverThumbElem-logo" style="left:'+_thumbLogoLayout.x+'%;top:'+_thumbLogoLayout.y+'%;width:'+_thumbLogoLayout.size+'%;height:'+_thumbLogoLayout.size+'%"><div class="adminInfoBrandMark adminInfoCoverElem-static"><img src="/assets/logo-icons/masters/master-transparent.svg" alt="" class="adminInfoBrandLogo" aria-hidden="true"></div></div>':'')+
+            '<div class="infoCoverThumbElem infoCoverThumbElem-title" style="left:'+_thumbTitleLayout.x+'%;top:'+_thumbTitleLayout.y+'%"><div class="infoCoverThumbTitle">'+esc(_thumbTitle)+'</div></div>'+
+            (_thumbSub?'<div class="infoCoverThumbElem infoCoverThumbElem-sub" style="left:'+_thumbSubLayout.x+'%;top:'+_thumbSubLayout.y+'%"><div class="infoCoverThumbSub">'+esc(_thumbSub)+'</div></div>':'')+
+          '</div>'+
+          '</div>'
+      :'<div class="stijlSlidePlaceholder">'+pictureIcon+'<span>Achtergrond toevoegen</span></div>';
   var isDraggable=!opt.excluded&&!isCover;
   // Actions – identical to styleSlideCardHtml + include/exclude toggle
   var uploadLbl='<label class="stijlSlideUpload" title="SVG kiezen" onclick="event.stopPropagation()">'+uploadIcon+'<input type="file" accept=".svg,image/svg+xml" onclick="event.stopPropagation()" onchange="if(this.files&&this.files[0])uploadFile(this.files[0],\''+esc(cardPath)+'\',\''+cardSid+'\');this.value=\'\'"></label>';
   var cropBtn=hit&&hit.dataUrl?'<button class="stijlSlideMiniBtn" type="button" title="Bijsnijden" onclick="event.stopPropagation();recropStyleSlide(\''+esc(cardPath)+'\',\''+cardSid+'\')">'+cropIcon+'</button>':'';
   // Delete: cover image → delete file; custom page → delete page; themes are only excluded (not deleted) from info slider
   var deleteBtn=
-    (isCover&&hit&&hit.dataUrl?'<button class="stijlSlideMiniBtn danger" type="button" title="Afbeelding verwijderen" onclick="event.stopPropagation();deleteStyleSlideFile(\''+esc(cardPath)+'\',\''+cardSid+'\')">'+deleteIcon+'</button>':'')
+    (isCover&&hit&&hit.dataUrl?'<button class="stijlSlideMiniBtn danger" type="button" title="Afbeelding verwijderen" onclick="event.stopPropagation();deleteStyleSlideFile(\''+esc(cardPath)+'\',\''+cardSid+'\')">'+deleteIcon+'</button>'
+    :isCover&&S.activeKind==='space'&&!((S.d.meta||{}).infoCoverSkip)?'<button class="stijlSlideMiniBtn danger" type="button" title="Automatische cover verwijderen" onclick="event.stopPropagation();skipAutoInfoCover()">'+deleteIcon+'</button>':'')
     +(opt.isCustom?'<button class="stijlSlideMiniBtn danger" type="button" title="Pagina verwijderen" onclick="event.stopPropagation();deleteInfoCustomPage(\''+esc(opt.key)+'\')">'+deleteIcon+'</button>':'');
   // Include/exclude toggle
   var toggleBtn=opt.excluded
@@ -3396,9 +9088,9 @@ function infoSlideCardHtml(opt,selectedKey){
   var actionsHtml='<div class="stijlSlideActions">'+uploadLbl+cropBtn+deleteBtn+toggleBtn+'</div>';
   // Tile body: editable name for themes and custom pages
   var nameHtml=isTheme
-    ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Naam wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
+    ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Dubbelklik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" ondblclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
     :opt.isCustom
-      ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Naam wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(customInputValue)+'" placeholder="Naam" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateInfoCustomPageLabel(\''+esc(opt.key)+'\',this.value)"></div>'
+      ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Dubbelklik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" ondblclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',true)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(customInputValue)+'" placeholder="Naam" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateInfoCustomPageLabel(\''+esc(opt.key)+'\',this.value)"></div>'
       :'<div class="stijlSlideName">'+esc(cardLabel)+'</div>';
   return '<div class="stijlSlideCard infoSlideCard'+(isSelected?' sel':'')+(opt.excluded?' info-excluded':'')+(hasText?' has-info':'')+'" data-info-key="'+esc(opt.key)+'"'
     +(isDraggable?' draggable="true"':'')
@@ -3429,6 +9121,395 @@ function previewTextStore(){
   meta.ui=meta.ui||{};
   meta.ui.previewTexts=meta.ui.previewTexts||{};
   return meta.ui.previewTexts;
+}
+function backStyleUi(meta){
+  meta=meta||{};
+  meta.ui=meta.ui||{};
+  meta.ui.backStyle=meta.ui.backStyle||{};
+  return meta.ui.backStyle;
+}
+function backStyleCssVarStore(meta){
+  var ui=backStyleUi(meta);
+  ui.cssVars=ui.cssVars||{};
+  return ui.cssVars;
+}
+function backStyleCardStore(meta){
+  var ui=backStyleUi(meta);
+  if(ui.byCard&&typeof ui.byCard==='object')return ui.byCard;
+  if(ui.cardEntries&&typeof ui.cardEntries==='object')return ui.cardEntries;
+  ui.byCard=ui.byCard||{};
+  return ui.byCard;
+}
+function backStyleCardEntry(meta,key){
+  var store=backStyleCardStore(meta);
+  store[key]=store[key]||{};
+  store[key].cssVars=store[key].cssVars||{};
+  return store[key];
+}
+function backStyleScope(meta){
+  var ui=backStyleUi(meta);
+  ui.scope=(ui.scope==='card')?'card':'set';
+  return ui.scope;
+}
+function questionEntityId(card){
+  if(!card||typeof card!=='object')return '';
+  if(!card._qid)card._qid=nextQuestionEntityId();
+  return String(card._qid||'');
+}
+function questionBackDesignKey(themeKey,qi){
+  var list=(S.d&&S.d.questions&&S.d.questions[themeKey])||[];
+  var idx=parseInt(qi,10);
+  if(isNaN(idx)||idx<0||idx>=list.length)return '';
+  var qid=questionEntityId(list[idx]);
+  return qid?('__back_card__:'+qid):'';
+}
+function currentBackDesignKey(themeKey){
+  var meta=S.d.meta||{};
+  var scope=backStyleScope(meta);
+  var key=themeKey||STYLE_PREVIEW_KEY||'algemeen';
+  if(scope!=='card')return BACK_STYLE_KEY;
+  var selectedKey=questionBackDesignKey(key,selectedQuestionIndex(key));
+  return selectedKey||BACK_STYLE_KEY;
+}
+function styleCssVarsForKey(meta,key){
+  meta=meta||{};
+  var front=meta.cssVars||{};
+  if(key!==BACK_STYLE_KEY&&String(key||'').indexOf('__back_card__:')!==0)return front;
+  var merged=cloneJson(front||{});
+  var back=(key===BACK_STYLE_KEY?backStyleCssVarStore(meta):backStyleCardEntry(meta,key).cssVars);
+  Object.keys(back).forEach(function(name){
+    merged[name]=back[name];
+  });
+  return merged;
+}
+function isCustomBackMode(meta){
+  return (((meta||{}).backMode||'mirror')==='blank');
+}
+function ensureBackDesignDefaults(meta){
+  meta=meta||S.d.meta||{};
+  var styleKey=currentBackDesignKey(STYLE_PREVIEW_KEY||'algemeen');
+  var maps=cardBgMaps(meta);
+  if(!normalizeHexInput(maps.base[styleKey]||'')){
+    maps.base[styleKey]=normalizeHexInput(meta.blankBackColor||'')||'#F8E4D2';
+  }
+  cardBuildStore(meta)[styleKey]='self';
+  if(styleKey===BACK_STYLE_KEY)backStyleCssVarStore(meta);
+  else if(String(styleKey||'').indexOf('__back_card__:')===0)backStyleCardEntry(meta,styleKey);
+  return meta;
+}
+function setBackDesignScope(scope){
+  var ui=backStyleUi(S.d.meta||{});
+  ui.scope=(scope==='card')?'card':'set';
+  if(STYLE_BACK_EDIT_SURFACE==='back')ensureBackDesignDefaults(S.d.meta||{});
+  buildStijlPreserveBg(g('pw'));
+  animateEditorPaneSwitch();
+  updateStijlPreview();
+}
+var BACK_EDITOR_REFRESH_TIMER=0;
+var BACK_EDITOR_FINALIZE_TIMER=0;
+var BACK_EDITOR_FLIP_TIMER=0;
+var BACK_EDITOR_SPIN_TIMER=0;
+var BACK_PREVIEW_FLIP_DURATION=520;
+var BACK_PREVIEW_REBUILD_DELAY=260;
+var BACK_PREVIEW_SWAP_DELAY=140;
+var BACK_PREVIEW_FLIP_START_DELAY=24;
+var BACK_PREVIEW_SPIN_DURATION=380;
+var BACK_PREVIEW_SPIN_SWAP_DELAY=170;
+var BACK_EXTRA_CONTROLS_DELAYED=false;
+var BACK_MODE_UI_OVERRIDE='';
+var BACK_SURFACE_UI_OVERRIDE='';
+function currentBackModeActual(){
+  return ((((S.d||{}).meta||{}).backMode)||'mirror');
+}
+function currentBackEditSurfaceActual(){
+  return STYLE_BACK_EDIT_SURFACE||'front';
+}
+function currentBackModeForUi(){
+  return BACK_MODE_UI_OVERRIDE||currentBackModeActual();
+}
+function currentBackEditSurfaceForUi(){
+  return BACK_SURFACE_UI_OVERRIDE||currentBackEditSurfaceActual();
+}
+function shouldShowBackExtraControls(backMode){
+  var mode=backMode||currentBackModeForUi();
+  return mode==='blank'&&currentBackEditSurfaceForUi()==='back'&&!BACK_EXTRA_CONTROLS_DELAYED;
+}
+function previewCardInners(){
+  return Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasWindow:not([data-wizard-preview="1"]) .cardFaceInner'));
+}
+function previewCardBackFaces(){
+  return Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasWindow:not([data-wizard-preview="1"]) .cardFaceBack'));
+}
+function setPreviewCardFlipState(isFlipped){
+  CANVAS_CARD_FLIPPED=!!isFlipped;
+  syncBackSurfaceUiState();
+  previewCardInners().forEach(function(inner){
+    inner.classList.toggle('flipped',CANVAS_CARD_FLIPPED);
+  });
+}
+function startPreviewFlipState(isFlipped,afterFlipStart){
+  var after=typeof afterFlipStart==='function'?afterFlipStart:null;
+  previewCardInners().forEach(function(inner){
+    void inner.offsetWidth;
+  });
+  if(BACK_EDITOR_FLIP_TIMER)clearTimeout(BACK_EDITOR_FLIP_TIMER);
+  BACK_EDITOR_FLIP_TIMER=setTimeout(function(){
+    BACK_EDITOR_FLIP_TIMER=0;
+    setPreviewCardFlipState(isFlipped);
+    if(after)after();
+  },BACK_PREVIEW_FLIP_START_DELAY);
+}
+function startPreviewBackSwapTurn(){
+  if(BACK_EDITOR_SPIN_TIMER)clearTimeout(BACK_EDITOR_SPIN_TIMER);
+  previewCardInners().forEach(function(inner){
+    inner.classList.remove('back-swap-turn');
+    void inner.offsetWidth;
+    inner.classList.add('back-swap-turn');
+  });
+  BACK_EDITOR_SPIN_TIMER=setTimeout(function(){
+    BACK_EDITOR_SPIN_TIMER=0;
+    previewCardInners().forEach(function(inner){
+      inner.classList.remove('back-swap-turn');
+    });
+  },BACK_PREVIEW_SPIN_DURATION+40);
+}
+function syncPreviewBackFacesForCurrentState(){
+  var meta=S.d.meta||{};
+  previewCardBackFaces().forEach(function(back){
+    var inner=back&&back.closest?back.closest('.cardFaceInner'):null;
+    var front=inner&&inner.querySelector?inner.querySelector('.cardFaceFront'):null;
+    if(!front)return;
+    var frontShape=front.querySelector('.cpShapeLayer');
+    var previewKey=(frontShape&&frontShape.getAttribute('data-shape-key'))||STYLE_PREVIEW_KEY||'algemeen';
+    var frontCv=styleCssVarsForKey(meta,previewKey);
+    var backCfg=backPreviewConfig(previewKey);
+    var backCv=backCfg.cssVars||frontCv;
+    var backFont=backCv['--pk-font']||frontCv['--pk-font']||'IBM Plex Sans';
+    var backFs=fontSizeCss(backCv['--pk-font-size']||frontCv['--pk-font-size']||'12');
+    var backTextColor=backCv['--pk-set-text']||frontCv['--pk-set-text']||'rgba(48,96,136,0.95)';
+    var backHalign=backCv['--pk-text-align']||(frontCv['--pk-text-align']||'center');
+    var backValign=backCv['--pk-text-valign']||(frontCv['--pk-text-valign']||'center');
+    var backAlignItems=backValign==='top'?'flex-start':backValign==='bottom'?'flex-end':'center';
+    var backJustifyContent=backHalign==='left'?'flex-start':backHalign==='right'?'flex-end':'center';
+    var backUsesFrontDesign=backCfg.mirrorImage||backCfg.seedFromFront;
+    var backShapeKey=backUsesFrontDesign?previewKey:(backCfg.styleKey||previewKey);
+    var frontBg=front.querySelector('.cpBg');
+    var frontEmpty=front.querySelector('.cpBgEmpty');
+    var bgHtml='';
+    if(backUsesFrontDesign){
+      if(frontBg){
+        var bgClone=frontBg.cloneNode(true);
+        bgClone.classList.toggle('is-reflect',!!backCfg.reflect);
+        bgHtml=bgClone.outerHTML;
+      }else if(frontEmpty){
+        bgHtml=frontEmpty.outerHTML;
+      }
+    }else{
+      bgHtml='<div class="cpBgEmpty" style="'+cardBgStyle(backCfg.bg)+';position:absolute;inset:0"></div>';
+    }
+    back.classList.toggle('is-reflect',!!backCfg.reflect);
+    back.style.background=(backCfg.custom&&!backCfg.seedFromFront)?backCfg.bg:'transparent';
+    back.style.fontFamily="'"+backFont+"',sans-serif";
+    back.style.fontSize=backFs;
+    back.style.color=backTextColor;
+    var currentBg=back.querySelector('.cpBg, .cpBgEmpty');
+    if(bgHtml){
+      var bgWrap=document.createElement('div');
+      bgWrap.innerHTML=bgHtml;
+      var nextBg=bgWrap.firstElementChild;
+      if(nextBg){
+        if(currentBg)currentBg.replaceWith(nextBg);
+        else back.insertBefore(nextBg,back.firstChild||null);
+      }
+    }
+    var shapeLayer=back.querySelector('.cpShapeLayer');
+    if(!shapeLayer){
+      shapeLayer=document.createElement('div');
+      back.appendChild(shapeLayer);
+    }
+    shapeLayer.className='cpShapeLayer'+(backCfg.reflect?' is-reflect':'');
+    shapeLayer.setAttribute('data-shape-key',backShapeKey);
+    shapeLayer.innerHTML=backUsesFrontDesign
+      ?((frontShape&&frontShape.innerHTML)||'')
+      :cardShapesLayerHtml(backShapeKey);
+    var overlay=back.querySelector('.cpOverlay');
+    if(overlay){
+      overlay.style.alignItems=backAlignItems;
+      overlay.style.justifyContent=backJustifyContent;
+      overlay.style.textAlign=backHalign;
+    }
+  });
+}
+function animateBackFaceRefresh(state){
+  var phase=state||'in';
+  previewCardBackFaces().forEach(function(back){
+    back.classList.remove('is-refreshing','is-refreshing-out','is-refreshing-in');
+    void back.offsetWidth;
+    back.classList.add(phase==='out'?'is-refreshing-out':'is-refreshing-in','is-refreshing');
+    if(back._refreshTimer)clearTimeout(back._refreshTimer);
+    back._refreshTimer=setTimeout(function(){
+      back._refreshTimer=0;
+      back.classList.remove('is-refreshing','is-refreshing-out','is-refreshing-in');
+    },Math.max(BACK_PREVIEW_SWAP_DELAY+80,220));
+  });
+}
+function rebuildPreviewForCurrentBackState(){
+  buildStijlPreserveBg(g('pw'));
+  syncBackModeUiState();
+  syncBackSurfaceUiState();
+  syncBackExtraControlsUiState();
+  updateStijlPreview();
+}
+function syncBackSurfaceUiState(){
+  var activeSurface=(currentBackEditSurfaceForUi()==='back')?'back':'front';
+  document.querySelectorAll('[data-back-edit-surface]').forEach(function(btn){
+    btn.classList.toggle('sel',btn.getAttribute('data-back-edit-surface')===activeSurface);
+  });
+  document.querySelectorAll('.stijlCanvasFlipBtn').forEach(function(btn){
+    btn.classList.toggle('sel',CANVAS_CARD_FLIPPED);
+  });
+}
+function syncBackModeUiState(){
+  var backMode=currentBackModeForUi();
+  document.querySelectorAll('[data-back-mode]').forEach(function(btn){
+    btn.classList.toggle('sel',btn.getAttribute('data-back-mode')===backMode);
+  });
+}
+function syncBackExtraControlsUiState(forceVisible){
+  var visible=(typeof forceVisible==='boolean')?forceVisible:shouldShowBackExtraControls();
+  document.querySelectorAll('.previewEditSurfaceStack').forEach(function(stack){
+    stack.classList.toggle('is-visible',visible);
+    stack.classList.toggle('is-hidden',!visible);
+    if(visible)stack.removeAttribute('aria-hidden');
+    else stack.setAttribute('aria-hidden','true');
+    stack.querySelectorAll('button').forEach(function(btn){
+      if(visible)btn.removeAttribute('tabindex');
+      else btn.setAttribute('tabindex','-1');
+    });
+  });
+}
+function runBackPreviewTransition(opts){
+  opts=opts||{};
+  var fromFlipped=!!opts.fromFlipped;
+  var toFlipped=!!opts.toFlipped;
+  var delayExtraReveal=!!opts.delayExtraReveal;
+  var roundTrip=!!opts.roundTrip;
+  var spinAdvance=!!opts.spinAdvance;
+  var afterTransition=typeof opts.afterTransition==='function'?opts.afterTransition:null;
+  if(BACK_EDITOR_REFRESH_TIMER)clearTimeout(BACK_EDITOR_REFRESH_TIMER);
+  if(BACK_EDITOR_FINALIZE_TIMER)clearTimeout(BACK_EDITOR_FINALIZE_TIMER);
+  if(BACK_EDITOR_FLIP_TIMER)clearTimeout(BACK_EDITOR_FLIP_TIMER);
+  if(BACK_EDITOR_SPIN_TIMER)clearTimeout(BACK_EDITOR_SPIN_TIMER);
+  function finalizeTransitionAfterDelay(duration){
+    if(!(delayExtraReveal||afterTransition))return;
+    BACK_EDITOR_FINALIZE_TIMER=setTimeout(function(){
+      BACK_EDITOR_FINALIZE_TIMER=0;
+      if(afterTransition)afterTransition();
+      BACK_EXTRA_CONTROLS_DELAYED=false;
+      syncBackExtraControlsUiState();
+    },duration||BACK_PREVIEW_FLIP_DURATION);
+  }
+  if(spinAdvance&&fromFlipped&&toFlipped){
+    CANVAS_CARD_FLIPPED=true;
+    syncBackModeUiState();
+    syncBackSurfaceUiState();
+    syncBackExtraControlsUiState();
+    startPreviewBackSwapTurn();
+    BACK_EDITOR_REFRESH_TIMER=setTimeout(function(){
+      BACK_EDITOR_REFRESH_TIMER=0;
+      syncPreviewBackFacesForCurrentState();
+      updateStijlPreview();
+    },BACK_PREVIEW_SPIN_SWAP_DELAY);
+    finalizeTransitionAfterDelay(BACK_PREVIEW_SPIN_DURATION);
+    return;
+  }
+  if(roundTrip&&fromFlipped&&toFlipped){
+    CANVAS_CARD_FLIPPED=true;
+    syncBackModeUiState();
+    syncBackSurfaceUiState();
+    syncBackExtraControlsUiState();
+    animateBackFaceRefresh('out');
+    BACK_EDITOR_REFRESH_TIMER=setTimeout(function(){
+      BACK_EDITOR_REFRESH_TIMER=0;
+      syncPreviewBackFacesForCurrentState();
+      updateStijlPreview();
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){
+          animateBackFaceRefresh('in');
+          finalizeTransitionAfterDelay(BACK_PREVIEW_FLIP_DURATION);
+        });
+      });
+    },BACK_PREVIEW_SWAP_DELAY);
+    return;
+  }
+  if(!fromFlipped&&toFlipped){
+    CANVAS_CARD_FLIPPED=false;
+    syncBackModeUiState();
+    syncBackSurfaceUiState();
+    syncBackExtraControlsUiState();
+    startPreviewFlipState(true);
+    BACK_EDITOR_REFRESH_TIMER=setTimeout(function(){
+      BACK_EDITOR_REFRESH_TIMER=0;
+      syncPreviewBackFacesForCurrentState();
+      updateStijlPreview();
+    },BACK_PREVIEW_REBUILD_DELAY);
+    finalizeTransitionAfterDelay(BACK_PREVIEW_FLIP_DURATION);
+    return;
+  }
+  CANVAS_CARD_FLIPPED=fromFlipped;
+  rebuildPreviewForCurrentBackState();
+  if(toFlipped!==fromFlipped){
+    startPreviewFlipState(toFlipped,finalizeTransitionAfterDelay);
+    return;
+  }
+  setPreviewCardFlipState(toFlipped);
+  if(delayExtraReveal||afterTransition){
+    if(afterTransition)afterTransition();
+    BACK_EXTRA_CONTROLS_DELAYED=false;
+    syncBackExtraControlsUiState();
+  }
+}
+function setBackEditSurface(surface){
+  var nextSurface=(surface==='back')?'back':'front';
+  var wasFlipped=CANVAS_CARD_FLIPPED;
+  STYLE_BACK_EDIT_SURFACE=nextSurface;
+  if(STYLE_BACK_EDIT_SURFACE==='back')ensureBackDesignDefaults(S.d.meta||{});
+  runBackPreviewTransition({
+    fromFlipped:wasFlipped,
+    toFlipped:STYLE_BACK_EDIT_SURFACE==='back',
+    afterTransition:function(){
+      buildStijlPreserveBg(g('pw'));
+      updateStijlPreview();
+      syncBackModeUiState();
+      syncBackSurfaceUiState();
+      syncBackExtraControlsUiState();
+    }
+  });
+}
+function isEditingBackDesign(){
+  return S.clTab==='opmaken'&&S.opmPane==='vragen'&&isCustomBackMode((S.d||{}).meta||{})&&currentBackEditSurfaceActual()==='back';
+}
+function backPreviewConfig(themeKey){
+  var meta=S.d.meta||{};
+  var mode=(meta.backMode||'mirror');
+  var key=themeKey||STYLE_PREVIEW_KEY||'algemeen';
+  var blankColor=(meta.blankBackColors&&meta.blankBackColors[key])||meta.blankBackColor||'#F8E4D2';
+  var custom=mode==='blank';
+  var styleKey=custom?currentBackDesignKey(key):key;
+  var seedFromFront=custom&&shouldSeedBlankBackFromFront(meta,styleKey,blankColor);
+  var bg=custom?(cardBgForKey(meta,styleKey)||normalizedCardSurface(blankColor)):'transparent';
+  return {
+    mode:mode,
+    custom:custom,
+    reflect:mode==='reflect',
+    mirrorImage:(mode==='mirror'||mode==='reflect'),
+    seedFromFront:seedFromFront,
+    styleKey:styleKey,
+    cssVars:styleCssVarsForKey(meta,styleKey),
+    bg:bg,
+    blankColor:normalizedCardSurface(blankColor),
+    scope:backStyleScope(meta)
+  };
 }
 function updateStylePreviewText(key,val){
   var store=previewTextStore();
@@ -3527,7 +9608,7 @@ function applyCardPreset(presetId,key,baseHex,accentHex){
   STYLE_PREVIEW_KEY=previewKey;
   uploadDataUrlToPath(path,dataUrl,'Preset: '+preset,function(){
     setCardBuildMode(previewKey,'image');
-    setTimeout(function(){loadCardPreviews();},50);
+    scheduleCardPreviewWarmup(120);
   }).then(function(){
     toast('Preset toegevoegd','green');
   }).catch(function(err){
@@ -3543,6 +9624,40 @@ function updateStyleSetName(val){
   if(titleEl){if(titleEl.tagName==='INPUT')titleEl.value=val||S.activeId;else titleEl.textContent=val||S.activeId;}
   syncEditorHeaderWidths();
 }
+function startEditorSetTitleEdit(el){
+  if(!el||S.activeKind!=='set')return false;
+  el.dataset.beforeEdit=String(el.value||'');
+  el.readOnly=false;
+  el.classList.add('is-editing');
+  el.title='Druk op Enter om op te slaan';
+  syncEditorHeaderWidths();
+  setTimeout(function(){
+    try{el.focus();el.select();}catch(e){}
+  },0);
+  return false;
+}
+function finishEditorSetTitleEdit(el){
+  if(!el||S.activeKind!=='set')return;
+  el.readOnly=true;
+  el.classList.remove('is-editing');
+  el.title='Dubbelklik om naam te wijzigen';
+  syncEditorHeaderWidths();
+}
+function handleEditorSetTitleKey(event,el){
+  if(!el)return;
+  if(event.key==='Enter'){
+    event.preventDefault();
+    el.blur();
+    return;
+  }
+  if(event.key==='Escape'){
+    event.preventDefault();
+    var prev=Object.prototype.hasOwnProperty.call(el.dataset,'beforeEdit')?el.dataset.beforeEdit:String(el.value||'');
+    el.value=prev;
+    updateStyleSetName(prev);
+    el.blur();
+  }
+}
 function updateStyleThemeName(idx,val){
   if(idx<0)return;
   var meta=S.d.meta||{};
@@ -3553,7 +9668,7 @@ function updateStyleThemeName(idx,val){
     if(card.dataset.stylePreviewKey!==key)return;
     card.dataset.stylePreviewKey=key;
     card.setAttribute('onclick','setStylePreviewKey(\''+esc(key)+'\')');
-    var newLabel=val||('Thema '+(idx+1));
+    var newLabel=themeLabelForIndex(idx,val);
     var labelEl=card.querySelector('.stijlSlideNameLabel');
     if(labelEl)labelEl.textContent=newLabel;
     Array.prototype.slice.call(card.querySelectorAll('.stijlSlideNameInput')).forEach(function(nameEl){
@@ -3565,10 +9680,8 @@ function updateStyleThemeName(idx,val){
   });
   var stijlInput=g('stijlThemeInput');
   if(stijlInput&&document.activeElement!==stijlInput)stijlInput.value=val;
-  var qInput=document.querySelector('.questionsThemeInput');
-  if(qInput&&document.activeElement!==qInput)qInput.value=val;
   var thEl=g('editorThemeTitle');
-  if(thEl){if(thEl.tagName==='INPUT'){if(document.activeElement!==thEl)thEl.value=val||('Thema '+(idx+1));}else if(thEl.textContent)thEl.textContent=val||('Thema '+(idx+1));}
+  if(thEl){if(thEl.tagName==='INPUT'){if(document.activeElement!==thEl)thEl.value=themeLabelForIndex(idx,val);}else if(thEl.textContent)thEl.textContent=themeLabelForIndex(idx,val);}
   var titles=((meta.ui||{}).infoMidTitles)||{};
   if(!Object.prototype.hasOwnProperty.call(titles,key))syncInfoMidTitleEls(key);
   if(STYLE_PREVIEW_KEY===key||INFO_SLIDE_KEY===key)updateEditorHeaderTheme();
@@ -3586,6 +9699,7 @@ function beginStyleSlideNameEdit(key,isInfo){
   if(!card.classList.contains('sel')){
     if(isInfo)setInfoPreviewKey(key);
     else setStylePreviewKey(key);
+    setTimeout(function(){beginStyleSlideNameEdit(key,isInfo);},40);
     return;
   }
   card.classList.add('editing-name');
@@ -3730,11 +9844,22 @@ function reorderStyleThemes(fromKey,toKey,before){
   markDirty();
   buildStijlPreserveBg(g('pw'));
 }
+function styleSlideThumbDataUrl(opt){
+  opt=opt||{};
+  var bundle=S.d||null;
+  if(!bundle||!S.activeId)return '';
+  if(opt.key==='cover'){
+    return spacePreviewSetCoverDataUrl({id:S.activeId,bundle:bundle},bundle)||'';
+  }
+  return styleThemeThumbDataUrl(bundle,opt.key||'algemeen',opt.file)||'';
+}
 function styleSlideCardHtml(opt,selectedKey){
   var path=styleCardPathForKey(opt.key);
   var sid=safeid(path);
   var hit=((cachedCardAssetForFile(S.activeId,opt.file)||{}).asset)||null;
   var mode=cardBuildModeForKey(S.d.meta||{},opt.key);
+  var thumbDataUrl=(hit&&hit.dataUrl)||styleSlideThumbDataUrl(opt);
+  var thumbModeClass=!thumbDataUrl?(' is-empty-thumb'+(mode==='self'?' is-self-thumb':'')):'';
   var isTheme=opt.key!=='cover'&&opt.key!=='algemeen';
   var isAlgemeen=opt.key==='algemeen';
   var infoMode=S.opmPane==='info';
@@ -3745,26 +9870,26 @@ function styleSlideCardHtml(opt,selectedKey){
   var cropIcon='<svg viewBox="0 0 24 24"><path d="M6 3v12a3 3 0 0 0 3 3h12"/><path d="M8 16L16 8"/><path d="M9 8h8v8"/></svg>';
   var deleteIcon='<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg>';
   var pictureIcon='<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.3"/><path d="M5 16l4.5-4.5 3 3 2.8-2.8L19 16"/></svg>';
-  var cardLabel=opt.key==='cover'?'Cover':(opt.key==='algemeen'?'Kaart':(opt.label||'Thema'));
+  var themeIdx=styleThemeIndexByKey(opt.key);
+  var cardLabel=opt.key==='cover'?'Cover':(opt.key==='algemeen'?nextThemeLabel(S.d.meta||{}):themeLabelForIndex(themeIdx,opt.label));
+  var uploadLbl='<label class="stijlSlideUpload" title="Afbeelding uploaden" onclick="event.stopPropagation()">'+uploadIcon+'<input type="file" accept=".svg,.png,.jpg,.jpeg,image/*" onclick="event.stopPropagation()" onchange="if(this.files&&this.files[0])uploadFile(this.files[0],\''+esc(path)+'\',\''+sid+'\');this.value=\'\'"></label>';
+  var cropBtn=hit&&hit.dataUrl?'<button class="stijlSlideMiniBtn" type="button" title="Bijsnijden" onclick="event.stopPropagation();recropStyleSlide(\''+esc(path)+'\',\''+sid+'\')">'+cropIcon+'</button>':'';
+  var dupBtn=isTheme?'<button class="stijlSlideMiniBtn" type="button" title="Thema dupliceren" onclick="event.stopPropagation();duplicateThemeFromStyle(\''+esc(opt.key)+'\')">'+duplicateIcon+'</button>':'';
+  var delBtn=isTheme?'<button class="stijlSlideMiniBtn danger" type="button" title="Thema verwijderen" onclick="event.stopPropagation();deleteThemeFromStyle(\''+esc(opt.key)+'\')">'+deleteIcon+'</button>':
+    (hit&&hit.dataUrl?'<button class="stijlSlideMiniBtn danger" type="button" title="Afbeelding verwijderen" onclick="event.stopPropagation();deleteStyleSlideFile(\''+esc(path)+'\',\''+sid+'\')">'+deleteIcon+'</button>':'');
+  var actionsHtml='<div class="stijlSlideActions">'+uploadLbl+cropBtn+dupBtn+delBtn+'</div>';
   return '<div class="stijlSlideCard'+(opt.key===selectedKey?' sel':'')+(isTheme?' is-theme':'')+(isAlgemeen?' is-algemeen':'')+(infoMode?' info-mode':'')+(hasInfo?' has-info':'')+'" data-style-preview-key="'+esc(opt.key)+'" data-path="'+esc(path)+'" data-sid="'+sid+'"'+(isTheme?' draggable="true" data-theme-key="'+esc(opt.key)+'"':'')+(isAlgemeen?' data-theme-key="algemeen"':'')+' onclick="setStylePreviewKey(\''+esc(opt.key)+'\')">'+
-    '<div class="stijlSlideThumb">'+
-      (hit&&hit.dataUrl
-        ?'<img src="'+hit.dataUrl+'" alt="'+esc(opt.label)+'">'
-        :'<div class="stijlSlidePlaceholder">'+pictureIcon+'<span>'+((opt.key==='cover'||opt.key==='algemeen')?'Achtergrond toevoegen':(mode==='self'?'Zelf maken':'Afbeelding kiezen'))+'</span></div>')+
-      '<div class="stijlSlideActions">'+
-        ((opt.key==='cover')
-          ?'<button class="stijlSlideMiniBtn" type="button" title="Set dupliceren" onclick="event.stopPropagation();dupSet()">'+duplicateIcon+'</button>'
-          :(isTheme?'<button class="stijlSlideMiniBtn" type="button" title="Thema dupliceren" onclick="event.stopPropagation();duplicateThemeFromStyle(\''+esc(opt.key)+'\')">'+duplicateIcon+'</button>':''))+
-        '<label class="stijlSlideUpload" title="SVG kiezen" onclick="event.stopPropagation()">'+uploadIcon+'<input type="file" accept=".svg,image/svg+xml" onclick="event.stopPropagation()" onchange="if(this.files&&this.files[0])uploadFile(this.files[0],\''+esc(path)+'\',\''+sid+'\');this.value=\'\'"></label>'+
-        (hit&&hit.dataUrl?'<button class="stijlSlideMiniBtn" type="button" title="Bijsnijden" onclick="event.stopPropagation();recropStyleSlide(\''+esc(path)+'\',\''+sid+'\')">'+cropIcon+'</button>':'')+
-        (isTheme?'<button class="stijlSlideMiniBtn danger" type="button" title="Thema verwijderen" onclick="event.stopPropagation();deleteThemeFromStyle(\''+esc(opt.key)+'\')">'+deleteIcon+'</button>':(hit&&hit.dataUrl?'<button class="stijlSlideMiniBtn danger" type="button" title="Verwijderen" onclick="event.stopPropagation();deleteStyleSlideFile(\''+esc(path)+'\',\''+sid+'\')">'+deleteIcon+'</button>':''))+
-      '</div>'+
+    '<div class="stijlSlideThumb'+thumbModeClass+'">'+
+      (thumbDataUrl
+        ?'<img src="'+thumbDataUrl+'" alt="'+esc(cardLabel)+'">'
+        :'<div class="stijlSlidePlaceholder">'+pictureIcon+'<span>Achtergrond toevoegen</span></div>')+
+      actionsHtml+
     '</div>'+
     '<div class="stijlSlideBody">'+
       (isTheme
-        ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Naam wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
+        ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Dubbelklik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" ondblclick="event.stopPropagation();beginStyleSlideNameEdit(\''+esc(opt.key)+'\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="Thema" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="endStyleSlideNameEdit(this)" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.value=\''+esc(cardLabel)+'\';this.blur();}" oninput="event.stopPropagation();updateStyleThemeNameByKey(\''+esc(opt.key)+'\',this.value)"></div>'
         :isAlgemeen
-          ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Naam geven → maakt thema aan" onmousedown="event.stopPropagation()" onclick="event.stopPropagation();beginStyleSlideNameEdit(\'algemeen\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="" placeholder="Naam geven…" title="Naam geven → maakt thema aan" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="var _v=(this.value||\'\').trim();endStyleSlideNameEdit(this);if(_v){this.value=\'\';promoteAlgemeenToTheme(_v);}" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.value=\'\';this.blur();}" oninput="event.stopPropagation()"></div>'
+          ?'<div class="stijlSlideNameEditWrap"><div class="stijlSlideName stijlSlideNameLabel" title="Dubbelklik om naam te wijzigen" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" ondblclick="event.stopPropagation();beginStyleSlideNameEdit(\'algemeen\',false)">'+esc(cardLabel)+'</div><input class="stijlSlideName stijlSlideNameInput" type="text" value="'+esc(cardLabel)+'" placeholder="'+esc(cardLabel)+'" title="Naam wijzigen" draggable="false" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onblur="var _v=(this.value||\'\').trim();endStyleSlideNameEdit(this);if(_v){promoteAlgemeenToTheme(_v);}else{this.value=\''+esc(cardLabel)+'\';}" onkeydown="event.stopPropagation();if(event.key===\'Enter\'){event.preventDefault();this.blur();}if(event.key===\'Escape\'){event.preventDefault();this.value=\''+esc(cardLabel)+'\';this.blur();}" oninput="event.stopPropagation()"></div>'
           :'<div class="stijlSlideName">'+esc(cardLabel)+'</div>')+
       (infoMode?'<div class="stijlSlideInfoDot" title="'+(hasInfo?'Heeft infotekst':'Nog geen infotekst')+'"></div>':'')+
     '</div>'+
@@ -3783,20 +9908,94 @@ function previewVarianceHint(previewKey){
   return '';
 }
 function wireStyleComposer(){
-  var _lastHintCard=null,_lastHintBefore=null;
   function clearStyleDragHints(){
-    _lastHintCard=null;_lastHintBefore=null;
     Array.prototype.slice.call(document.querySelectorAll('.stijlSlideRail.reordering')).forEach(function(rail){rail.classList.remove('reordering');});
+    Array.prototype.slice.call(document.querySelectorAll('.stijlSlideGap')).forEach(function(gap){gap.remove();});
     Array.prototype.slice.call(document.querySelectorAll('.stijlSlideCard.drop-before,.stijlSlideCard.drop-after,.infoSlideCard.drop-before,.infoSlideCard.drop-after')).forEach(function(el){
       el.classList.remove('drop-before','drop-after');
     });
   }
-  function setStyleDragHint(card,before){
+  function ensureStyleSlideGap(rail,width,height){
+    if(!rail)return null;
+    var gap=rail.querySelector('.stijlSlideGap');
+    if(!gap){
+      gap=document.createElement('div');
+      gap.className='stijlSlideGap';
+      gap.setAttribute('aria-hidden','true');
+    }
+    gap.style.width=Math.max(72,Math.round(width||108))+'px';
+    gap.style.height=Math.max(86,Math.round(height||96))+'px';
+    if(gap.parentNode!==rail)rail.appendChild(gap);
+    return gap;
+  }
+  function slideCardWidth(card){
+    if(!card)return 108;
+    var rect=card.getBoundingClientRect();
+    return rect&&rect.width?rect.width:Math.max(card.offsetWidth||0,108);
+  }
+  function slideCardHeight(card){
+    if(!card)return 96;
+    var rect=card.getBoundingClientRect();
+    return rect&&rect.height?rect.height:Math.max(card.offsetHeight||0,96);
+  }
+  function slideDragTargets(rail,type,dragCard){
+    var selector=type==='info'
+      ? '.infoSlideCard[data-info-key]:not(.info-excluded)'
+      : '.stijlSlideCard[data-theme-key]';
+    return Array.prototype.slice.call(rail.querySelectorAll(selector)).filter(function(card){
+      if(card===dragCard)return false;
+      if(type==='info')return card.dataset.infoKey!=='cover';
+      return !!card.dataset.themeKey && card.dataset.themeKey!=='algemeen';
+    });
+  }
+  function setStyleDragHint(anchor,before){
+    var state=STYLE_SLIDE_DND;
+    if(!state||!state.rail)return;
     clearStyleDragHints();
-    if(!card)return;
-    var rail=card.closest('.stijlSlideRail');
-    if(rail)rail.classList.add('reordering');
-    card.classList.add(before?'drop-before':'drop-after');
+    state.rail.classList.add('reordering');
+    var gap=ensureStyleSlideGap(state.rail,slideCardWidth(state.card),slideCardHeight(state.card));
+    if(!anchor){
+      state.overKey='';
+      state.overBefore=true;
+      state.anchorCard=null;
+      return;
+    }
+    state.anchorCard=anchor;
+    state.overBefore=before!==false;
+    state.overKey=state.type==='info'?anchor.dataset.infoKey:anchor.dataset.themeKey;
+    anchor.classList.add(state.overBefore?'drop-before':'drop-after');
+    if(state.overBefore)state.rail.insertBefore(gap,anchor);
+    else state.rail.insertBefore(gap,anchor.nextSibling);
+  }
+  function updateStyleDragHint(rail,clientX){
+    var state=STYLE_SLIDE_DND;
+    if(!state||state.rail!==rail)return;
+    var cards=slideDragTargets(rail,state.type,state.card);
+    if(!cards.length){
+      setStyleDragHint(null,true);
+      return;
+    }
+    var anchor=cards[cards.length-1];
+    var before=false;
+    for(var i=0;i<cards.length;i++){
+      var card=cards[i];
+      var rect=card.getBoundingClientRect();
+      var mid=rect.left+(rect.width/2);
+      if(clientX<mid){
+        anchor=card;
+        before=true;
+        break;
+      }
+    }
+    if(state.anchorCard===anchor&&state.overBefore===before)return;
+    setStyleDragHint(anchor,before);
+  }
+  function maybeAutoScrollRail(rail,clientX){
+    if(!rail)return;
+    var rect=rail.getBoundingClientRect();
+    var edge=42;
+    if(clientX<rect.left+edge)rail.scrollLeft-=14;
+    else if(clientX>rect.right-edge)rail.scrollLeft+=14;
   }
   var previewDrop=document.querySelector('[data-style-drop-preview]');
   if(previewDrop){
@@ -3836,11 +10035,13 @@ function wireStyleComposer(){
         }
         card.classList.add('dragging');
         clearStyleDragHints();
-        var rail=card.closest('.stijlSlideRail'); if(rail)rail.classList.add('reordering');
+        var rail=card.closest('.stijlSlideRail');
+        STYLE_SLIDE_DND={type:'info',key:card.dataset.infoKey,card:card,rail:rail,anchorCard:null,overKey:'',overBefore:true};
+        if(rail)rail.classList.add('reordering');
         e.dataTransfer.effectAllowed='move';
         e.dataTransfer.setData('text/plain',card.dataset.infoKey);
       });
-      card.addEventListener('dragend',function(){card.classList.remove('dragging');clearStyleDragHints();});
+      card.addEventListener('dragend',function(){card.classList.remove('dragging');STYLE_SLIDE_DND=null;clearStyleDragHints();});
     }
     if(card.dataset.themeKey){
       card.addEventListener('dragstart',function(e){
@@ -3851,31 +10052,32 @@ function wireStyleComposer(){
         }
         card.classList.add('dragging');
         clearStyleDragHints();
-        var rail=card.closest('.stijlSlideRail'); if(rail)rail.classList.add('reordering');
+        var rail=card.closest('.stijlSlideRail');
+        STYLE_SLIDE_DND={type:'theme',key:card.dataset.themeKey,card:card,rail:rail,anchorCard:null,overKey:'',overBefore:true};
+        if(rail)rail.classList.add('reordering');
         e.dataTransfer.effectAllowed='move';
         e.dataTransfer.setData('text/plain',card.dataset.themeKey);
       });
       card.addEventListener('dragend',function(){
         card.classList.remove('dragging');
         Array.prototype.slice.call(document.querySelectorAll('.stijlSlideCard.dragover,.infoSlideCard.dragover')).forEach(function(el){el.classList.remove('dragover');});
+        STYLE_SLIDE_DND=null;
         clearStyleDragHints();
       });
     }
     card.addEventListener('dragenter',function(e){
+      if(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.card) return;
       e.preventDefault();
       depth+=1;
       card.classList.add('dragover');
-      var rect=card.getBoundingClientRect();
-      setStyleDragHint(card,(e.clientX-rect.left)<rect.width/2);
     });
     card.addEventListener('dragover',function(e){
+      if(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.card) return;
       e.preventDefault();
       card.classList.add('dragover');
-      var rect=card.getBoundingClientRect();
-      var before=(e.clientX-rect.left)<rect.width/2;
-      if(card!==_lastHintCard||before!==_lastHintBefore){_lastHintCard=card;_lastHintBefore=before;setStyleDragHint(card,before);}
     });
     card.addEventListener('dragleave',function(e){
+      if(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.card) return;
       e.preventDefault();
       depth=Math.max(0,depth-1);
       if(!depth){
@@ -3884,25 +10086,45 @@ function wireStyleComposer(){
       }
     });
     card.addEventListener('drop',function(e){
+      if(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.card) return;
       e.preventDefault();
       depth=0;
       card.classList.remove('dragover');
-      var rect=card.getBoundingClientRect();
-      var before=(e.clientX-rect.left)<rect.width/2;
-      clearStyleDragHints();
-      var dragKey=e.dataTransfer&&e.dataTransfer.getData('text/plain');
-      if(dragKey&&card.dataset.infoKey){
-        reorderInfoSlides(dragKey,card.dataset.infoKey,before);
-        return;
-      }
-      if(dragKey&&card.dataset.themeKey){
-        reorderStyleThemes(dragKey,card.dataset.themeKey,before);
-        return;
-      }
       var files=e.dataTransfer&&e.dataTransfer.files;
       if(!(files&&files.length))return;
       assignStyleFiles(files,card.dataset.stylePreviewKey||STYLE_PREVIEW_KEY);
       setTimeout(function(){buildStijlPreserveBg(g('pw'));},30);
+    });
+  });
+  Array.prototype.slice.call(document.querySelectorAll('.stijlSlideRail')).forEach(function(rail){
+    rail.addEventListener('dragover',function(e){
+      if(!(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.rail===rail))return;
+      e.preventDefault();
+      maybeAutoScrollRail(rail,e.clientX);
+      updateStyleDragHint(rail,e.clientX);
+      if(e.dataTransfer)e.dataTransfer.dropEffect='move';
+    });
+    rail.addEventListener('dragleave',function(e){
+      if(!(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.rail===rail))return;
+      var rect=rail.getBoundingClientRect();
+      var inside=e.clientX>=rect.left&&e.clientX<=rect.right&&e.clientY>=rect.top&&e.clientY<=rect.bottom;
+      if(inside)return;
+      clearStyleDragHints();
+    });
+    rail.addEventListener('drop',function(e){
+      if(!(STYLE_SLIDE_DND&&STYLE_SLIDE_DND.rail===rail))return;
+      e.preventDefault();
+      updateStyleDragHint(rail,e.clientX);
+      var state=STYLE_SLIDE_DND;
+      var dragKey=state.key;
+      var overKey=state.overKey;
+      var before=state.overBefore;
+      STYLE_SLIDE_DND=null;
+      Array.prototype.slice.call(document.querySelectorAll('.stijlSlideCard.dragover,.infoSlideCard.dragover')).forEach(function(el){el.classList.remove('dragover');});
+      clearStyleDragHints();
+      if(!dragKey||!overKey||dragKey===overKey)return;
+      if(state.type==='info')reorderInfoSlides(dragKey,overKey,before);
+      else reorderStyleThemes(dragKey,overKey,before);
     });
   });
 }
@@ -3916,7 +10138,7 @@ function makeCoverTextBlock(seed){
     {x:12,y:76,size:12,valign:'bottom'}
   ];
   var preset=presets[Math.min(seed||0,presets.length-1)]||presets[1];
-  return {text:'',x:preset.x,y:preset.y,valign:preset.valign,size:preset.size,align:'left',weight:'regular',italic:false,underline:false,font:baseFont,color:baseColor,bg:''};
+  return {text:'',x:preset.x,y:preset.y,valign:'center',size:preset.size,align:'center',weight:'regular',italic:false,underline:false,font:baseFont,color:baseColor,bg:''};
 }
 function coverTextStore(){
   var meta=S.d.meta||{};
@@ -3924,7 +10146,7 @@ function coverTextStore(){
   meta.ui.coverTexts=Array.isArray(meta.ui.coverTexts)?meta.ui.coverTexts:[];
   meta.ui.coverTexts=meta.ui.coverTexts.slice(0,6).map(function(item,idx){
     item.size=Math.max(8,Math.min(48,parseInt(item.size,10)|| (idx===0?18:12)));
-    item.align=(item.align==='center'||item.align==='right')?item.align:'left';
+    item.align=(item.align==='left'||item.align==='right')?item.align:'center';
     item.valign=(item.valign==='top'||item.valign==='bottom')?item.valign:'center';
     item.weight=(item.weight==='medium'||item.weight==='semibold'||item.weight==='bold')?item.weight:'regular';
     item.italic=!!item.italic;
@@ -3941,7 +10163,10 @@ var COVER_TEXT_ACTIVE=0;
 var COVER_TEXT_LAST_FOCUSED=0;
 var COVER_TEXT_SELECTED_MULTI=[];
 var COVER_TEXT_SUPPRESS_CLICK_UNTIL=0;
+var COVER_TEXT_DESELECTED=false;
+var COVER_ELEM_SEL=null; // 'logo'|'title'|'sub'
 function currentCoverTextIdx(){
+  if(COVER_TEXT_DESELECTED)return -1;
   var blocks=coverTextStore();
   if(!blocks.length)return -1;
   var active=Number(COVER_TEXT_ACTIVE);
@@ -3964,6 +10189,7 @@ function normalizeCoverTextSelectedMulti(){
   return COVER_TEXT_SELECTED_MULTI.slice();
 }
 function getCoverTextSelectedIndices(){
+  if(COVER_TEXT_DESELECTED)return [];
   var list=normalizeCoverTextSelectedMulti();
   if(list.length)return list.slice();
   var idx=currentCoverTextIdx();
@@ -3980,6 +10206,7 @@ function setCoverTextSelection(indices,activeIdx){
   var list=(Array.isArray(indices)?indices:[indices]).map(function(v){return Number(v);}).filter(function(v,i,arr){
     return v>=0&&v<blocks.length&&arr.indexOf(v)===i;
   }).sort(function(a,b){return a-b;});
+  COVER_TEXT_DESELECTED=false;
   COVER_TEXT_SELECTED_MULTI=list;
   if(list.length){
     setCoverTextActiveState(typeof activeIdx==='number'&&list.indexOf(activeIdx)>=0?activeIdx:list[list.length-1]);
@@ -3995,8 +10222,9 @@ function toggleCoverTextSelection(idx){
   setCoverTextSelection(list,list.length?idx:-1);
 }
 function clearCoverTextSelection(){
-  if(!normalizeCoverTextSelectedMulti().length)return false;
+  if(!normalizeCoverTextSelectedMulti().length&&!COVER_TEXT_DESELECTED)return false;
   COVER_TEXT_SELECTED_MULTI=[];
+  COVER_TEXT_DESELECTED=true;
   patchCoverTextTargets();
   refreshShapeEditors('cover');
   return true;
@@ -4039,7 +10267,7 @@ function coverTextItemFromBlock(block){
     x:Number(block.x)||50,
     y:Number(block.y)||50,
     size:Math.max(8,Math.min(48,parseInt(block.size,10)||12)),
-    align:block.align||'left',
+    align:block.align||'center',
     valign:block.valign||'center',
     weight:block.weight||'regular',
     italic:!!block.italic,
@@ -4076,6 +10304,7 @@ function setCoverTextActiveState(idx){
   idx=Math.max(0,Math.min(max,Number(idx)||0));
   COVER_TEXT_ACTIVE=idx;
   COVER_TEXT_LAST_FOCUSED=idx;
+  COVER_TEXT_DESELECTED=false;
   return idx;
 }
 function syncCoverTextInputs(){
@@ -4115,7 +10344,7 @@ function syncActiveCoverTextControls(){
     btn.classList.toggle('sel',String(btn.dataset.fontSizeOption||'')===String(block.size||12));
   });
   coverEditorQueryAll('[data-align]').forEach(function(btn){
-    btn.classList.toggle('sel',btn.dataset.align===String(block.align||'left'));
+    btn.classList.toggle('sel',btn.dataset.align===String(block.align||'center'));
   });
   coverEditorQueryAll('[data-valign]').forEach(function(btn){
     btn.classList.toggle('sel',btn.dataset.valign===String(block.valign||'center'));
@@ -4182,6 +10411,7 @@ function selectCoverTextItem(idx,ev){
     if(ev){ev.preventDefault();ev.stopPropagation();}
     return;
   }
+  COVER_ELEM_SEL=null;
   if(ev&&(ev.shiftKey||ev.metaKey||ev.ctrlKey))toggleCoverTextSelection(idx);
   else{
     setShapeSelection('cover',[],-1);
@@ -4421,6 +10651,7 @@ function startCoverTextInlineEdit(ev,idx){
     span.classList.add('cpTextBlockHint');
   }
   span.contentEditable='true';
+  span.spellcheck=false;
   span.focus();
   var range=document.createRange();
   range.selectNodeContents(span);
@@ -4558,9 +10789,47 @@ function closeTextMenu(el){
 }
 function setBackMode(mode){
   var m=S.d.meta=S.d.meta||{};
-  m.backMode=(mode==='blank'||mode==='reflect')?mode:'mirror';
+  var nextMode=(mode==='blank'||mode==='reflect')?mode:'mirror';
+  var changed=m.backMode!==nextMode;
+  var wasFlipped=CANVAS_CARD_FLIPPED;
+  var prevMode=m.backMode||'mirror';
+  var prevSurface=STYLE_BACK_EDIT_SURFACE||'front';
+  var spinAdvance=!!(changed&&wasFlipped);
+  var needsEditorRebuild=!!(prevMode==='blank'||nextMode==='blank');
+  m.backMode=nextMode;
+  if(m.backMode==='blank'){
+    ensureBackDesignDefaults(m);
+    STYLE_BACK_EDIT_SURFACE='back';
+  }else{
+    STYLE_BACK_EDIT_SURFACE='front';
+  }
+  if(changed&&(!wasFlipped||spinAdvance)){
+    BACK_MODE_UI_OVERRIDE=prevMode;
+    BACK_SURFACE_UI_OVERRIDE=(prevMode==='blank'||m.backMode==='blank')?prevSurface:'';
+  }else{
+    BACK_MODE_UI_OVERRIDE='';
+    BACK_SURFACE_UI_OVERRIDE='';
+  }
+  BACK_EXTRA_CONTROLS_DELAYED=!!(m.backMode==='blank'&&changed&&!wasFlipped);
   markDirty();
-  buildStijlPreserveBg(g('pw'));
+  runBackPreviewTransition({
+    fromFlipped:wasFlipped,
+    toFlipped:true,
+    roundTrip:changed&&wasFlipped&&!spinAdvance,
+    spinAdvance:spinAdvance,
+    delayExtraReveal:BACK_EXTRA_CONTROLS_DELAYED,
+    afterTransition:function(){
+      BACK_MODE_UI_OVERRIDE='';
+      BACK_SURFACE_UI_OVERRIDE='';
+      if(needsEditorRebuild){
+        buildStijlPreserveBg(g('pw'));
+        updateStijlPreview();
+      }
+      syncBackModeUiState();
+      syncBackSurfaceUiState();
+      syncBackExtraControlsUiState();
+    }
+  });
 }
 function setTextWeight(val){
   val=(val==='medium'||val==='semibold'||val==='bold')?val:'regular';
@@ -4643,10 +10912,7 @@ function buildCoverTextDropdownContent(){
   var trashSvg='<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg>';
   var addBtn='<button class="textToolbarMenuItem" type="button" onclick="addCoverTextBlock()"><span style="display:inline-flex;align-items:center;gap:6px"><span style="font-size:16px;line-height:1;font-weight:500">+</span><span>Tekstvak toevoegen</span></span></button>';
   var rows=!blocks.length
-    ?'<div style="display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:4px 0 2px">'+
-        addBtn+
-        '<div style="font-size:11.5px;line-height:1.4;color:var(--k3);text-align:center;padding:2px 4px 0">Nog geen tekstvak</div>'+
-      '</div>'
+    ?addBtn
     :blocks.map(function(item,idx){
       var active=idx===activeIdx;
       return '<div class="coverTextCard coverTextDropRow'+(active?' active':'')+'" data-cover-text-idx="'+idx+'">'+
@@ -4654,7 +10920,7 @@ function buildCoverTextDropdownContent(){
         '<button class="coverTextMiniBtn danger" type="button" onclick="event.preventDefault();event.stopPropagation();removeCoverTextBlock('+idx+')">'+trashSvg+'</button>'+
       '</div>';
     }).join('');
-  return '<div class="textToolbarMenuLabel">Tekstvakken</div>'+rows+
+  return rows+
     (blocks.length?'<div class="textToolbarMenuSep" style="margin:6px 0"></div>'+addBtn:'');
 }
 function refreshCoverTextDropdown(){
@@ -4672,12 +10938,13 @@ function addCoverTextBlock(){
   var blocks=coverTextStore();
   if(blocks.length>=6){toast('Maximaal 6 tekstvakken','amber');return;}
   blocks.push(makeCoverTextBlock(blocks.length));
-  setCoverTextActiveState(blocks.length-1);
+  setCoverTextSelection([blocks.length-1],blocks.length-1);
   markDirty();
   updateStijlPreview();
   refreshCoverTextCard();
   refreshCoverTextDropdown();
   refreshShapeEditors('cover');
+  syncActiveCoverTextControls();
   var newIdx=currentCoverTextIdx();
   setTimeout(function(){startCoverTextInlineEdit(null,newIdx);},60);
 }
@@ -4748,25 +11015,24 @@ function buildFontSizeMenuHtml(curSize){
 }
 function buildTextColorMenuHtml(action,currentColor){
   var hex=normalizeHexInput(currentColor)||'#1a1a2e';
-  var meta=stylePaletteMeta(action);
-  var tcRows=[meta.quick.slice(0,8)].concat(BRAND_FAM_BG.slice(1));
+  var tcMeta=stylePaletteMeta('settc');
+  var tcRows=[tcMeta.quick.slice(0,8)].concat(BRAND_FAM_BG.slice(1));
   return '<details class="textToolbarMenu">'+
     '<summary class="textToolbarMenuBtn" title="Tekstkleur" data-text-color-btn="1">'+textColorButtonIcon(hex)+'<span class="textToolbarCaret">▾</span></summary>'+
     '<div class="textToolbarMenuPop brandPopPop">'+
-      brandPaletteHtml(action,hex,tcRows)+
+      brandTextColorPaletteHtml(action,hex,tcRows,{universal:true})+
     '</div>'+
   '</details>';
 }
 function buildTextBgMenuHtml(color){
   var hex=normalizeHexInput(color)||'';
-  var tbRows=BRAND_FAM_BG;
   var noSw='<button class="brandSw brandNoColorSw'+(hex?'':' sel')+'" type="button" title="Geen vlak" onclick="setTextBgMode(\'\')">'+
     '<svg viewBox="0 0 18 18" width="18" height="18"><line x1="3" y1="15" x2="15" y2="3" stroke="#d05050" stroke-width="1.5" stroke-linecap="round"/></svg>'+
   '</button>';
   return '<details class="textToolbarMenu">'+
     '<summary class="textToolbarMenuBtn" title="Tekstvlak" data-text-bg-btn="1">'+textBgButtonIcon(hex||'none')+'<span class="textToolbarCaret">▾</span></summary>'+
     '<div class="textToolbarMenuPop brandPopPop">'+
-      brandPaletteHtml('settb',hex||'',tbRows,{prefixHtml:noSw})+
+      brandTextColorPaletteHtml('settb',hex||'',BRAND_FAM_BG,{prefixHtml:noSw})+
     '</div>'+
   '</details>';
 }
@@ -4782,10 +11048,7 @@ var SHAPE_SEL_KEY=null;
 function startShapeSelTimer(key){
   SHAPE_SEL_KEY=key||activeStyleEditKey();
   if(SHAPE_SEL_TIMER){clearTimeout(SHAPE_SEL_TIMER);SHAPE_SEL_TIMER=null;}
-  SHAPE_SEL_TIMER=setTimeout(function(){
-    SHAPE_SEL_TIMER=null;
-    clearActiveShapeSelection(SHAPE_SEL_KEY);
-  },6500);
+  // No auto-deselect timer — selection persists until explicitly changed
 }
 function resetShapeSelTimer(){
   SHAPE_SEL_KEY=SHAPE_SEL_KEY||activeStyleEditKey();
@@ -5352,44 +11615,284 @@ function previewNightMode(){
   meta.ui=meta.ui||{};
   return !!meta.ui.previewNight;
 }
+function previewNightToggleIconHtml(isNight){
+  return isNight
+    ? '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.9 1.8a5.8 5.8 0 1 0 3.3 10.7 6.2 6.2 0 1 1-3.3-10.7Z"></path></svg>'
+    : '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.4"></circle><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"></path></svg>';
+}
+function refreshPreviewNightUi(){
+  var isNight=previewNightMode()||adminNightMode();
+  Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasWindow')).forEach(function(win){
+    if(isWizardPreviewWindow(win))return;
+    win.classList.toggle('night',isNight);
+  });
+  Array.prototype.slice.call(document.querySelectorAll('[data-preview-night-toggle="1"]')).forEach(function(btn){
+    if(isInsideWizardPreview(btn))return;
+    var label=isNight?'Nachtmodus uitzetten':'Nachtmodus aanzetten';
+    btn.classList.toggle('sel',isNight);
+    btn.setAttribute('aria-label',label);
+    btn.setAttribute('title',label);
+    btn.innerHTML=previewNightToggleIconHtml(isNight);
+  });
+  if(isViewCardsFocusModeActive())refreshFocusPresentationHeadActions();
+  renderBgPreview();
+}
 function previewGridMode(){
   var meta=((S.d||{}).meta=S.d.meta||{});
   meta.ui=meta.ui||{};
   return !!meta.ui.previewGrid;
+}
+function refreshPreviewGridUi(){
+  var isGrid=previewGridMode();
+  Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasWindow')).forEach(function(win){
+    if(isWizardPreviewWindow(win))return;
+    win.classList.toggle('grid-on',isGrid);
+  });
+  Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasGridBtn')).forEach(function(btn){
+    if(isInsideWizardPreview(btn))return;
+    var label=isGrid?'Raster uitzetten':'Raster tonen';
+    btn.classList.toggle('sel',isGrid);
+    btn.setAttribute('aria-label',label);
+    btn.setAttribute('title',label);
+  });
+  syncPreviewGridAccentState();
 }
 function togglePreviewNight(){
   var meta=((S.d||{}).meta=S.d.meta||{});
   meta.ui=meta.ui||{};
   meta.ui.previewNight=!meta.ui.previewNight;
   markDirty();
-  if(S.clTab==='opmaken')buildStijlPreserveBg(g('pw'));
+  if(S.clTab==='opmaken'){
+    refreshPreviewNightUi();
+  }
 }
 function togglePreviewGrid(){
   var meta=((S.d||{}).meta=S.d.meta||{});
   meta.ui=meta.ui||{};
   meta.ui.previewGrid=!meta.ui.previewGrid;
   markDirty();
-  if(S.clTab==='opmaken')buildStijlPreserveBg(g('pw'));
+  if(S.clTab==='opmaken'){
+    refreshPreviewGridUi();
+  }
 }
 var CANVAS_CARD_FLIPPED=false;
 var CANVAS_ZOOM_PCT=100;
+var CANVAS_ZOOM_MIN_PCT=40;
+var CANVAS_ZOOM_MAX_PCT=200;
+var CANVAS_ZOOM_SCOPE_VALUES={};
 var PHONE_CARD_W=340;
+function canvasZoomScopeKeyForPane(activeKind,pane){
+  var kind=activeKind==='space'?'space':'set';
+  var scopePane;
+  if(kind==='space'){
+    scopePane=(pane==='info')?'info':(pane==='inst'?'inst':'space');
+  }else{
+    scopePane=(pane==='inst')?'inst':'editor';
+  }
+  return kind+':'+scopePane;
+}
+function currentCanvasZoomScopeKey(){
+  return canvasZoomScopeKeyForPane(S.activeKind,S.opmPane);
+}
+function rememberCanvasZoomForScope(scopeKey,pct){
+  if(!scopeKey)return;
+  var value=Number(pct);
+  if(!isFinite(value)||value<=0)return;
+  CANVAS_ZOOM_SCOPE_VALUES[scopeKey]=value;
+}
+function restoreCanvasZoomForScope(scopeKey,fallback){
+  var value=scopeKey?Number(CANVAS_ZOOM_SCOPE_VALUES[scopeKey]):NaN;
+  if(isFinite(value)&&value>0)return value;
+  return fallback||100;
+}
+function previewWindowIsVisible(win){
+  if(!win||!win.getBoundingClientRect)return false;
+  var rect=win.getBoundingClientRect();
+  if(!(rect.width>0&&rect.height>0))return false;
+  var cs=window.getComputedStyle?window.getComputedStyle(win):null;
+  if(cs&&(cs.display==='none'||cs.visibility==='hidden'))return false;
+  return true;
+}
+function isWizardPreviewWindow(win){
+  return !!(win&&win.getAttribute&&win.getAttribute('data-wizard-preview')==='1');
+}
+function isInsideWizardPreview(node){
+  return !!(node&&node.closest&&node.closest('.stijlCanvasWindow[data-wizard-preview="1"]'));
+}
+function currentCanvasZoomBounds(){
+  var min=CANVAS_ZOOM_MIN_PCT;
+  var max=CANVAS_ZOOM_MAX_PCT;
+  var fitCaps=[];
+  document.querySelectorAll('.stijlCanvasWindow').forEach(function(win){
+    if(isWizardPreviewWindow(win))return;
+    if(!previewWindowIsVisible(win))return;
+    if(!win||!win.getClientRects||!win.getClientRects().length)return;
+    if(win.classList.contains('site-preview-window')){
+      var siteAvailW=win.clientWidth||0;
+      var siteAvailH=win.clientHeight||0;
+      if(siteAvailW>0&&siteAvailH>0){
+        fitCaps.push(Math.min(siteAvailW/SPACE_PREVIEW_W,siteAvailH/SPACE_PREVIEW_H)*100);
+      }
+      return;
+    }
+    var wrap=win.querySelector('.stijlCardPrevWrap');
+    var visual=win.querySelector('.stijlCardPrevWrap .cardFaceOuter, .stijlCardPrevWrap .adminInfoSlide');
+    if(!wrap||!visual)return;
+    var availW=wrap.clientWidth||0;
+    var availH=wrap.clientHeight||0;
+    var rect=visual.getBoundingClientRect();
+    var appliedScale=parseFloat(visual.style.zoom||'')||1;
+    if(!(availW>0&&availH>0&&rect.width>0&&rect.height>0&&appliedScale>0))return;
+    var baseW=rect.width/appliedScale;
+    var baseH=rect.height/appliedScale;
+    if(!(baseW>0&&baseH>0))return;
+    if(win.classList.contains('info-preview')&&visual.classList.contains('adminInfoSlide')){
+      fitCaps.push((availW/baseW)*100);
+      return;
+    }
+    fitCaps.push(Math.min(availW/baseW,availH/baseH)*100);
+  });
+  if(fitCaps.length){
+    var autoMax=Math.floor(Math.min.apply(null,fitCaps)/5)*5;
+    if(autoMax>0)max=Math.min(max,autoMax);
+  }
+  max=Math.max(min,max);
+  return{min:min,max:max};
+}
+function baseCanvasPreviewShellHeight(){
+  // Mirrors the desktop preview shell clamp in CSS:
+  // clamp(360px, calc(100vh - var(--toolbar-h) - 154px), 468px)
+  var toolbarH=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-h'))||66;
+  return Math.max(360,Math.min(window.innerHeight-toolbarH-154,468));
+}
+function syncSingleCanvasPreviewLayout(win){
+  if(!win||!win.querySelector)return;
+  var inner=win.querySelector('.stijlCanvasWindowInner');
+  var card=win.querySelector('.stijlCardPrevWrap');
+  if(!inner||!card)return;
+  var winRect=win.getBoundingClientRect();
+  if(!winRect.width||!winRect.height)return;
+  var topbar=win.querySelector('.stijlCanvasTopbar');
+  var backbar=win.querySelector('.stijlCanvasBackbar');
+  var visual=card.querySelector('.cardFaceOuter, .adminInfoSlide');
+  var sideInset=14;
+  var contentTop=34;
+  var contentBottom=70;
+  if(topbar){
+    var topbarRect=topbar.getBoundingClientRect();
+    sideInset=Math.max(8,Math.round(topbarRect.left-winRect.left));
+    contentTop=Math.max(0,Math.round(topbarRect.bottom-winRect.top)+8);
+  }
+  if(backbar){
+    var backbarRect=backbar.getBoundingClientRect();
+    contentBottom=Math.max(0,Math.round(winRect.bottom-backbarRect.top)-4);
+  }
+  var backbarExtra=win.querySelector('.previewEditSurfaceStack');
+  if(backbarExtra&&typeof backbarExtra.getBoundingClientRect==='function'){
+    var backbarExtraRect=backbarExtra.getBoundingClientRect();
+    if(backbarExtraRect.width>0&&backbarExtraRect.height>0){
+      var reserveTop=backbarExtraRect.top;
+      if(backbar&&typeof backbar.getBoundingClientRect==='function'){
+        reserveTop=Math.min(reserveTop,backbar.getBoundingClientRect().top);
+      }
+      contentBottom=Math.max(contentBottom,Math.max(0,Math.round(winRect.bottom-reserveTop)-4));
+    }
+  }
+  var effectiveBottom=contentBottom;
+  win.style.setProperty('--preview-side-inset',sideInset+'px');
+  win.style.setProperty('--preview-content-top',contentTop+'px');
+  win.style.setProperty('--preview-content-bottom',effectiveBottom+'px');
+  if(win.classList.contains('info-preview')){
+    var previewSide=win.closest('.stijlCanvasSide.preview');
+    var previewShellH=previewSide
+      ? parseFloat(getComputedStyle(previewSide).getPropertyValue('--preview-shell-max-h'))||0
+      : 0;
+    var basePreviewWindowH=previewShellH>0 ? previewShellH : baseCanvasPreviewShellHeight();
+    var infoAvailH=Math.max(0,basePreviewWindowH-contentTop-effectiveBottom);
+    var infoScale=parseFloat(visual&&visual.style.zoom||'')||1;
+    var infoCardFace=card.querySelector('.adminInfoSlideCard');
+    var infoCardFaceRect=infoCardFace&&infoCardFace.getBoundingClientRect?infoCardFace.getBoundingClientRect():null;
+    var infoCardH=(infoCardFaceRect&&infoCardFaceRect.height)?infoCardFaceRect.height:0;
+    if(!(infoCardH>0)){
+      var infoBaseCardW=parseFloat(getComputedStyle(card).getPropertyValue('--editor-preview-card-w'))||320;
+      infoCardH=Math.round((infoBaseCardW*(55/85))*infoScale);
+    }
+    var infoCardStart=contentTop+Math.max(0,Math.round((infoAvailH-infoCardH)/2));
+    card.style.top=infoCardStart+'px';
+    card.style.bottom='auto';
+    card.style.height='auto';
+    card.style.transform='none';
+    return;
+  }
+  card.style.top=contentTop+'px';
+  card.style.bottom=contentBottom+'px';
+  card.style.height='auto';
+  card.style.transform='none';
+}
+function syncCanvasPreviewLayout(){
+  requestAnimationFrame(function(){
+    document.querySelectorAll('.stijlCanvasWindow:not(.site-preview-window)').forEach(function(win){
+      if(isWizardPreviewWindow(win))return;
+      syncSingleCanvasPreviewLayout(win);
+    });
+  });
+}
+window.PK=window.PK||{};
+window.PK.syncCanvasPreviewWindowLayout=syncSingleCanvasPreviewLayout;
+var CANVAS_VIEWPORT_SYNC_RAF=0;
+function scheduleCanvasViewportSync(){
+  if(CANVAS_VIEWPORT_SYNC_RAF)cancelAnimationFrame(CANVAS_VIEWPORT_SYNC_RAF);
+  CANVAS_VIEWPORT_SYNC_RAF=requestAnimationFrame(function(){
+    CANVAS_VIEWPORT_SYNC_RAF=0;
+    applyCanvasZoom();
+  });
+}
 function applyCanvasZoom(){
+  var bounds=currentCanvasZoomBounds();
+  CANVAS_ZOOM_PCT=Math.max(bounds.min,Math.min(bounds.max,CANVAS_ZOOM_PCT));
+  rememberCanvasZoomForScope(currentCanvasZoomScopeKey(),CANVAS_ZOOM_PCT);
   var scale=CANVAS_ZOOM_PCT/100;
   document.querySelectorAll('.stijlCanvasCardWrap .cardFaceOuter, .stijlCanvasCardWrap .adminInfoSlide').forEach(function(el){
+    if(isInsideWizardPreview(el))return;
     el.style.zoom=scale;
   });
-  document.querySelectorAll('.cvZoomPct').forEach(function(el){el.textContent=CANVAS_ZOOM_PCT+'%';});
+  document.querySelectorAll('.spaceLiveFrameScale').forEach(function(el){
+    el.style.setProperty('--preview-scale',scale);
+    el.style.height=Math.round(SPACE_PREVIEW_H*scale)+'px';
+  });
+  document.querySelectorAll('.cvZoomPct').forEach(function(el){
+    if(isInsideWizardPreview(el))return;
+    el.textContent=CANVAS_ZOOM_PCT+'%';
+  });
+  syncCanvasPreviewLayout();
+}
+var SPACE_PREVIEW_REFRESH_TM=0;
+function refreshSpaceSitePreviewFrame(){
+  if(SPACE_PREVIEW_CARDS_MODE)return;
+  var frame=document.querySelector('.spaceLiveFrame');
+  if(!frame)return;
+  var doc=spaceSitePreviewDocumentHtml();
+  if(frame.getAttribute('srcdoc')!==doc)frame.setAttribute('srcdoc',doc);
+}
+function scheduleSpaceSitePreviewRefresh(){
+  if(S.activeKind!=='space')return;
+  clearTimeout(SPACE_PREVIEW_REFRESH_TM);
+  SPACE_PREVIEW_REFRESH_TM=setTimeout(function(){
+    SPACE_PREVIEW_REFRESH_TM=0;
+    refreshSpaceSitePreviewFrame();
+  },40);
 }
 function setCanvasZoom(pct){
-  CANVAS_ZOOM_PCT=Math.max(40,Math.min(300,Math.round(pct/25)*25));
+  var bounds=currentCanvasZoomBounds();
+  CANVAS_ZOOM_PCT=Math.max(bounds.min,Math.min(bounds.max,Math.round(pct/5)*5));
+  rememberCanvasZoomForScope(currentCanvasZoomScopeKey(),CANVAS_ZOOM_PCT);
   applyCanvasZoom();
 }
 function stepCanvasZoom(delta){
   var prev=CANVAS_ZOOM_PCT;
   setCanvasZoom(CANVAS_ZOOM_PCT+delta);
   if(CANVAS_ZOOM_PCT===prev){
-    var ctrl=document.querySelector('.cvZoomControl');
+    var ctrl=document.querySelector('.stijlCanvasWindow:not([data-wizard-preview="1"]) .cvZoomControl');
     if(ctrl){ctrl.classList.remove('at-limit');void ctrl.offsetWidth;ctrl.classList.add('at-limit');setTimeout(function(){ctrl.classList.remove('at-limit');},500);}
   }
 }
@@ -5398,8 +11901,9 @@ function toggleCanvasFlip(){
   CANVAS_CARD_FLIPPED=!CANVAS_CARD_FLIPPED;
   var inner=document.querySelector('.stijlCanvasWindow .cardFaceInner');
   if(inner)inner.classList.toggle('flipped',CANVAS_CARD_FLIPPED);
-  var btn=document.querySelector('.stijlCanvasFlipBtn');
-  if(btn)btn.classList.toggle('sel',CANVAS_CARD_FLIPPED);
+  document.querySelectorAll('.stijlCanvasFlipBtn').forEach(function(btn){
+    btn.classList.toggle('sel',CANVAS_CARD_FLIPPED);
+  });
 }
 function focusShapeEditor(key){
   var sel='.shapeEditor[data-shape-key="'+String(key||'').replace(/"/g,'&quot;')+'"]';
@@ -5538,7 +12042,7 @@ function startShapeDrag(ev,key,idx){
     ev.stopPropagation();
     return;
   }
-  if(key==='cover')COVER_TEXT_SELECTED_MULTI=[];
+  if(key==='cover'){COVER_TEXT_SELECTED_MULTI=[];COVER_TEXT_ACTIVE=-1;COVER_TEXT_DESELECTED=true;COVER_ELEM_SEL=null;}
   setShapeSelection(key,[Number(idx)],Number(idx));
   refreshShapeEditors(key);
   setTimeout(function(){focusShapeEditor(key);},20);
@@ -5660,7 +12164,7 @@ var SHAPE_PAL_ROWS=(function(){
 var STYLE_ICON_QUERY={};
 var STYLE_ICON_SELECTED={};
 var STYLE_ICON_OPEN={};
-var STIJL_SHAPES_OPEN={}; // collapsed per key; default open (undefined = open)
+var STIJL_SHAPES_OPEN={}; // open per key; default open
 var STYLE_ICON_RESULTS={};
 var STYLE_ICON_LOADING={};
 var STYLE_ICON_REQ={};
@@ -5790,7 +12294,6 @@ function fetchStyleIcons(key){
 function buildIconLibraryHtml(key){
   var items=filteredIconLibrary(key);
   var selected=STYLE_ICON_SELECTED[key]||'';
-  var isOpen=!!STYLE_ICON_OPEN[key];
   var q=String(STYLE_ICON_QUERY[key]||'').trim();
   var isLoading=!!STYLE_ICON_LOADING[key];
   var iconButtonHtml=function(item){
@@ -5800,27 +12303,25 @@ function buildIconLibraryHtml(key){
     return '<button class="iconChip'+(selected===item.id?' sel':'')+'" type="button" title="'+esc(item.label)+'" onclick="addStyleIconShape(\''+esc(key)+'\',\''+esc(item.id)+'\')">'+iconHtml+'</button>';
   };
   return '<div class="iconLibrary">'+
-    '<div class="iconLibraryHead"><div class="stijlSectionLabel">Iconen</div><button type="button" aria-label="Icoon toevoegen" title="'+(isOpen?'Sluiten':'Icoon toevoegen')+'" onclick="toggleStyleIconLibrary(\''+esc(key)+'\')" style="border:none;background:transparent;color:#5c8f9f;font:inherit;font-size:21px;font-weight:300;line-height:1;cursor:pointer;padding:0 1px;box-shadow:none;opacity:.88">'+(isOpen?'−':'+')+'</button></div>'+
-    (isOpen
-      ? '<div class="iconGridMini">'+ICON_LIBRARY.slice(0,STYLE_ICON_ROW_LIMIT).map(iconButtonHtml).join('')+'</div>'+
-        '<input class="iconSearch" type="search" value="'+esc(STYLE_ICON_QUERY[key]||'')+'" placeholder="Zoek in het Engels, bv. arrow of heart" oninput="setStyleIconQuery(\''+esc(key)+'\',this.value)">'+
-        (isLoading
-          ? '<div class="iconLoading">Iconen laden…</div>'
-          : q.length>=2
-          ? (items.length
-              ? '<div class="iconGridMini">'+items.slice(0,STYLE_ICON_ROW_LIMIT).map(iconButtonHtml).join('')+'</div>'
-              : '<div class="iconEmpty">Geen iconen gevonden.</div>')
-          : '')
+    '<div class="iconLibraryHead"><div class="shapeLibraryLabel">Iconen</div></div>'+
+    '<div class="iconGridMini">'+ICON_LIBRARY.slice(0,STYLE_ICON_ROW_LIMIT).map(iconButtonHtml).join('')+'</div>'+
+    '<input class="iconSearch" type="search" value="'+esc(STYLE_ICON_QUERY[key]||'')+'" placeholder="Zoek in het Engels, bv. arrow of heart" oninput="setStyleIconQuery(\''+esc(key)+'\',this.value)">'+
+    (isLoading
+      ? '<div class="iconLoading">Iconen laden…</div>'
+      : q.length>=2
+      ? (items.length
+          ? '<div class="iconGridMini">'+items.slice(0,STYLE_ICON_ROW_LIMIT).map(iconButtonHtml).join('')+'</div>'
+          : '<div class="iconEmpty">Geen iconen gevonden.</div>')
       : '')+
   '</div>';
 }
-function toggleStyleIconLibrary(key){
-  STYLE_ICON_OPEN[key]=!STYLE_ICON_OPEN[key];
+function toggleShapesSection(key){
+  toggleStoredOpenState(STIJL_SHAPES_OPEN,key,true);
   refreshShapeEditors(key);
 }
-function toggleShapesSection(key){
-  // undefined/false = open, true = collapsed
-  STIJL_SHAPES_OPEN[key]=STIJL_SHAPES_OPEN[key]===true?false:true;
+function toggleShapeAdjustSection(key){
+  key=key||activeStyleEditKey();
+  toggleStoredOpenState(STYLE_SHAPE_ADJUST_OPEN,key,true);
   refreshShapeEditors(key);
 }
 function setStyleIconQuery(key,val){
@@ -5874,7 +12375,7 @@ function shapeColorPaletteHtml(key,idx,field,current){
   var applyInline='updateShapeField(\''+esc(key)+'\','+idx+',\''+field+'\',this.value)';
   var shapeQuick=SHAPE_PAL_ROWS[0].slice();
   (function(){var ext=BRAND_FAMILIES;for(var _qi=0;_qi<ext.length&&shapeQuick.length<24;_qi+=2){var _fc=ext[_qi];if(_fc&&!shapeQuick.some(function(q){return q.a===_fc.base;}))shapeQuick.push({n:_fc.n,a:_fc.base});}})();
-  var html='<div class="brandCompact">'+
+  var html='<div class="brandCompact brandCompact-shared">'+
     '<div class="brandQSection">'+
       '<div class="brandQuickRow">'+
         '<div class="brandSwsGroup">'+
@@ -5952,16 +12453,17 @@ function colorToneAdjust(baseHex,tone){
     else if(mx===g)h=((b-r)/d+2)/6;
     else h=((r-g)/d+4)/6;
   }
-  var amt=Math.abs(n)/100;
+  var t=n/100;// -1..+1, linear
   var newL,newS;
-  if(n>0){
-    // Lighten: stays within family range — max L=0.93 (light pastel, not white)
-    newL=l+(0.93-l)*Math.sqrt(amt);
-    newS=s*Math.pow(1-amt,0.7);
+  if(t>0){
+    // Lighten linearly: l → 0.84 (less extreme, more midtones)
+    newL=l+(0.84-l)*t;
+    newS=s*(1-t*0.60);
   }else{
-    // Darken: stays within family range — min L=0.25 (dark but recognisable hue, not near-black)
-    newL=l*(1-amt)+0.25*amt;
-    newS=Math.min(1,s+s*(amt*0.4));
+    // Darken linearly: l → 0.26 (less extreme, more midtones)
+    var dt=-t;
+    newL=l-(l-0.26)*dt;
+    newS=Math.min(1,s+(0.45-s)*dt*0.35);
   }
   // HSL → RGB
   function hue2rgb(p,q,t){t=t<0?t+1:t>1?t-1:t;if(t<1/6)return p+(q-p)*6*t;if(t<0.5)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p;}
@@ -5998,9 +12500,21 @@ function setCardBgTone(val){
   var base=cardBgBaseForKey(meta,key);
   maps.base[key]=base;
   maps.tone[key]=tone;
-  setCardBuildMode(key,'self');
+  // Set build mode to 'self' directly without re-rendering the panel (which would destroy the slider during drag)
+  var store=cardBuildStore(meta);
+  store[key]='self';
   markDirty();
   updateStijlPreview();
+}
+function toggleStyleColorCard(key){
+  key=key||activeStyleEditKey();
+  toggleStoredOpenState(STYLE_CARD_COLOR_OPEN,key,true);
+  buildStijlPreserveBg(g('pw'));
+}
+function toggleStyleBgCard(key){
+  key=key||activeStyleEditKey();
+  toggleStoredOpenState(STYLE_BG_CARD_OPEN,key,true);
+  buildStijlPreserveBg(g('pw'));
 }
 function shapeChipIconHtml(layer){
   if(isTextLayerItem(layer))return textIconSvg();
@@ -6009,9 +12523,22 @@ function shapeChipIconHtml(layer){
   }
   return shapeIconSvg((layer&&layer.type)||'circle');
 }
+function buildInfoCoverElementChips(key){
+  if(key!=='cover'||S.activeKind!=='space')return '';
+  var chips=[];
+  var logoHidden=!!(S.d&&S.d.meta&&S.d.meta.infoCoverLogoRemoved);
+  var title=String(infoCoverTitleText()||'').trim()||'Titel';
+  var sub=String(infoCoverSubText()||'').trim()||'Ondertitel';
+  if(!logoHidden){
+    chips.push('<button class="shapeChip shapeChipCoverElem'+(COVER_ELEM_SEL==='logo'?' sel active':'')+'" type="button" title="Logo" aria-label="Logo" onclick="selectCoverElem(\'logo\')"><img src="/assets/logo-icons/masters/master-transparent.svg" alt="" class="shapeChipCoverLogo" aria-hidden="true"></button>');
+  }
+  chips.push('<button class="shapeChip shapeChipCoverElem'+(COVER_ELEM_SEL==='title'?' sel active':'')+'" type="button" title="T1: '+esc(title)+'" aria-label="T1: '+esc(title)+'" onclick="selectCoverElem(\'title\')"><span class="shapeChipCoverLabel">T1</span></button>');
+  chips.push('<button class="shapeChip shapeChipCoverElem'+(COVER_ELEM_SEL==='sub'?' sel active':'')+'" type="button" title="T2: '+esc(sub)+'" aria-label="T2: '+esc(sub)+'" onclick="selectCoverElem(\'sub\')"><span class="shapeChipCoverLabel">T2</span></button>');
+  return chips.join('');
+}
 function buildCoverTextShapeChips(key){
   if(key!=='cover')return '';
-  return coverTextStore().map(function(item,idx){
+  return buildInfoCoverElementChips(key)+coverTextStore().map(function(item,idx){
     var label=String(item.text||'').trim()||('Tekstvak '+(idx+1));
     var isSel=isCoverTextSelected(idx);
     var isAct=currentCoverTextIdx()===idx;
@@ -6022,28 +12549,93 @@ function buildShapeEditorHtml(key){
   var layers=getCardShapeLayers(key);
   var active=getShapeActiveIndex(key);
   var layer=layers[active];
+  var coverTextEditing=!!(key==='cover'&&((typeof currentCoverTextIdx==='function'&&currentCoverTextIdx()>=0)||COVER_ELEM_SEL));
+  if(layers.length&&!layer&&!coverTextEditing){
+    active=ensureShapeActiveIndex(key);
+    layer=layers[active];
+  }
   var target=ensureShapeColorTarget(key);
-  var shapesCollapsed=STIJL_SHAPES_OPEN[key]===true;
-  var shapeToggleBtn='<button type="button" aria-label="'+(shapesCollapsed?'Vormen tonen':'Vormen inklappen')+'" title="'+(shapesCollapsed?'Tonen':'Inklappen')+'" onclick="toggleShapesSection(\''+esc(key)+'\')" style="border:none;background:transparent;color:#5c8f9f;font:inherit;font-size:21px;font-weight:300;line-height:1;cursor:pointer;padding:0 1px;box-shadow:none;opacity:.88">'+(shapesCollapsed?'+':'−')+'</button>';
-  var sectionHead='<div class="stijlSectionLabel" style="display:flex;align-items:center;justify-content:space-between">Vormen'+shapeToggleBtn+'</div>';
-  if(!layers.length||!layer){
-    var emptyContent=
-      ((layers.length||buildCoverTextShapeChips(key))
-        ? '<div class="shapeLayerBar">'+
-            layers.map(function(item,i){var shape=shapeLayerLabel(item);return '<button class="shapeChip'+(i===active?' sel':'')+'" type="button" title="'+esc(shape+' '+(i+1))+'" aria-label="'+esc(shape+' '+(i+1))+'" onclick="setShapeLayerActive(\''+esc(key)+'\','+i+')">'+shapeChipIconHtml(item)+'</button>';}).join('')+
-            buildCoverTextShapeChips(key)+
-          '</div>'+
-          '<div class="shapeGhost">'+(layers.length?'Klik een vormlaag of tekstlaag om verder te werken.':'Klik een tekstlaag om verder te werken.')+'</div>'
-        : '<div class="shapeGhost">Kies een vorm of tekst om te beginnen.</div>')+
-      '<div class="shapeGrid">'+
-        '<div class="shapeField"><div class="shapeTypeBar">'+
-          SHAPE_TYPES.map(function(opt){return '<button class="shapeTypeBtn" type="button" title="'+esc(opt.label)+'" aria-label="'+esc(opt.label)+'" onclick="addShapeLayer(\''+esc(key)+'\',\''+opt.id+'\')">'+shapeIconSvg(opt.id)+'</button>';}).join('')+
-          '<label class="shapeTypeImportBtn" title="SVG vorm toevoegen" aria-label="SVG vorm toevoegen"><span>+</span><input type="file" accept=".svg,image/svg+xml" onchange="importShapeSvgFile(\''+esc(key)+'\',this)"></label>'+
-        '</div></div>'+
+  var shapesOpen=storedOpenState(STIJL_SHAPES_OPEN,key,true);
+  var adjustOpen=storedOpenState(STYLE_SHAPE_ADJUST_OPEN,key,true);
+  var sectionHead=buildSectionCollapseToggleHtml({
+    className:'sectionCollapseBtn sectionCollapseBtnInline',
+    label:'Vormen',
+    onclick:'toggleShapesSection(\''+esc(key)+'\')',
+    open:shapesOpen,
+    ariaLabel:'Vormen'
+  });
+  function buildShapeSubsection(label,open,onclick,body,disabled){
+    return '<div class="shapeSubsection'+(open?'':' is-collapsed')+(disabled?' is-disabled':'')+'">'+
+      buildSectionCollapseToggleHtml({
+        className:'sectionCollapseBtn sectionCollapseBtnSub',
+        label:label,
+        onclick:onclick,
+        open:open,
+        ariaLabel:label
+      })+
+      (open?body:'')+
+    '</div>';
+  }
+  function buildEditBody(adjustMarkup,colorMarkup){
+    return '<div class="shapeEditCluster">'+
+      adjustMarkup+
+      '<div class="shapeStaticSection">'+
+        '<div class="shapeLibraryLabel">Kleur</div>'+
+        colorMarkup+
       '</div>'+
+    '</div>';
+  }
+  var emptyAdjustBody=
+      '<div class="shapeGhost shapeGhostCompact">Selecteer eerst een vorm.</div>'+
+      '<div class="shapeSliderRow">'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Grootte</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:42%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Rotatie</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:56%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+      '</div>';
+  var emptyColorBody=
+      '<div class="shapePaintRow is-disabled">'+
+        '<div class="shapePaintTabs is-disabled">'+
+          '<button class="shapePaintBtn fill sel" type="button" tabindex="-1" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
+          '<button class="shapePaintBtn stroke" type="button" tabindex="-1" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="shapeSwRow shapeSwRowDisabled">'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#ffffff"></button>'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#CFE6DF"></button>'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#C9D8F7"></button>'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#DED8F3"></button>'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#F7E2CC"></button>'+
+        '<button class="shapeSw is-disabled" type="button" tabindex="-1" aria-hidden="true" style="background:#F4E099"></button>'+
+      '</div>'+
+      '<div class="shapeSliderRow">'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Kleurtoon</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:48%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Opacity</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:72%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+      '</div>';
+  var emptyEditSection=buildShapeSubsection('Bewerken',adjustOpen,'toggleShapeAdjustSection(\''+esc(key)+'\')',buildEditBody(emptyAdjustBody,emptyColorBody),true);
+  if(!layers.length||!layer){
+    var _textChips=buildCoverTextShapeChips(key);
+    var _shapeChips=layers.map(function(item,i){var shape=shapeLayerLabel(item);return '<button class="shapeChip'+(i===active?' sel':'')+'" type="button" title="'+esc(shape+' '+(i+1))+'" aria-label="'+esc(shape+' '+(i+1))+'" onclick="setShapeLayerActive(\''+esc(key)+'\','+i+')">'+shapeChipIconHtml(item)+'</button>';}).join('');
+    var _hasChips=!!(layers.length||_textChips);
+    var _shapeTypeBar='<div class="shapeGrid"><div class="shapeField"><div class="shapeTypeBar">'+
+      SHAPE_TYPES.map(function(opt){return '<button class="shapeTypeBtn" type="button" title="'+esc(opt.label)+'" aria-label="'+esc(opt.label)+'" onclick="addShapeLayer(\''+esc(key)+'\',\''+opt.id+'\')">'+shapeIconSvg(opt.id)+'</button>';}).join('')+
+      '<label class="shapeTypeImportBtn" title="SVG vorm toevoegen" aria-label="SVG vorm toevoegen"><span>+</span><input type="file" accept=".svg,image/svg+xml" onchange="importShapeSvgFile(\''+esc(key)+'\',this)"></label>'+
+    '</div></div></div>';
+    var _selTextIdx=(key==='cover'?getCoverTextSelectedIndices():[]);
+    var _coverElemSel=(key==='cover'&&COVER_ELEM_SEL);
+    var _emptyDeleteBtn=(_coverElemSel
+      ?'<button class="shapeLayerDelete" type="button" title="Verwijderen" onclick="removeSelectedCoverElem()"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>'
+      :_selTextIdx.length?'<button class="shapeLayerDelete" type="button" title="'+((_selTextIdx.length>1)?'Geselecteerde tekstvakken verwijderen':'Tekstvak verwijderen')+'" onclick="removeSelectedShapeLayers(\''+esc(key)+'\')"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>':'');
+    var emptyContent=
+      '<div class="shapeActiveWrap">'+
+        '<div class="shapeActiveLabel">Actieve vormen</div>'+
+        (_hasChips
+          ? '<div class="shapeLayerBar">'+_shapeChips+_textChips+_emptyDeleteBtn+'</div>'
+          : '<div class="shapeGhost">Kies een vorm of tekst om te beginnen.</div>')+
+      '</div>'+
+      _shapeTypeBar+
       buildIconLibraryHtml(key)+
+      emptyEditSection+
       '<div class="shapeEmptyState"></div>';
-    return '<div class="stijlShapes">'+sectionHead+(shapesCollapsed?'':emptyContent)+'</div>';
+    return '<div class="stijlShapes">'+sectionHead+(shapesOpen?emptyContent:'')+'</div>';
   }
   var fillColor=layer?(layer.fill||'#CFE6DF'):'#CFE6DF';
   var strokeColor=layer?(layer.stroke||'#ffffff'):'#ffffff';
@@ -6056,8 +12648,48 @@ function buildShapeEditorHtml(key){
   var selectedTextIndices=(key==='cover'?getCoverTextSelectedIndices():[]);
   var multiSelected=selectedIndices.length>1;
   var hasGroupSelection=selectedIndices.some(function(idx){return isGroupLayer(layers[idx]);});
-  var hasTextSelection=!!selectedTextIndices.length;
   var deleteBtn=layer?'<button class="shapeLayerDelete" type="button" title="'+(multiSelected?'Geselecteerde vormen verwijderen':'Vorm verwijderen')+'" aria-label="'+(multiSelected?'Geselecteerde vormen verwijderen':'Vorm verwijderen')+'" onclick="removeSelectedShapeLayers(\''+esc(key)+'\')"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg></button>':'';
+  var groupAdjustBody=
+      '<div class="shapeGhost shapeGhostCompact">Pas dit aan na degroeperen.</div>'+
+      '<div class="shapeSliderRow">'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Grootte</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:42%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+        '<div class="shapeSliderHRow is-disabled"><span class="shapeSliderHLbl">Rotatie</span><div class="shapeSliderStub"><span class="shapeSliderStubFill" style="width:56%"></span></div><span class="shapeSliderValPill is-disabled">-</span></div>'+
+      '</div>';
+  var groupColorBody=
+      '<div class="shapeGhost shapeGhostCompact">Pas dit aan na degroeperen.</div>'+
+      emptyColorBody;
+  var adjustBody=
+      '<div class="shapeSliderRow">'+
+        '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Grootte</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(sizeValue,12,120)+'%" type="range" min="12" max="120" step="1" value="'+sizeValue+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'\');updateShapeField(\''+esc(key)+'\','+active+',\'size\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(sizeValue,'')+'</span></div>'+
+        '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Rotatie</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(rotateValue,-180,180)+'%" type="range" min="-180" max="180" step="1" value="'+rotateValue+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'°\');updateShapeField(\''+esc(key)+'\','+active+',\'rotate\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(rotateValue,'°')+'</span></div>'+
+      '</div>';
+  var colorBody=
+      '<div class="shapePaintRow" style="display:flex;align-items:center;gap:8px;margin-bottom:0">'+
+        '<div class="shapePaintTabs">'+
+          '<button class="shapePaintBtn fill'+(target==='fill'?' sel':'')+'" type="button" title="Vulling" aria-label="Vulling" onclick="setShapeColorTarget(\''+esc(key)+'\',\'fill\')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
+          '<button class="shapePaintBtn stroke'+(target==='stroke'?' sel':'')+'" type="button" title="Outline" aria-label="Outline" onclick="setShapeColorTarget(\''+esc(key)+'\',\'stroke\')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
+        '</div>'+
+        (target==='stroke'
+          ? '<select class="fontSizeSel shapeOutlineSel" aria-label="Dikte" onchange="updateShapeField(\''+esc(key)+'\','+active+',\'strokeWidth\',this.value)">'+
+              ['0','1','2','3','4','6','8'].map(function(v){return '<option value="'+v+'"'+(String(layer.strokeWidth||0)===v?' selected':'')+'>'+v+'px</option>';}).join('')+
+            '</select>'
+          : '')+
+      '</div>'+
+      shapeColorPaletteHtml(key,active,target,target==='stroke'?strokeColor:fillColor)+
+      '<div class="shapeSliderRow">'+
+        '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Kleurtoon</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(target==='stroke'?strokeTone:fillTone,-100,100)+'%" type="range" min="-100" max="100" step="1" value="'+(target==='stroke'?strokeTone:fillTone)+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml((this.value>0?\'+\':\'\')+this.value,\'\');setShapeColorTone(\''+esc(key)+'\','+active+',\''+target+'\',this.value,true)" onchange="setShapeColorTone(\''+esc(key)+'\','+active+',\''+target+'\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(((target==='stroke'?strokeTone:fillTone)>0?'+':'')+(target==='stroke'?strokeTone:fillTone),'')+'</span></div>'+
+        '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Opacity</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(currentOpacity,0,100)+'%" type="range" min="0" max="100" step="1" value="'+currentOpacity+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'%\');updateShapeField(\''+esc(key)+'\','+active+',\''+(target==='stroke'?'strokeOpacity':'fillOpacity')+'\',this.value/100)"><span class="shapeSliderValPill">'+sliderValueHtml(currentOpacity,'%')+'</span></div>'+
+      '</div>';
+  var editSection=buildShapeSubsection(
+    'Bewerken',
+    adjustOpen,
+    'toggleShapeAdjustSection(\''+esc(key)+'\')',
+    buildEditBody(
+      hasGroupSelection?groupAdjustBody:adjustBody,
+      hasGroupSelection?groupColorBody:colorBody
+    ),
+    hasGroupSelection
+  );
   var layerContent=
     '<div class="shapeActiveWrap">'+
       '<div class="shapeActiveLabel">Actieve vormen</div>'+
@@ -6086,29 +12718,10 @@ function buildShapeEditorHtml(key){
         SHAPE_TYPES.map(function(opt){return '<button class="shapeTypeBtn'+(layer&&opt.id===layer.type?' sel':'')+'" type="button" title="'+esc(opt.label)+'" aria-label="'+esc(opt.label)+'" onclick="selectShapeType(\''+esc(key)+'\','+active+',\''+opt.id+'\')">'+shapeIconSvg(opt.id)+'</button>';}).join('')+
         '<label class="shapeTypeImportBtn" title="SVG vorm toevoegen" aria-label="SVG vorm toevoegen"><span>+</span><input type="file" accept=".svg,image/svg+xml" onchange="importShapeSvgFile(\''+esc(key)+'\',this)"></label>'+
       '</div></div>'+
-      (layer&&!hasGroupSelection?
-        '<div class="shapePaintRow" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'+
-          '<div class="shapePaintTabs">'+
-            '<button class="shapePaintBtn fill'+(target==='fill'?' sel':'')+'" type="button" title="Vulling" aria-label="Vulling" onclick="setShapeColorTarget(\''+esc(key)+'\',\'fill\')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
-            '<button class="shapePaintBtn stroke'+(target==='stroke'?' sel':'')+'" type="button" title="Outline" aria-label="Outline" onclick="setShapeColorTarget(\''+esc(key)+'\',\'stroke\')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12Z"/></svg></button>'+
-          '</div>'+
-          (target==='stroke'
-            ? '<select class="fontSizeSel shapeOutlineSel" aria-label="Dikte" onchange="updateShapeField(\''+esc(key)+'\','+active+',\'strokeWidth\',this.value)">'+
-                ['0','1','2','3','4','6','8'].map(function(v){return '<option value="'+v+'"'+(String(layer.strokeWidth||0)===v?' selected':'')+'>'+v+'px</option>';}).join('')+
-              '</select>'
-            : '')+
-        '</div>'+
-        shapeColorPaletteHtml(key,active,target,target==='stroke'?strokeColor:fillColor)+
-        '<div class="shapeSliderRow" style="margin-top:12px">'+
-          '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Kleurtoon</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(target==='stroke'?strokeTone:fillTone,-100,100)+'%" type="range" min="-100" max="100" step="1" value="'+(target==='stroke'?strokeTone:fillTone)+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml((this.value>0?\'+\':\'\')+this.value,\'\');setShapeColorTone(\''+esc(key)+'\','+active+',\''+target+'\',this.value,true)" onchange="setShapeColorTone(\''+esc(key)+'\','+active+',\''+target+'\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(((target==='stroke'?strokeTone:fillTone)>0?'+':'')+(target==='stroke'?strokeTone:fillTone),'')+'</span></div>'+
-          '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Opacity</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(currentOpacity,0,100)+'%" type="range" min="0" max="100" step="1" value="'+currentOpacity+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'%\');updateShapeField(\''+esc(key)+'\','+active+',\''+(target==='stroke'?'strokeOpacity':'fillOpacity')+'\',this.value/100)"><span class="shapeSliderValPill">'+sliderValueHtml(currentOpacity,'%')+'</span></div>'+
-          '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Grootte</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(sizeValue,12,120)+'%" type="range" min="12" max="120" step="1" value="'+sizeValue+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'\');updateShapeField(\''+esc(key)+'\','+active+',\'size\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(sizeValue,'')+'</span></div>'+
-          '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Rotatie</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(rotateValue,-180,180)+'%" type="range" min="-180" max="180" step="1" value="'+rotateValue+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml(this.value,\'°\');updateShapeField(\''+esc(key)+'\','+active+',\'rotate\',this.value)"><span class="shapeSliderValPill">'+sliderValueHtml(rotateValue,'°')+'</span></div>'+
-        '</div>'
-      :'')+
-    '</div>'+
-    buildIconLibraryHtml(key);
-  return '<div class="stijlShapes">'+sectionHead+(shapesCollapsed?'':layerContent)+'</div>';
+      buildIconLibraryHtml(key)+
+      editSection+
+    '</div>';
+  return '<div class="stijlShapes">'+sectionHead+(shapesOpen?layerContent:'')+'</div>';
 }
 function refreshShapeEditors(key){
   Array.prototype.slice.call(document.querySelectorAll('.shapeEditor[data-shape-key="'+key.replace(/"/g,'&quot;')+'"]')).forEach(function(el){
@@ -6180,6 +12793,7 @@ function setShapeLayerActive(key,idx,ev){
     if(key==='cover'){
       COVER_TEXT_SELECTED_MULTI=[];
       COVER_TEXT_ACTIVE=-1;
+      COVER_TEXT_DESELECTED=true;
     }
     setShapeSelection(key,[Number(idx)],Number(idx));
   }
@@ -6187,14 +12801,12 @@ function setShapeLayerActive(key,idx,ev){
   startShapeSelTimer(key);
   if(key==='cover')patchCoverTextTargets();
   refreshShapeEditors(key);
-  setTimeout(function(){focusShapeEditor(key);},20);
 }
 function selectShapeType(key,idx,type){
   if(idx<0){addShapeLayer(key,type);return;}
   setShapeSelection(key,[Number(idx)],Number(idx));
   updateShapeField(key,idx,'type',type);
   syncShapeColorTargetForLayer(key,getCardShapeLayers(key)[Number(idx)]);
-  setTimeout(function(){focusShapeEditor(key);},20);
 }
 function moveSelectedShapeLayers(key,dir){
   key=key||activeStyleEditKey();
@@ -6231,7 +12843,6 @@ function moveSelectedShapeLayers(key,dir){
   markDirty();
   refreshShapeEditors(key);
   startShapeSelTimer(key);
-  setTimeout(function(){focusShapeEditor(key);},20);
 }
 var _shapeDrag=null;
 function dragShapeChip(ev,phase,key,idx){
@@ -6508,10 +13119,12 @@ function buildSharedCardEditor(opts){
   opts=opts||{};
   var m=S.d.meta||{};
   var previewKey=opts.previewKey||'algemeen';
+  var designKey=opts.designKey||previewKey;
   var layoutMode=opts.layoutMode||'stack';
+  var viewerOnlyPreview=!!opts.viewerOnlyPreview;
   // Use a local copy so the while-loop fill never mutates the real store
   var coverBlocks=coverTextStore().slice();
-  if(previewKey==='cover'){
+  if(designKey==='cover'){
     while(coverBlocks.length<2){
       var block=makeCoverTextBlock(coverBlocks.length);
       if(coverBlocks.length===0)block.text=String(m.title||'');
@@ -6519,23 +13132,31 @@ function buildSharedCardEditor(opts){
       coverBlocks.push(block);
     }
   }
-  var activeCoverBlock=previewKey==='cover'?(coverBlocks[currentCoverTextIdx()]||coverBlocks[0]||null):null;
-  var curFont=previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.font||'IBM Plex Sans'):((m.cssVars||{})['--pk-font']||'IBM Plex Sans');
-  var curFontSize=previewKey==='cover'&&activeCoverBlock?String(activeCoverBlock.size||12):normFontSize((m.cssVars||{})['--pk-font-size']||'12');
-  var textColor=previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.color||'#1a1a2e'):((m.cssVars||{})['--pk-set-text']||'#1a1a2e');
-  var cardBg=cardBgForKey(m,previewKey);
-  var align=previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.align||'left'):((m.cssVars||{})['--pk-text-align']||(opts.infoRichCe?'left':'center'));
-  var valign=previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.valign||'center'):((m.cssVars||{})['--pk-text-valign']||'center');
-  var textWeight=opts.forceBold?'bold':(previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.weight||'regular'):(((m.cssVars||{})['--pk-font-weight'])||'regular'));
-  var textItalic=previewKey==='cover'&&activeCoverBlock?!!activeCoverBlock.italic:(((m.cssVars||{})['--pk-font-italic'])==='1');
-  var textUnderline=previewKey==='cover'&&activeCoverBlock?!!activeCoverBlock.underline:(((m.cssVars||{})['--pk-font-underline'])==='1');
-  var textBgMode=previewKey==='cover'&&activeCoverBlock?(activeCoverBlock.bg||''):(((m.cssVars||{})['--pk-text-bg-color'])||'');
-  var letterSpacing=String((m.cssVars||{})['--pk-letter-spacing']||'0');
-  var lineHeight=String((m.cssVars||{})['--pk-line-height']||'1.4');
-  var accentColor=((m.cssVars||{})['--pk-set-accent']||'#CFE6DF');
+  var editorCv=styleCssVarsForKey(m,designKey);
+  var activeCoverBlock=designKey==='cover'?(coverBlocks[currentCoverTextIdx()]||coverBlocks[0]||null):null;
+  var curFont=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.font||'IBM Plex Sans'):((editorCv||{})['--pk-font']||'IBM Plex Sans');
+  var curFontSize=designKey==='cover'&&activeCoverBlock?String(activeCoverBlock.size||12):normFontSize((editorCv||{})['--pk-font-size']||'12');
+  var textColor=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.color||'#1a1a2e'):((editorCv||{})['--pk-set-text']||'#1a1a2e');
+  var editorCardBg=cardBgForKey(m,designKey);
+  var previewCardBg=cardBgForKey(m,previewKey);
+  var align=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.align||'center'):((editorCv||{})['--pk-text-align']||'center');
+  var valign=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.valign||'center'):((editorCv||{})['--pk-text-valign']||'center');
+  var textWeight=opts.forceBold?'bold':(designKey==='cover'&&activeCoverBlock?(activeCoverBlock.weight||'regular'):(((editorCv||{})['--pk-font-weight'])||'regular'));
+  var textItalic=designKey==='cover'&&activeCoverBlock?!!activeCoverBlock.italic:(((editorCv||{})['--pk-font-italic'])==='1');
+  var textUnderline=designKey==='cover'&&activeCoverBlock?!!activeCoverBlock.underline:(((editorCv||{})['--pk-font-underline'])==='1');
+  var textBgMode=designKey==='cover'&&activeCoverBlock?(activeCoverBlock.bg||''):(((editorCv||{})['--pk-text-bg-color'])||'');
+  var letterSpacing=String((editorCv||{})['--pk-letter-spacing']||'0');
+  var lineHeight=String((editorCv||{})['--pk-line-height']||'1.4');
+  var accentColor=((editorCv||{})['--pk-set-accent']||'#CFE6DF');
   var doubleSided=(m.doubleSided!==false);
   var backMode=(m.backMode||'mirror');
-  var mode=cardBuildModeForKey(m,previewKey);
+  var backModeUi=currentBackModeForUi();
+  var backSurfaceUi=currentBackEditSurfaceForUi();
+  var backScope=backStyleScope(m);
+  var editingBackSurface=(backMode==='blank'&&currentBackEditSurfaceActual()==='back');
+  var activeBackDesignKey=opts.backDesignKey||currentBackDesignKey(previewKey);
+  var canUseCardBackScope=previewKey!=='cover'&&((((S.d||{}).questions||{})[previewKey])||[]).length>0;
+  var mode=cardBuildModeForKey(m,designKey);
   var alignIcons={
     left:'<svg viewBox="0 0 16 16"><line x1="2.5" y1="4" x2="13.5" y2="4"/><line x1="2.5" y1="8" x2="10" y2="8"/><line x1="2.5" y1="12" x2="12" y2="12"/></svg>',
     center:'<svg viewBox="0 0 16 16"><line x1="2.5" y1="4" x2="13.5" y2="4"/><line x1="4" y1="8" x2="12" y2="8"/><line x1="3" y1="12" x2="13" y2="12"/></svg>',
@@ -6546,7 +13167,11 @@ function buildSharedCardEditor(opts){
     center:'<svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="1.5" fill="none" opacity=".35"/><line x1="4.5" y1="7" x2="11.5" y2="7"/><line x1="4.5" y1="9.5" x2="9.5" y2="9.5" opacity=".45"/></svg>',
     bottom:'<svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="1.5" fill="none" opacity=".35"/><line x1="4.5" y1="9.5" x2="11.5" y2="9.5"/><line x1="4.5" y1="12" x2="9.5" y2="12" opacity=".45"/></svg>'
   };
-  var previewCore=sharedCardPreviewHtml({
+  var isSpacePreview=S.activeKind==='space';
+  var isSpaceSitePreview=isSpacePreview&&!opts.infoRichCe;
+  var previewCore=isSpaceSitePreview
+    ?spaceSitePreviewHtml()
+    :sharedCardPreviewHtml({
         wrapId:opts.wrapId||'stijlCardPrevWrap',
         wrapClass:opts.wrapClass||'stijlCardPrevWrap',
         faceId:opts.faceId||'stijlCardFace',
@@ -6558,9 +13183,10 @@ function buildSharedCardEditor(opts){
         frontTxt:(opts.frontTxt!=null?opts.frontTxt:(opts.sampleTxt||'')),
         backTxt:opts.backTxt||'',
         flipped:!!opts.flipped,
-        cardBg:cardBg,
-        emptyBg:(opts.emptyBg||cardBg),
-        forceNoImage:mode==='self',
+        cardBg:previewCardBg,
+        emptyBg:(opts.emptyBg||previewCardBg),
+        forceNoImage:!!opts.forceNoImage||(String(designKey||'').indexOf('__back')!==0&&mode==='self'),
+        backDesignKey:activeBackDesignKey,
         showCoverTexts:previewKey==='cover',
         suppressEmptyFrontHint:!!opts.suppressEmptyFrontHint,
         infoRichCe:!!opts.infoRichCe,
@@ -6568,58 +13194,210 @@ function buildSharedCardEditor(opts){
         showInfoMidTitle:!!opts.showInfoMidTitle,
         infoMidTitleKey:opts.infoMidTitleKey||'',
         infoMidTitleText:opts.infoMidTitleText!=null?opts.infoMidTitleText:'',
+        viewerOnlyPreview:viewerOnlyPreview,
         wrapStyle:opts.wrapStyle||''
       });
-  var previewHintHtml=(opts.previewHint===false?'':'<div class="stijlPreviewHint">'+esc(stylePreviewDisplayFile(opts.previewHint||opts.previewFile||'kaart.svg'))+'</div>');
+  var sharedPreviewShell=window.PK&&window.PK.sharedPreviewShell;
+  var canUseSharedPreviewShell=!!(sharedPreviewShell
+    && typeof sharedPreviewShell.renderCanvasPreviewShell==='function'
+    && typeof sharedPreviewShell.buildTopbarHtml==='function'
+    && typeof sharedPreviewShell.buildBackbarHtml==='function'
+    && typeof sharedPreviewShell.buildZoomControlHtml==='function');
+  var previewHintHtml=(opts.previewHint===false||isSpaceSitePreview?'':'<div class="stijlPreviewHint">'+esc(stylePreviewDisplayFile(opts.previewHint||opts.previewFile||'kaart.svg'))+'</div>');
   var nightMode=previewNightMode()||adminNightMode();
   var gridMode=previewGridMode();
-  var nightIcon=nightMode
-    ? '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.9 1.8a5.8 5.8 0 1 0 3.3 10.7 6.2 6.2 0 1 1-3.3-10.7Z"></path></svg>'
-    : '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.4"></circle><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"></path></svg>';
+  var nightIcon=previewNightToggleIconHtml(nightMode);
   var gridIcon='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 2.5v11M10.5 2.5v11M2.5 5.5h11M2.5 10.5h11"></path><rect x="2.5" y="2.5" width="11" height="11" rx="2"></rect></svg>';
-  var flipIcon='<svg class="flipIconStd" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6.5h6a4.75 4.75 0 0 1 0 9.5H6.75"/><path d="M9 4 5.25 6.75 9 9.5"/></svg>';
-  var zoomCtrl='<div class="cvZoomControl">'+
-    '<button class="cvZoomBtn" type="button" onclick="stepCanvasZoom(-25)" title="Uitzoomen">−</button>'+
-    '<button class="cvZoomPct" type="button" onclick="resetCanvasZoom()" title="Telefoon-formaat (100%)">'+CANVAS_ZOOM_PCT+'%</button>'+
-    '<button class="cvZoomBtn" type="button" onclick="stepCanvasZoom(25)" title="Inzoomen">+</button>'+
-  '</div>';
-  var nightToggleHtml='<div class="stijlCanvasTopbar">'+
-    zoomCtrl+
-    '<div class="stijlCanvasTopbarRight">'+
-      '<button class="stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" type="button" aria-label="Kaart omdraaien" title="Kaart omdraaien" onclick="toggleCanvasFlip()">'+flipIcon+'</button>'+
-      '<button class="stijlCanvasGridBtn'+(gridMode?' sel':'')+'" type="button" aria-label="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" title="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" onclick="togglePreviewGrid()">'+gridIcon+'</button>'+
-      '<button class="stijlCanvasNightBtn'+(nightMode?' sel':'')+'" type="button" aria-label="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" title="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" onclick="togglePreviewNight()">'+nightIcon+'</button>'+
-    '</div>'+
-  '</div>';
-  var previewBackToolbarHtml=(!opts.infoRichCe&&doubleSided)
-    ?'<div class="stijlCanvasBackbar">'+
-        '<div class="stijlCanvasBackbarLabel">Achterkant</div>'+
-        '<div class="stijlCanvasBackbarGroup">'+
-          '<button class="stijlBackModeBtn'+(backMode==='mirror'?' sel':'')+'" type="button" onclick="setBackMode(\'mirror\')" title="Zelfde ontwerp">Zelfde</button>'+
-          '<button class="stijlBackModeBtn'+(backMode==='reflect'?' sel':'')+'" type="button" onclick="setBackMode(\'reflect\')" title="Zelfde ontwerp gespiegeld">Gespiegeld</button>'+
-          '<button class="stijlBackModeBtn'+(backMode==='blank'?' sel':'')+'" type="button" onclick="setBackMode(\'blank\')" title="Aparte achterkant">Apart</button>'+
-        '</div>'+
-      '</div>'
+  var flipIcon='<span class="flipGlyph" aria-hidden="true">↻</span>';
+  var zoomCtrl=canUseSharedPreviewShell
+    ? sharedPreviewShell.buildZoomControlHtml({
+        zoomPct:CANVAS_ZOOM_PCT,
+        zoomOutAttrText:' onclick="stepCanvasZoom(-25)"',
+        resetAttrText:' onclick="resetCanvasZoom()"',
+        zoomInAttrText:' onclick="stepCanvasZoom(25)"'
+      })
+    : buildCanvasZoomControlHtml();
+  var backArrow='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>';
+  var fwdArrow='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>';
+  var homeIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>';
+  // Shared nav pill: ← ⌂ →  no separators, clean pill
+  var isViewerFocusMode=viewerOnlyPreview&&getViewCardsBrowserMode()==='focus';
+  var hasInfoNav=!!(opts.infoRichCe&&infoPreviewNavKeys().length>1);
+  var navBackFn=isViewerFocusMode?'viewPreviewNavBack()':(isSpaceSitePreview?'previewNavBack()':(opts.infoRichCe?'infoPreviewNavBack()':'cardPreviewNavBack()'));
+  var navHomeFn=isViewerFocusMode?'exitViewCardsFocusMode()':(isSpaceSitePreview?'previewNavHome()':(opts.infoRichCe?'infoPreviewNavHome()':'cardPreviewNavHome()'));
+  var navFwdFn=isViewerFocusMode?'viewPreviewNavForward()':(isSpaceSitePreview?'previewNavForward()':(opts.infoRichCe?'infoPreviewNavForward()':'cardPreviewNavForward()'));
+  var navHomeTitle=isViewerFocusMode?'Terug naar overzicht':(isSpaceSitePreview?'Overzicht':(opts.infoRichCe?'Cover':'Eerste kaart'));
+  var navCenterHtml;
+  if(isViewerFocusMode){
+    navCenterHtml='<button class="stijlCanvasNightBtn previewNavPosBtn" type="button" title="'+navHomeTitle+'" onclick="'+navHomeFn+'"><span class="previewNavPosText">Overzicht</span></button>';
+  }else if(!isSpaceSitePreview&&!opts.infoRichCe){
+    var _curKey=STYLE_PREVIEW_KEY||'cover';
+    if(_curKey==='cover'){
+      navCenterHtml='<button class="stijlCanvasNightBtn previewNavPosBtn" type="button" title="'+navHomeTitle+'" onclick="'+navHomeFn+'"><span class="previewNavPosText">Cover</span></button>';
+    }else{
+      var _qs=(S.d&&S.d.questions&&S.d.questions[_curKey])||[];
+      var _idx=selectedQuestionIndex(_curKey);
+      var _total=_qs.length||1;
+      var _pos=(Math.min(_idx,_total-1)+1)+' / '+_total;
+      navCenterHtml='<button class="stijlCanvasNightBtn previewNavPosBtn" type="button" title="'+navHomeTitle+'" onclick="'+navHomeFn+'"><span class="previewNavPosText">'+_pos+'</span></button>';
+    }
+  }else{
+    navCenterHtml='<button class="stijlCanvasNightBtn" type="button" title="'+navHomeTitle+'" onclick="'+navHomeFn+'">'+homeIcon+'</button>';
+  }
+  var previewNavPillHtml=(isViewerFocusMode?'':((!opts.infoRichCe||hasInfoNav)
+    ?('<div class="previewTopPill previewNavPill">'+
+        '<button class="stijlCanvasNightBtn" type="button" title="Vorige" onclick="'+navBackFn+'">'+backArrow+'</button>'+
+        navCenterHtml+
+        '<button class="stijlCanvasNightBtn" type="button" title="Volgende" onclick="'+navFwdFn+'">'+fwdArrow+'</button>'+
+      '</div>')
+    :'<div></div>'));
+  var previewNightBtnHtml='<button class="stijlCanvasNightBtn'+(nightMode?' sel':'')+'" data-preview-night-toggle="1" type="button" aria-label="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" title="'+(nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten')+'" onclick="togglePreviewNight()">'+nightIcon+'</button>';
+  var previewActionPillHtml='<div class="previewTopPill">'+
+    (isSpaceSitePreview
+      ?previewNightBtnHtml
+      :(isViewerFocusMode
+        ?''
+        :((doubleSided?('<button class="stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" type="button" aria-label="Kaart omdraaien" title="Kaart omdraaien" onclick="toggleCanvasFlip()">'+flipIcon+'</button>'+
+          '<div class="previewTopPillSep"></div>'):'')+
+          '<button class="stijlCanvasGridBtn'+(gridMode?' sel':'')+'" type="button" aria-label="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" title="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" onclick="togglePreviewGrid()">'+gridIcon+'</button>'+
+          previewNightBtnHtml)))+
+    '</div>';
+  var nightToggleHtml=isViewerFocusMode
+    ?''
+    :('<div class="stijlCanvasTopbar">'+
+        zoomCtrl+
+        previewNavPillHtml+
+        '<div class="stijlCanvasTopbarRight">'+previewActionPillHtml+'</div>'+
+      '</div>');
+  if(canUseSharedPreviewShell){
+    nightToggleHtml=isViewerFocusMode
+      ?''
+      :sharedPreviewShell.buildTopbarHtml({
+          zoom:{
+            zoomPct:CANVAS_ZOOM_PCT,
+            zoomOutAttrText:' onclick="stepCanvasZoom(-25)"',
+            resetAttrText:' onclick="resetCanvasZoom()"',
+            zoomInAttrText:' onclick="stepCanvasZoom(25)"'
+          },
+          nav:isViewerFocusMode
+            ?{enabled:false}
+            :((!opts.infoRichCe||hasInfoNav)
+              ?{
+                  centerHtml:navCenterHtml,
+                  backAttrText:' onclick="'+navBackFn+'"',
+                  forwardAttrText:' onclick="'+navFwdFn+'"'
+                }
+              :{
+                  enabled:false,
+                  placeholderHtml:'<div></div>'
+                }),
+          actions:isSpaceSitePreview
+            ?{
+                showNight:true,
+                nightSelected:nightMode,
+                nightAttrText:' data-preview-night-toggle="1" onclick="togglePreviewNight()"'
+              }
+            :{
+                showFlip:!isViewerFocusMode&&doubleSided,
+                flipSelected:CANVAS_CARD_FLIPPED,
+                flipAttrText:' onclick="toggleCanvasFlip()"',
+                showGrid:!isViewerFocusMode,
+                gridSelected:gridMode,
+                gridAttrText:' onclick="togglePreviewGrid()"',
+                showNight:true,
+                nightSelected:nightMode,
+                nightAttrText:' data-preview-night-toggle="1" onclick="togglePreviewNight()"'
+              }
+        });
+  }
+  var showPreviewBackToolbarExtra=shouldShowBackExtraControls(backModeUi);
+  var previewBackToolbarExtraHtml=
+    '<div class="previewEditSurfaceStack'+(showPreviewBackToolbarExtra?' is-visible':' is-hidden')+'"'+(showPreviewBackToolbarExtra?'':' aria-hidden="true"')+'>'+
+      '<div class="previewEditSurfacePill previewEditSurfacePill-surface">'+
+        '<button class="previewEditSurfaceBtn'+(backSurfaceUi!=='back'?' sel':'')+'" data-back-edit-surface="front" type="button" title="Voorkant ontwerpen" onclick="setBackEditSurface(\'front\')"'+(showPreviewBackToolbarExtra?'':' tabindex="-1"')+'>Voor</button>'+
+        '<button class="previewEditSurfaceBtn'+(backSurfaceUi==='back'?' sel':'')+'" data-back-edit-surface="back" type="button" title="Achterkant ontwerpen" onclick="setBackEditSurface(\'back\')"'+(showPreviewBackToolbarExtra?'':' tabindex="-1"')+'>Achter</button>'+
+      '</div>'+
+      '<div class="previewEditSurfacePill previewEditSurfacePill-scope">'+
+        '<button class="previewEditSurfaceBtn'+(backScope!=='card'?' sel':'')+'" type="button" title="Pas het achterkantontwerp toe op de hele set" onclick="setBackDesignScope(\'set\')"'+(showPreviewBackToolbarExtra?'':' tabindex="-1"')+'>Hele set</button>'+
+        '<button class="previewEditSurfaceBtn'+(backScope==='card'?' sel':'')+(canUseCardBackScope?'':' is-disabled')+'" type="button" title="'+(canUseCardBackScope?'Pas het achterkantontwerp alleen toe op deze kaart':'Beschikbaar zodra je een vraag selecteert')+'" onclick="'+(canUseCardBackScope?'setBackDesignScope(\'card\')':'return false')+'"'+(canUseCardBackScope?'':' aria-disabled="true"')+((showPreviewBackToolbarExtra&&canUseCardBackScope)?'':' tabindex="-1"')+'>Deze kaart</button>'+
+      '</div>'+
+    '</div>';
+  var previewBackToolbarHtml=(!viewerOnlyPreview&&!isSpaceSitePreview&&!opts.infoRichCe&&doubleSided)
+    ?(canUseSharedPreviewShell
+      ?sharedPreviewShell.buildBackbarHtml({
+          enabled:true,
+          label:'Achterkant',
+          modes:[
+            {
+              label:'Zelfde',
+              selected:backModeUi==='mirror',
+              title:'Zelfde ontwerp',
+              attrText:' data-back-mode="mirror" onclick="setBackMode(\'mirror\')"'
+            },
+            {
+              label:'Gespiegeld',
+              selected:backModeUi==='reflect',
+              title:'Zelfde ontwerp gespiegeld',
+              attrText:' data-back-mode="reflect" onclick="setBackMode(\'reflect\')"'
+            },
+            {
+              label:'Eigen',
+              selected:backModeUi==='blank',
+              title:'Eigen achterkant',
+              attrText:' data-back-mode="blank" onclick="setBackMode(\'blank\')"'
+            }
+          ],
+          extraHtml:previewBackToolbarExtraHtml
+        })
+      :'<div class="stijlCanvasBackbar">'+
+          '<div class="stijlCanvasBackbarLabel">Achterkant</div>'+
+          '<div class="stijlCanvasBackbarGroup">'+
+            '<button class="stijlBackModeBtn'+(backModeUi==='mirror'?' sel':'')+'" data-back-mode="mirror" type="button" onclick="setBackMode(\'mirror\')" title="Zelfde ontwerp">Zelfde</button>'+
+            '<button class="stijlBackModeBtn'+(backModeUi==='reflect'?' sel':'')+'" data-back-mode="reflect" type="button" onclick="setBackMode(\'reflect\')" title="Zelfde ontwerp gespiegeld">Gespiegeld</button>'+
+            '<button class="stijlBackModeBtn'+(backModeUi==='blank'?' sel':'')+'" data-back-mode="blank" type="button" onclick="setBackMode(\'blank\')" title="Eigen achterkant">Eigen</button>'+
+          '</div>'+
+          previewBackToolbarExtraHtml+
+        '</div>')
     :'';
-  var varianceHint=(!opts.infoRichCe)?previewVarianceHint(previewKey):'';
+  var varianceHint=(!viewerOnlyPreview&&!isSpaceSitePreview&&!opts.infoRichCe)?previewVarianceHint(previewKey):'';
   var previewVarianceHtml=varianceHint
     ?'<div class="stijlCanvasVarianceHint" title="'+esc(varianceHint)+'">'+esc(varianceHint)+'</div>'
     :'';
+  var previewDropAttrs=viewerOnlyPreview?'':' data-style-drop-preview="1" data-style-preview-key="'+esc(designKey)+'"';
+  var canvasWindowClassName='stijlCanvasWindow'+(nightMode?' night':'')+(gridMode?' grid-on':'')+(opts.infoRichCe?' info-preview':'')+(isSpaceSitePreview?' site-preview-window':'')+(viewerOnlyPreview?' viewer-only-preview':'');
   var previewCol=(layoutMode==='canvas'
-      ?'<div class="stijlPreviewCol stijlCanvasCenter"><div class="stijlCanvasStage'+(opts.infoRichCe?' info-preview-stage':'')+'">'+
-        '<div class="stijlCanvasCardWrap">'+
-          (opts.selectorHtml?'<div class="stijlPreviewPick" style="width:100%">'+opts.selectorHtml+'</div>':'')+
-          '<div class="stijlCanvasWindow'+(nightMode?' night':'')+(gridMode?' grid-on':'')+(opts.infoRichCe?' info-preview':'')+'" data-style-drop-preview="1" data-style-preview-key="'+esc(previewKey)+'">'+nightToggleHtml+previewBackToolbarHtml+previewVarianceHtml+'<div class="bgCanvas" id="bgWrap"><canvas id="bgCanvas"></canvas></div><div class="stijlCanvasWindowInner">'+previewCore+'</div></div>'+
-        '</div>'+
-      '</div></div>'
+      ?(canUseSharedPreviewShell
+        ?sharedPreviewShell.renderCanvasPreviewShell({
+            columnClassName:'stijlPreviewCol stijlCanvasCenter',
+            stageClassName:'stijlCanvasStage'+(opts.infoRichCe?' info-preview-stage':''),
+            cardWrapClassName:'stijlCanvasCardWrap',
+            selectorHtml:opts.selectorHtml||'',
+            windowClassName:canvasWindowClassName,
+            windowAttrText:previewDropAttrs,
+            topbarHtml:nightToggleHtml,
+            varianceHtml:previewVarianceHtml,
+            bgWrapId:'bgWrap',
+            bgCanvasId:'bgCanvas',
+            innerClassName:isSpaceSitePreview?'site-preview-inner':'',
+            previewCoreHtml:previewCore,
+            backbarHtml:previewBackToolbarHtml
+          })
+        :'<div class="stijlPreviewCol stijlCanvasCenter"><div class="stijlCanvasStage'+(opts.infoRichCe?' info-preview-stage':'')+'">'+
+          '<div class="stijlCanvasCardWrap">'+
+            (opts.selectorHtml?'<div class="stijlPreviewPick" style="width:100%">'+opts.selectorHtml+'</div>':'')+
+            '<div class="'+canvasWindowClassName+'"'+previewDropAttrs+'>'+nightToggleHtml+previewVarianceHtml+'<div class="bgCanvas" id="bgWrap"><canvas id="bgCanvas"></canvas></div><div class="stijlCanvasWindowInner'+(isSpaceSitePreview?' site-preview-inner':'')+'">'+previewCore+'</div>'+previewBackToolbarHtml+'</div>'+
+          '</div>'+
+        '</div></div>')
       :'<div class="stijlPreviewCol">'+
         (opts.selectorHtml?'<div class="stijlPreviewPick">'+opts.selectorHtml+'</div>':'')+
         previewCore+
         previewHintHtml+
       '</div>');
-  var addTextBtn=(previewKey==='cover'
+  var addTextBtn=(designKey==='cover'
     ?'<details class="textToolbarMenu" id="coverTextToolbarMenu"><summary class="textToolbarMenuBtn" title="Tekstvakken beheren" data-cover-text-menu="1"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;display:block"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg><span class="textToolbarCaret">▾</span></summary><div class="textToolbarMenuPop coverTextDropdown" style="min-width:210px;right:0;left:auto">'+buildCoverTextDropdownContent()+'</div></details>'
-    :'');
+    :(opts.showDisabledTextBtn
+      ?'<button class="textToolbarMenuBtn is-disabled" type="button" disabled title="Tekstvak is alleen beschikbaar op de cover" aria-label="Tekstvak niet beschikbaar"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;display:block"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg><span class="textToolbarCaret">▾</span></button>'
+      :''));
   var typoCard='<div class="stijlMiniCard span2">'+
             '<div class="stijlEditorSection">'+
               '<div class="stijlSectionLabel">Typografie</div>'+
@@ -6672,40 +13450,76 @@ function buildSharedCardEditor(opts){
               '</div>'+
             '</div>'+
           '</div>';
-  var textCard=(previewKey==='cover'?'<div class="stijlMiniCard tight" id="coverTextEditorCard">'+buildCoverTextEditorHtml()+'</div>':'');
-  var shapeCard='<div class="stijlMiniCard tight">'+
-            '<div class="shapeEditor" data-shape-key="'+esc(previewKey)+'">'+buildShapeEditorHtml(previewKey)+'</div>'+
+  var textCard=(designKey==='cover'?'<div class="stijlMiniCard tight" id="coverTextEditorCard">'+buildCoverTextEditorHtml()+'</div>':'');
+  var shapesCardOpen=storedOpenState(STIJL_SHAPES_OPEN,designKey,true);
+  var shapeCard='<div class="stijlMiniCard tight'+(shapesCardOpen?'':' is-collapsed')+'" data-tip="vormen">'+
+            '<div class="shapeEditor" data-shape-key="'+esc(designKey)+'">'+buildShapeEditorHtml(designKey)+'</div>'+
           '</div>';
-  var colorCard='<div class="stijlMiniCard">'+
-            '<div class="stijlMiniHead"><div><div class="stijlSectionLabel">Kaartkleur</div></div></div>'+
-            '<div class="stijlEditorSection">'+
-              '<div class="stijlColorStack">'+
-                '<div class="stijlColorLine">'+
-                  (layoutMode==='canvas'?'':'<div class="sLbl">Achtergrond</div>')+
-                  brandPaletteHtml('setcbg',cardBg,BRAND_FAM_BG)+
-                '</div>'+
-                '<div class="shapeSliderRow" style="margin-top:10px">'+
-                  '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Kleurtoon</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(cardBgToneValue(),-100,100)+'%" type="range" min="-100" max="100" step="1" value="'+cardBgToneValue()+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml((this.value>0?\'+\':\'\')+this.value,\'\');setCardBgTone(this.value)"><span class="shapeSliderValPill">'+sliderValueHtml((cardBgToneValue()>0?'+':'')+cardBgToneValue(),'')+'</span></div>'+
-                '</div>'+
-              '</div>'+
-            '</div>'+
+  var cardColorOpen=storedOpenState(STYLE_CARD_COLOR_OPEN,designKey,true);
+  var bgCardOpen=storedOpenState(STYLE_BG_CARD_OPEN,designKey,true);
+  var colorCard='<div class="stijlMiniCard'+(cardColorOpen?'':' is-collapsed')+'" data-tip="kleur">'+
+            '<div class="stijlMiniHead">'+buildSectionCollapseToggleHtml({
+              className:'sectionCollapseBtn sectionCollapseBtnCard',
+              label:'Kaartkleur',
+              onclick:'toggleStyleColorCard(\''+esc(designKey)+'\')',
+              open:cardColorOpen,
+              ariaLabel:'Kaartkleur'
+            })+'</div>'+
+            (cardColorOpen
+              ? '<div class="stijlEditorSection">'+
+                  '<div class="stijlColorStack">'+
+                    '<div class="stijlColorLine">'+
+                      (layoutMode==='canvas'?'':'<div class="sLbl">Achtergrond</div>')+
+                      brandColorPaletteHtml('setcbg',editorCardBg,BRAND_FAM_BG)+
+                    '</div>'+
+                    '<div class="shapeSliderRow" style="margin-top:6px">'+
+                      '<div class="shapeSliderHRow"><span class="shapeSliderHLbl">Kleurtoon</span><input class="shapeSlider" style="flex:1;--pct:'+sliderPercent(cardBgToneValue(),-100,100)+'%" type="range" min="-100" max="100" step="1" value="'+cardBgToneValue()+'" oninput="paintShapeSlider(this);this.nextElementSibling.innerHTML=sliderValueHtml((this.value>0?\'+\':\'\')+this.value,\'\');setCardBgTone(this.value)"><span class="shapeSliderValPill">'+sliderValueHtml((cardBgToneValue()>0?'+':'')+cardBgToneValue(),'')+'</span></div>'+
+                    '</div>'+
+                  '</div>'+
+                '</div>'
+              : '')+
           '</div>';
-  var bgCard='<div class="stijlMiniCard tight">'+
-            '<div class="stijlMiniHead"><div><div class="stijlSectionLabel">Achtergrond</div></div></div>'+
-            buildBgCtrls(bgCfg(),accentColor,'',true)+
+  var bgCard='<div class="stijlMiniCard tight'+(bgCardOpen?'':' is-collapsed')+'" data-tip="achtergrond">'+
+            '<div class="stijlMiniHead">'+buildSectionCollapseToggleHtml({
+              className:'sectionCollapseBtn sectionCollapseBtnCard',
+              label:'Achtergrond',
+              onclick:'toggleStyleBgCard(\''+esc(designKey)+'\')',
+              open:bgCardOpen,
+              ariaLabel:'Achtergrond'
+            })+'</div>'+
+            (bgCardOpen?buildBgCtrls(bgCfg(),accentColor,'',true):'')+
           '</div>';
-  var toolbarRow='<div class="stijlCanvasToolbar">'+
+  var toolbarRow='<div class="stijlCanvasToolbar'+(opts.disableToolbar?' is-disabled':'')+'">'+
     typoCard.replace(' span2','')+
   '</div>';
-  var toolbarExtra=opts.toolbarExtra?'<div class="stijlCanvasToolbarExtra">'+opts.toolbarExtra+'</div>':'';
+  var toolbarExtra=opts.toolbarExtra?'<div class="stijlCanvasTopToolsSide"><div class="stijlCanvasToolbarExtra">'+opts.toolbarExtra+'</div></div>':'';
+  if(opts.disableShapeCard&&!opts.hideShapeCard){
+    shapeCard=shapeCard.replace('class="stijlMiniCard tight"','class="stijlMiniCard tight is-disabled"');
+  }
+  if(opts.disableColorCard&&!opts.hideColorCard){
+    colorCard=colorCard.replace('class="stijlMiniCard"','class="stijlMiniCard is-disabled"');
+  }
+  var leftCards={
+    shape:(opts.hideShapeCard?'':shapeCard),
+    color:(opts.hideColorCard?'':colorCard),
+    bg:(opts.hideBgCard?'':bgCard)
+  };
+  var leftOrder=(opts.leftCardOrder&&opts.leftCardOrder.length?opts.leftCardOrder:['shape','color','bg']);
+  var leftStack=leftOrder.map(function(key){return leftCards[key]||'';}).join('');
   if(layoutMode==='canvas'){
-    return '<div class="stijlCanvasTopTools">'+toolbarRow+toolbarExtra+'</div>'+
+    var staticHomeClass=opts.disableSticky?' home-static-toolbar':'';
+    var staticPreviewClass=opts.disableSticky?' home-static-preview':'';
+    var staticSideClass=opts.disableSticky?' home-static-side':'';
+    return (opts.hideToolbar&&!toolbarExtra?'':'<div class="stijlCanvasTopTools'+staticHomeClass+'" data-tip="tekst">'+
+        (opts.hideToolbar?'':'<div class="stijlCanvasTopToolsMain">'+toolbarRow+'</div>')+
+        toolbarExtra+
+      '</div>')+
       '<div class="stijlCardLayout canvas">'+
-        '<div class="stijlCanvasSide left">'+shapeCard+colorCard+bgCard+'</div>'+
-        '<div class="stijlCanvasSide preview">'+
+        '<div class="stijlCanvasSide left">'+leftStack+'</div>'+
+        '<div class="stijlCanvasSide preview'+staticPreviewClass+'">'+
           previewCol+
         '</div>'+
-        '<div class="stijlCanvasSide right">'+(opts.sidePanelHtml||'')+'</div>'+
+        '<div class="stijlCanvasSide right'+staticSideClass+'">'+(opts.sidePanelHtml||'')+'</div>'+
       '</div>';
   }
   return '<div class="stijlCardLayout">'+
@@ -6739,7 +13553,50 @@ function setStylePreviewKey(key){
   buildStijlPreserveBg(g('pw'));
   updateEditorHeaderTheme();
 }
+function cardPreviewThemeKeys(){
+  var meta=(S.d&&S.d.meta)||{};
+  var themes=Array.isArray(meta.themes)?meta.themes:[];
+  var keys=['cover'];
+  if(themes.length){keys=keys.concat(themes.map(function(t){return t.key||'cover';}));}
+  else{keys.push('algemeen');}
+  return keys;
+}
+function infoPreviewNavKeys(){
+  var meta=(S.d&&S.d.meta)||{};
+  var opts=infoSlideOptions(meta).filter(function(opt){return !opt.excluded;});
+  var keys=opts.map(function(opt){return opt.key||'cover';}).filter(Boolean);
+  return keys.length?keys:['cover'];
+}
+function cardPreviewNavHome(){setStylePreviewKey('cover');}
+function cardPreviewNavBack(){
+  var keys=cardPreviewThemeKeys();
+  var cur=activeStyleEditKey();
+  var idx=keys.indexOf(cur);
+  if(idx>0)setStylePreviewKey(keys[idx-1]);
+  else setStylePreviewKey(keys[0]);
+}
+function cardPreviewNavForward(){
+  var keys=cardPreviewThemeKeys();
+  var cur=activeStyleEditKey();
+  var idx=keys.indexOf(cur);
+  if(idx>=0&&idx<keys.length-1)setStylePreviewKey(keys[idx+1]);
+}
+function infoPreviewNavHome(){setInfoPreviewKey('cover');}
+function infoPreviewNavBack(){
+  var keys=infoPreviewNavKeys();
+  var cur=INFO_SLIDE_KEY||'cover';
+  var idx=keys.indexOf(cur);
+  if(idx>0)setInfoPreviewKey(keys[idx-1]);
+  else setInfoPreviewKey(keys[0]);
+}
+function infoPreviewNavForward(){
+  var keys=infoPreviewNavKeys();
+  var cur=INFO_SLIDE_KEY||'cover';
+  var idx=keys.indexOf(cur);
+  if(idx>=0&&idx<keys.length-1)setInfoPreviewKey(keys[idx+1]);
+}
 function activeStyleEditKey(){
+  if(isEditingBackDesign())return currentBackDesignKey(STYLE_PREVIEW_KEY||'algemeen');
   if(S.clTab==='opmaken'&&S.opmPane==='info')return INFO_SLIDE_KEY||'cover';
   return STYLE_PREVIEW_KEY||'cover';
 }
@@ -6765,57 +13622,65 @@ function updateActiveHeaderThemeName(val){
   updateStyleThemeNameByKey(STYLE_PREVIEW_KEY,val);
 }
 function updateEditorHeaderTheme(){
+  if(S.activeKind==='space'){
+    var spaceThemeEl=g('editorThemeTitle');
+    var spaceSep=g('editorThemeSep');
+    if(spaceSep)spaceSep.style.display='';
+    if(spaceThemeEl&&spaceThemeEl.tagName==='INPUT'){
+      spaceThemeEl.value=(S.space&&S.space.name)||S.spaceSlug||'Home';
+      spaceThemeEl.style.display='';
+      spaceThemeEl.readOnly=true;
+      spaceThemeEl.classList.add('is-static');
+    }
+    syncEditorHeaderWidths();
+    return;
+  }
   var key=(S.clTab==='opmaken'&&S.opmPane==='info')
     ?(INFO_SLIDE_KEY||'cover')
     :(STYLE_PREVIEW_KEY||'cover');
-  var isTheme=key&&key!=='cover'&&key!=='algemeen';
   var sep=g('editorThemeSep');
   var thEl=g('editorThemeTitle');
   if(!sep||!thEl)return;
-  if(S.clTab==='inst'){
+  function setThemeHeaderDisplay(label,editable){
+    var name=String(label||'').trim();
     if(thEl.tagName==='INPUT'){
-      thEl.value='Instellingen';
-      thEl.style.display='';
-      thEl.readOnly=true;
-      thEl.classList.add('is-static');
-    }else thEl.textContent='Instellingen';
-    sep.style.display='';
+      thEl.value=name;
+      thEl.style.display=name?'':'none';
+      thEl.readOnly=!editable;
+      thEl.classList.toggle('is-static',!editable);
+      thEl.title=name;
+    }else{
+      thEl.textContent=name;
+    }
+    sep.style.display=name?'':'none';
+  }
+  if(S.clTab==='inst'){
+    setThemeHeaderDisplay('Instellingen',false);
   } else if(S.clTab==='opmaken'&&S.opmPane==='info'&&key){
     var infoOpts=infoSlideOptions(S.d&&S.d.meta||{});
     var active=infoOpts.find(function(opt){return opt.key===key;});
     var activeName=active?(active.label||active.key):key;
     var editable=!!(active&&(active.isCustom||(!active.isCustom&&active.key!=='cover')));
-    if(thEl.tagName==='INPUT'){
-      thEl.value=activeName;
-      thEl.style.display='';
-      thEl.readOnly=!editable;
-      thEl.classList.toggle('is-static',!editable);
-    }else thEl.textContent=activeName;
-    sep.style.display='';
-  } else if(isTheme){
+    setThemeHeaderDisplay(activeName,editable);
+  } else if(S.clTab==='opmaken'&&key){
     var theme=(S.d&&S.d.meta&&S.d.meta.themes||[]).find(function(t){return t.key===key;});
-    var name=theme?(theme.label||theme.key):key;
-    if(thEl.tagName==='INPUT'){
-      thEl.value=name;
-      thEl.style.display='';
-      thEl.readOnly=false;
-      thEl.classList.remove('is-static');
-    }else thEl.textContent=name;
-    sep.style.display='';
+    var isEditableTheme=!!(theme&&key!=='cover'&&key!=='algemeen');
+    var name=theme
+      ?(theme.label||theme.key)
+      :(key==='cover'?'Cover':(key==='algemeen'?'Algemeen':key));
+    setThemeHeaderDisplay(name,isEditableTheme);
   } else {
-    if(thEl.tagName==='INPUT'){
-      thEl.value='';
-      thEl.style.display='none';
-      thEl.readOnly=false;
-      thEl.classList.remove('is-static');
-    }else thEl.textContent='';
-    sep.style.display='none';
+    setThemeHeaderDisplay('',false);
   }
   syncEditorHeaderWidths();
 }
 function syncEditorHeaderWidths(){
   var titleEl=g('editorSetTitle');
   var thEl=g('editorThemeTitle');
+  function cssNum(v){
+    var n=parseFloat(v||'0');
+    return isFinite(n)?n:0;
+  }
   function fitHeaderInput(el,minW,maxW){
     if(!el||el.tagName!=='INPUT')return;
     var text=String(el.value||el.placeholder||'');
@@ -6831,12 +13696,17 @@ function syncEditorHeaderWidths(){
     probe.style.letterSpacing=cs.letterSpacing;
     probe.style.textTransform=cs.textTransform;
     document.body.appendChild(probe);
-    var width=Math.ceil(probe.getBoundingClientRect().width)+8;
+    var horizontalChrome=
+      cssNum(cs.paddingLeft)+
+      cssNum(cs.paddingRight)+
+      cssNum(cs.borderLeftWidth)+
+      cssNum(cs.borderRightWidth)+2;
+    var width=Math.ceil(probe.getBoundingClientRect().width)+Math.ceil(horizontalChrome);
     probe.remove();
     el.style.width=Math.max(minW,Math.min(maxW,width))+'px';
   }
-  fitHeaderInput(titleEl,84,320);
-  fitHeaderInput(thEl,56,260);
+  fitHeaderInput(titleEl,(titleEl&&titleEl.readOnly)?36:84,420);
+  fitHeaderInput(thEl,(thEl&&thEl.readOnly)?28:56,280);
 }
 function activeStyleDeletePath(){
   var key=activeStyleEditKey();
@@ -7005,12 +13875,13 @@ function stylePaletteMeta(action){
       families:[
         {n:'Houtskool',base:'#3C4650',deep:'#1A1A2E'},
         {n:'Navy',     base:'#2C3E63',deep:'#141E38'},
+        {n:'Indigo',   base:'#4F5FB2',deep:'#363F80'},
         {n:'Teal',     base:'#2F5F63',deep:'#1A3E40'},
+        {n:'Sage',     base:'#6FAE9A',deep:'#3D8070'},
         {n:'Woud',     base:'#365C45',deep:'#1E3D2A'},
         {n:'Violet',   base:'#6A63C2',deep:'#4A45A0'},
-        {n:'Indigo',   base:'#4F5FB2',deep:'#363F80'},
+        {n:'Berry',    base:'#B45B82',deep:'#8C4365'},
         {n:'Goud',     base:'#C99A2E',deep:'#8C6A10'},
-        {n:'Sage',     base:'#6FAE9A',deep:'#3D8070'}
       ]
     };
   }
@@ -7025,7 +13896,7 @@ function stylePaletteMeta(action){
         {n:'Perzik',     a:'#F8E4D2'},
         {n:'Teal',       a:'#A8D8D6'},
         {n:'Botergeel',  a:'#F4E2A5'},
-        {n:'Muntgroen',  a:'#7FC5A6'}
+        {n:'Roze',       a:'#F2C8D2'}
       ],
       families:[
         {n:'Sage',    base:'#F7F4EF',deep:'#CFE6DF'},
@@ -7056,39 +13927,114 @@ function stylePaletteRows(action){
   for(var i=0;i<pts.length;i+=15)rows.push(pts.slice(i,i+15));
   return rows;
 }
+function stylePaletteTextSections(action){
+  if(action!=='settc')return [];
+  var fams=stylePaletteMeta(action).families||[];
+  var byName={};
+  fams.forEach(function(f){byName[f.n]=f;});
+  return [
+    {label:'Neutraal & donker', names:['Houtskool','Navy','Indigo']},
+    {label:'Koel & natuurlijk', names:['Teal','Sage','Woud']},
+    {label:'Accent & warm', names:['Violet','Berry','Goud']}
+  ].map(function(section){
+    return {
+      label:section.label,
+      families:section.names.map(function(name){return byName[name];}).filter(Boolean)
+    };
+  }).filter(function(section){return section.families.length;});
+}
+function stylePaletteTextExpandedHtml(action,cur){
+  var sections=stylePaletteTextSections(action);
+  if(!sections.length)return '';
+  var html='<div class="brandTextSections">';
+  sections.forEach(function(section){
+    html+='<div class="brandTextSection">'+
+      '<div class="brandWordLabel">'+esc(section.label)+'</div>'+
+      '<div class="brandTextFamilyRows">';
+    section.families.forEach(function(fam){
+      html+='<div class="brandTextFamilyRow">'+
+        '<div class="brandTextFamilyName">'+esc(fam.n)+'</div>'+
+        '<div class="brandTextShadeRow">';
+      famShades(fam.deep||fam.base,fam.n).forEach(function(p){
+        html+=brandSwBtn(action,p,cur);
+      });
+      html+='</div></div>';
+    });
+    html+='</div></div>';
+  });
+  html+='</div>';
+  return html;
+}
 var _stylePalState=null;
 var _stylePalRecent=[];
 var _stylePalDrag=null;
 var _stylePalAnchor=null;
+function brandTextColorRowOpts(opts){
+  var base={compact:true,kind:'shared',rowClass:'brandQuickRow-textcolor'};
+  return Object.assign(base,opts||{});
+}
+function brandColorRowOpts(opts){
+  var base={compact:true,kind:'shared'};
+  return Object.assign(base,opts||{});
+}
+function brandTextColorPaletteHtml(action,currentColor,rows,opts){
+  return brandPaletteHtml(action,currentColor,rows,brandTextColorRowOpts(opts));
+}
+function brandColorPaletteHtml(action,currentColor,rows,opts){
+  return brandPaletteHtml(action,currentColor,rows,brandColorRowOpts(opts));
+}
+function brandColorQuickRowHtml(action,currentColor,rows,opts){
+  return brandQuickRowHtml(action,currentColor,rows,brandColorRowOpts(opts));
+}
+function brandQuickRowHtml(action,currentColor,rows,opts){
+  var cur=String(currentColor||'').toLowerCase();
+  var hexNorm=normalizeHexInput(currentColor)||'#ffffff';
+  var kind=((opts&&opts.kind)||((action==='settc')?'text':'shared'));
+  var rowClass=(opts&&opts.rowClass)?(' '+opts.rowClass):'';
+  var firstRow=rows[0]||[];
+  var quickLimit=(opts&&opts.quickLimit!=null)?opts.quickLimit:8;
+  var quickItems=firstRow.slice(0,quickLimit);
+  var prefixHtml=(opts&&opts.prefixHtml)||'';
+  var swatchAction=(opts&&opts.swatchAction)||action;
+  var expandTarget=(opts&&opts.expandTarget)||action;
+  var currentTarget=(opts&&opts.currentTarget)===false?'':((opts&&opts.currentTarget)||action);
+  var currentTargetAttr=currentTarget?' data-cur-target="'+esc(currentTarget)+'"':'';
+  var currentTitle=(opts&&opts.currentTitle)||'Eigen kleur kiezen';
+  var colorInputHandler=(opts&&opts.colorInputHandler)||("applyStyleColor('"+action+"',this.value);this.parentElement.style.background=this.value");
+  var gridIcon='<svg viewBox="0 0 14 14" width="11" height="11" fill="currentColor" opacity=".75"><rect x="1.5" y="1.5" width="3" height="3" rx=".8"/><rect x="5.5" y="1.5" width="3" height="3" rx=".8"/><rect x="9.5" y="1.5" width="3" height="3" rx=".8"/><rect x="1.5" y="5.5" width="3" height="3" rx=".8"/><rect x="5.5" y="5.5" width="3" height="3" rx=".8"/><rect x="9.5" y="5.5" width="3" height="3" rx=".8"/><rect x="1.5" y="9.5" width="3" height="3" rx=".8"/><rect x="5.5" y="9.5" width="3" height="3" rx=".8"/><rect x="9.5" y="9.5" width="3" height="3" rx=".8"/></svg>';
+  var isExpanded=!!STYLE_PAL_EXPANDED[expandTarget];
+  var isCompact=!!(opts&&opts.compact);
+  return '<div class="brandQuickRow'+rowClass+'">'+
+    '<div class="brandSwsGroup">'+
+      prefixHtml+
+      quickItems.map(function(p){return brandSwBtn(swatchAction,p,cur);}).join('')+
+    '</div>'+
+    '<div class="brandQuickActions'+(isCompact?' compact':'')+'">'+
+      '<button class="brandExpandBtn'+(isExpanded?' on':'')+'" type="button" data-action="expandpicker" data-target="'+expandTarget+'" title="'+(isExpanded?'Minder':'Meer kleuren')+'">'+gridIcon+'</button>'+
+      '<span class="brandQSep"></span>'+
+      '<label class="brandCurrentSw"'+currentTargetAttr+' style="background:'+esc(hexNorm)+'" title="'+esc(currentTitle)+'">'+
+        '<input type="color" value="'+esc(hexNorm)+'" oninput="'+esc(colorInputHandler)+'">'+
+      '</label>'+
+    '</div>'+
+  '</div>';
+}
 function brandPaletteHtml(action,currentColor,rows,opts){
   var cur=String(currentColor||'').toLowerCase();
   var hexNorm=normalizeHexInput(currentColor)||'#ffffff';
   var isExpanded=!!STYLE_PAL_EXPANDED[action];
-  var gridIcon='<svg viewBox="0 0 14 14" width="11" height="11" fill="currentColor" opacity=".75"><rect x="1.5" y="1.5" width="3" height="3" rx=".8"/><rect x="5.5" y="1.5" width="3" height="3" rx=".8"/><rect x="9.5" y="1.5" width="3" height="3" rx=".8"/><rect x="1.5" y="5.5" width="3" height="3" rx=".8"/><rect x="5.5" y="5.5" width="3" height="3" rx=".8"/><rect x="9.5" y="5.5" width="3" height="3" rx=".8"/><rect x="1.5" y="9.5" width="3" height="3" rx=".8"/><rect x="5.5" y="9.5" width="3" height="3" rx=".8"/><rect x="9.5" y="9.5" width="3" height="3" rx=".8"/></svg>';
+  var kind=((opts&&opts.kind)||((action==='settc')?'text':'shared'));
   var firstRow=rows[0]||[];
-  var quickItems=firstRow.slice(0,8);
-  (function(){var ext=BRAND_FAMILIES;for(var _qi=0;_qi<ext.length&&quickItems.length<24;_qi+=2){var _fc=ext[_qi];if(_fc&&!quickItems.some(function(q){return q.a===_fc.base;}))quickItems.push({n:_fc.n,a:_fc.base});}})();
+  var quickLimit=(opts&&opts.quickLimit!=null)?opts.quickLimit:8;
   var extraRows=(firstRow.length>8?[firstRow.slice(8)]:[]).concat(rows.slice(1));
-  var prefixHtml=(opts&&opts.prefixHtml)||'';
-  var html='<div class="brandCompact">'+
+  var html='<div class="brandCompact brandCompact-'+kind+'">'+
     '<div class="brandQSection">'+
-      '<div class="brandQuickRow">'+
-        '<div class="brandSwsGroup">'+
-          prefixHtml+
-          quickItems.map(function(p){return brandSwBtn(action,p,cur);}).join('')+
-        '</div>'+
-        '<div class="brandQuickActions">'+
-          '<button class="brandExpandBtn'+(isExpanded?' on':'')+'" type="button" data-action="expandpicker" data-target="'+action+'" title="'+(isExpanded?'Minder':'Meer kleuren')+'">'+gridIcon+'</button>'+
-          '<span class="brandQSep"></span>'+
-          '<label class="brandCurrentSw" data-cur-target="'+action+'" style="background:'+esc(hexNorm)+'" title="Eigen kleur kiezen">'+
-            '<input type="color" value="'+esc(hexNorm)+'" oninput="applyStyleColor(\''+esc(action)+'\',this.value);this.parentElement.style.background=this.value">'+
-          '</label>'+
-        '</div>'+
-      '</div>'+
+      brandQuickRowHtml(action,currentColor,rows,opts)+
     '</div>';
   if(isExpanded){
     html+='<div class="brandExpandedWrap">';
-    if(extraRows.length>=3){
+    if(action==='settc'&&!(opts&&opts.universal)){
+      html+=stylePaletteTextExpandedHtml(action,cur);
+    }else if(extraRows.length>=3){
       var wFams=[];
       for(var ci=0;ci<Math.floor(extraRows.length/3);ci++){
         var cr0=extraRows[ci*3]||[];
@@ -7284,6 +14230,7 @@ function openStylePalette(action,anchorEl){
 }
 
 function buildStijl(target){
+  var spaceMode=S.activeKind==='space';
   var m=S.d.meta||{};
   var accent=(m.cssVars||{})['--pk-set-accent']||'#CFE6DF';
   var bg=((m.ui||{}).index||{}).background||{};
@@ -7291,10 +14238,13 @@ function buildStijl(target){
   if(!Array.isArray(bg.palette)||!bg.palette.length){var bc=bgCfg();bc.palette=[accent];}
   var curFont=(m.cssVars||{})['--pk-font']||'IBM Plex Sans';
 
-  var pane=S.opmPane||'vragen';
+  var pane=spaceMode?((S.opmPane==='info')?'info':((S.opmPane==='inst')?'inst':'space')):(S.opmPane||'vragen');
   var isInfoMode=pane==='info';
+  var isInstMode=pane==='inst';
+  var contentPane=isInstMode?(S._instBasePane||(spaceMode?'space':'vragen')):pane;
+  var contentIsInfoMode=contentPane==='info';
   var infoKey=INFO_SLIDE_KEY||'cover';
-  if(!isInfoMode){
+  if(!contentIsInfoMode){
     var vraagOpts=stylePreviewOptions(m);
     var vraagKeys=vraagOpts.map(function(opt){return opt.key;});
     if(vraagKeys.indexOf(STYLE_PREVIEW_KEY)<0){
@@ -7303,35 +14253,26 @@ function buildStijl(target){
     }
   }
   // In info mode: use infoSlideOptions so custom pages and excluded slides are handled
-  var infoOpts=isInfoMode?infoSlideOptions(m):null;
-  if(isInfoMode){
+  var infoOpts=contentIsInfoMode?infoSlideOptions(m):null;
+  if(contentIsInfoMode){
     var infoActive=infoOpts.find(function(o){return o.key===infoKey&&!o.excluded;});
     if(!infoActive){var firstActive=infoOpts.find(function(o){return !o.excluded;});infoKey=(firstActive||infoOpts[0]||{}).key||'cover';}
     INFO_SLIDE_KEY=infoKey;
   }
-  var activeInfoOpt=isInfoMode?((infoOpts.find(function(o){return o.key===infoKey;})||null)):null;
-  var previewState=isInfoMode?null:stylePreviewState(m);
-  var themeIdx=!isInfoMode?styleThemeIndexByKey(previewState.selected.key):-1;
-  var themeLabel=!isInfoMode&&themeIdx>=0?((m.themes||[])[themeIdx].label||''):'';
-  var previewFile=isInfoMode?(((activeInfoOpt)||{}).file||'voorkant.svg'):previewState.file;
-  var sampleTxt=!isInfoMode?(previewState.selected.key==='cover'?previewState.sampleTxt:questionPreviewFrontText(previewState.selected.key)):'';
-  var sliderHtml='';
+  var activeInfoOpt=contentIsInfoMode?((infoOpts.find(function(o){return o.key===infoKey;})||null)):null;
+  var previewState=!contentIsInfoMode?stylePreviewState(m):null;
+  var themeIdx=!contentIsInfoMode?styleThemeIndexByKey(previewState.selected.key):-1;
+  var themeLabel=!contentIsInfoMode&&themeIdx>=0?((m.themes||[])[themeIdx].label||''):'';
+  var previewFile=contentIsInfoMode?(((activeInfoOpt)||{}).file||'voorkant.svg'):(previewState?previewState.file:'');
+  var infoCoverEnabled=contentIsInfoMode?isInfoSlideEnabled(m,'cover'):true;
+  var sampleTxt=!contentIsInfoMode?(previewState.selected.key==='cover'?previewState.sampleTxt:questionPreviewFrontText(previewState.selected.key)):'';
+  var sliderHtml='',sliderActionHtml='';
+  if(isInstMode){
+    sliderHtml=buildInlineSettingsSliderHtml(spaceMode);
+    sliderActionHtml=spaceMode?homeSliderActionsHtml():setEditorActionsHtml();
+  }
   if(isInfoMode){
     sliderHtml=infoOpts.map(function(opt){return infoSlideCardHtml(opt,infoKey);}).join('');
-    // Select-all / deselect-all tile (only when there are themes or custom pages to toggle)
-    var toggleableOpts=infoOpts.filter(function(o){return o.key!=='cover';});
-    if(toggleableOpts.length>0){
-      var allIncluded=toggleableOpts.every(function(o){return !o.excluded;});
-      var toggleAllTitle=allIncluded?'Alles verbergen':'Alles tonen';
-      var toggleAllAction=allIncluded?'excludeAllInfoThemes()':'includeAllInfoThemes()';
-      var toggleAllIcon=allIncluded
-        ?'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 8h10"/></svg>'
-        :'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>';
-      sliderHtml+='<button class="stijlSlideCard stijlSlideAdd infoToggleAll" type="button" onclick="'+toggleAllAction+'" title="'+toggleAllTitle+'">'+
-        '<div class="stijlSlideThumb"><div class="stijlSlidePlusWrap"><div class="stijlSlidePlusChip">'+toggleAllIcon+'</div></div></div>'+
-        '<div class="stijlSlideBody"><div class="stijlSlideName">'+esc(toggleAllTitle)+'</div></div>'+
-      '</button>';
-    }
     // "Vul alle thema's" tile – only when some themes have no info text yet
     var themsWithMissingInfo=(m.themes||[]).filter(function(th){return !String(((S.d.uitleg)||{})[th.key]||'').trim();});
     if(themsWithMissingInfo.length>0){
@@ -7341,58 +14282,98 @@ function buildStijl(target){
         '<div class="stijlSlideBody"><div class="stijlSlideName">Gebruik alle thema\'s</div></div>'+
       '</button>';
     }
-    sliderHtml+='<button class="stijlSlideCard stijlSlideAdd" type="button" onclick="addInfoCustomPage()" title="Eigen pagina toevoegen">'+
-      '<div class="stijlSlideThumb"><div class="stijlSlidePlusWrap"><div class="stijlSlidePlusChip"><div class="stijlSlidePlus">+</div></div></div></div>'+
-      '<div class="stijlSlideBody"><div class="stijlSlideName">Pagina</div></div>'+
-    '</button>';
-  }else{
+  }else if(!isInstMode){
     sliderHtml=previewState.options.map(function(opt){return styleSlideCardHtml(opt,previewState.selected.key);}).join('');
   }
-  if(!isInfoMode){
-    sliderHtml+=
-      '<button class="stijlSlideCard stijlSlideAdd" type="button" onclick="addThemeFromStyle()">'+
-        '<div class="stijlSlideThumb"><div class="stijlSlidePlusWrap"><div class="stijlSlidePlusChip"><div class="stijlSlidePlus">+</div></div></div></div>'+
-        '<div class="stijlSlideBody"><div class="stijlSlideName">Nieuw thema</div></div>'+
-      '</button>'+
-      '<button class="stijlSlideCard stijlSlideAdd stijlSlideDup" type="button" onclick="dupSet()" title="Set dupliceren">'+
-        '<div class="stijlSlideThumb"><div class="stijlSlidePlusWrap"><div class="stijlSlidePlusChip"><svg viewBox="0 0 24 24" style="width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></div></div></div>'+
-        '<div class="stijlSlideBody"><div class="stijlSlideName">Set dupliceren</div></div>'+
-      '</button>';
+  if(spaceMode&&!isInfoMode&&!isInstMode){
+    var _lsLayout=null;try{_lsLayout=localStorage.getItem('pk_layout_chosen');}catch(e){}
+    if(!currentSpacePublicPage().layoutChosen&&!S.spaceLayoutMode&&!_lsLayout){S.homeSliderPane='layout';}
+    else if(!S.homeSliderPane){S.homeSliderPane=S.homeCardsPane||'grid';}
+    sliderActionHtml=homeSliderActionsHtml();
+    sliderHtml=homeSliderStripHtml();
   }
-  var html='<div class="panel"><div class="stijlShell">'+
-    '<div id="stijl-kaart" class="stijlCardSection">'+
-      '<div class="stijlHeaderBar'+(isInfoMode?' info-mode':'')+'">'+
-        '<div class="stijlSlideRail">'+
-          sliderHtml+
-        '</div>'+
-      '</div>'+
-      '<div class="stijlSectionTitle">'+(isInfoMode?'Kaart infosheet':'Kaart opmaken')+'</div>'+
+  if(isInfoMode&&!spaceMode){
+    sliderActionHtml=setEditorInfoActionsHtml();
+  }
+  if(!isInfoMode&&!spaceMode&&!isInstMode){
+    sliderActionHtml=setEditorActionsHtml();
+    if(S.editorMode==='view'){
+      sliderHtml=buildViewCardsBrowserHtml();
+    }else if(SET_EDITOR_PANE==='format'){
+      var _fmtId=getCardFormatIdForMeta(S.d&&S.d.meta);
+      sliderHtml='<div class="stijlSlideRail homeOptionSlideRail setFmtSlideRail">'+fmtStripHtml(_fmtId,'setCardFormatFromSlider')+'</div>';
+    }else if(S.setThemeExpanded){
+      var _selectedKey=previewState.selected.key;
+      sliderHtml='<div class="homeSliderExpandWrap homeHeroPickerOpen setThemePickerOpen">'+
+        buildSetThemePickerSections(_selectedKey)+
+      '</div>';
+    }else{
+      sliderHtml='<div class="stijlSlideRail">'+sliderHtml+'</div>';
+    }
+  }
+  if(spaceMode){
+    var infoPages=spaceInfoPages();
+    if(!INFO_SLIDE_KEY||!infoPages.some(function(page){return page.key===INFO_SLIDE_KEY;})){
+      INFO_SLIDE_KEY=(infoPages[0]||{}).key||'cover';
+    }
+  }
+  var isViewMode=!isInfoMode&&!spaceMode&&!isInstMode&&S.editorMode==='view';
+  var viewBrowserMode=isViewMode?getViewCardsBrowserMode():'grid';
+  var isViewFocusMode=isViewMode&&viewBrowserMode==='focus';
+  var panelModeClass=(spaceMode?' space-editor-mode':' set-editor-mode');
+  var stickyCanvasClass=(layoutMode==='canvas'&&!(spaceMode&&!contentIsInfoMode)?' canvas-sticky-mode':'');
+  var html='<div class="panel'+panelModeClass+stickyCanvasClass+'"><div class="stijlShell">'+
+    '<div id="stijl-kaart" class="stijlCardSection'+(isViewFocusMode?' view-focus':'')+'">'+
+      ((spaceMode&&!isInfoMode)
+        ?'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+sliderActionHtml+'</div>'
+        :(isInfoMode&&spaceMode?'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+infoModeHeaderActionsHtml()+'</div>':(isInfoMode?'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+sliderActionHtml+'</div>':'<div class="stijlSectionTitle stijlSectionTitleTop stijlSectionTitleWithActions homeSliderTitleBar">'+sliderActionHtml+'</div>')))+
+      (isViewMode
+        ? '<div class="evpViewerSidebar'+(isViewFocusMode?' is-hidden':'')+'">'+sliderHtml+'</div>'
+        : '<div class="stijlHeaderBar'+(isInfoMode?' info-mode':'')+(isInstMode?' inlineSettingsHeader':'')+(spaceMode&&!isInfoMode?' space-layout-header home-set-header':'')+((!isInfoMode&&!spaceMode&&!isInstMode)?' has-theme-rail-toggle':'')+((!isInfoMode&&!spaceMode&&!isInstMode&&S.setThemeExpanded)?' is-expanded-slider':'')+'">'+
+            ((!isInfoMode&&!spaceMode&&!isInstMode)?setEditorThemeToggleHtml():'')+
+            (spaceMode&&!isInfoMode
+              ? sliderHtml
+              : (isInfoMode?'<div class="stijlSlideRail">'+sliderHtml+'</div>':sliderHtml))+
+          '</div>')+
       buildSharedCardEditor({
         selectorHtml:'',
         wrapId:'stijlCardPrevWrap',
         wrapClass:'stijlCardPrevWrap',
-        label:isInfoMode?((activeInfoOpt&&activeInfoOpt.label)||''):themeLabel,
+        label:contentIsInfoMode?((activeInfoOpt&&activeInfoOpt.label)||''):themeLabel,
         faceId:'stijlCardFace',
         frontId:'stijlCardTxt',
         backId:'stijlCardBack',
-        previewFile:isInfoMode?(((activeInfoOpt)||{}).file||previewFile):previewFile,
-        previewKey:isInfoMode?infoKey:previewState.selected.key,
-        forceNoImage:isInfoMode&&cardBuildModeForKey(m,infoKey)==='self',
-        sampleTxt:isInfoMode?mdToHtml(((S.d.uitleg)||{})[infoKey]||''):sampleTxt,
-        frontTxt:isInfoMode?mdToHtml(((S.d.uitleg)||{})[infoKey]||''):sampleTxt,
+        previewFile:contentIsInfoMode?(((activeInfoOpt)||{}).file||previewFile):previewFile,
+        previewKey:contentIsInfoMode?infoKey:previewState.selected.key,
+        designKey:(!contentIsInfoMode&&isEditingBackDesign()?currentBackDesignKey(previewState.selected.key):(contentIsInfoMode?infoKey:previewState.selected.key)),
+        forceNoImage:contentIsInfoMode&&cardBuildModeForKey(m,infoKey)==='self',
+        sampleTxt:contentIsInfoMode?((infoKey==='cover'&&!infoCoverEnabled)?'':mdToHtml(((S.d.uitleg)||{})[infoKey]||'')):sampleTxt,
+        frontTxt:contentIsInfoMode?((infoKey==='cover'&&!infoCoverEnabled)?'':mdToHtml(((S.d.uitleg)||{})[infoKey]||'')):sampleTxt,
         forceBold:false,
         previewHint:previewFile,
         suppressEmptyFrontHint:true,
-        infoRichCe:isInfoMode,
-        infoRichCeKey:isInfoMode?infoKey:null,
-        showInfoMidTitle:isInfoMode&&infoKey!=='cover'&&!!(((m.themes||[]).find(function(t){return t.key===infoKey;}))||((m.infoPages||[]).find(function(p){return p.key===infoKey;}))),
-        infoMidTitleKey:isInfoMode?infoKey:null,
-        infoMidTitleText:isInfoMode?infoMidTitleText(infoKey):'',
+        flipped:!contentIsInfoMode&&CANVAS_CARD_FLIPPED,
+        infoRichCe:contentIsInfoMode,
+        infoRichCeKey:contentIsInfoMode?infoKey:null,
+        showInfoMidTitle:contentIsInfoMode&&infoKey!=='cover'&&!!(((m.themes||[]).find(function(t){return t.key===infoKey;}))||((m.infoPages||[]).find(function(p){return p.key===infoKey;}))),
+        infoMidTitleKey:contentIsInfoMode?infoKey:null,
+        infoMidTitleText:contentIsInfoMode?infoMidTitleText(infoKey):'',
+        viewerOnlyPreview:isViewMode,
         layoutMode:layoutMode,
-        sidePanelHtml:'<div class="stijlQuestionPane'+(isInfoMode?' info-mode':'')+'">'+opmakenPaneTabsHtml(pane)+'<div id="stijlSidePaneBody"></div></div>'
+        hideToolbar:false,
+        hideShapeCard:false,
+        hideColorCard:false,
+        disableToolbar:spaceMode&&!contentIsInfoMode,
+        disableShapeCard:spaceMode&&!contentIsInfoMode,
+        disableColorCard:spaceMode&&!contentIsInfoMode,
+        disableSticky:spaceMode&&!contentIsInfoMode,
+        showDisabledTextBtn:!spaceMode&&!contentIsInfoMode&&(previewState.selected.key!=='cover'),
+        leftCardOrder:(spaceMode&&!contentIsInfoMode?['bg','shape','color']:['shape','color','bg']),
+        sidePanelHtml:'<div class="stijlQuestionPaneOuter"><div class="stijlQuestionPane'+(contentIsInfoMode?' info-mode':'')+'">'+'<div id="stijlSidePaneBody"></div></div></div><div id="globalTipBlock" class="globalTipBlock"></div>'
       })+
+      (isViewFocusMode?buildViewFocusRailHtml():'')+
     '</div>'+
-    (layoutMode==='canvas'?'':('<div id="stijl-bg" class="stijlCardSection">'+
+    (layoutMode==='canvas'?'':('<div id="stijl-bg" class="stijlCardSection" data-tip="achtergrond">'+
       '<div class="stijlSectionTitle">Achtergrond</div>'+
       '<div class="bgWrap">'+buildBgCtrls(bg,accent)+
       '<div class="bgPrev"><div class="bgCanvas" id="bgWrap"><canvas id="bgCanvas"></canvas></div><div class="bgHint">Live preview</div></div></div>'+
@@ -7416,16 +14397,26 @@ function buildStijl(target){
 
   var sidePane=g('stijlSidePaneBody');
   if(sidePane){
-    if(pane==='vragen'){
-      buildVragen(sidePane,{filterKey:STYLE_PREVIEW_KEY||'cover'});
+    var tipPaneId=contentPane;
+    if(spaceMode&&contentPane==='space'){
+      buildSpacePane(sidePane);
+    }else if(contentPane==='vragen'){
+      var activeVraagKey=STYLE_PREVIEW_KEY||'cover';
+      buildVragen(sidePane,{filterKey:activeVraagKey});
+      if(activeVraagKey==='cover')tipPaneId='cover';
     }else{
       buildInfoPane(sidePane);
     }
+    renderGlobalTip(tipPaneId);
+    initTipHovers();
     setTimeout(focusOpmakenSideContent,30);
   }
   setTimeout(updateStijlPreview,50);
   setTimeout(applyCanvasZoom,80);
   setTimeout(initSliderScrollHints,60);
+  setTimeout(initHomeSetSliderDnd,70);
+  setTimeout(updateGridExpandBtnVisibility,80);
+  if(isInstMode)wireInlineSettingsSlider(spaceMode);
 }
 function syncBgPalette(newAccent){
   var bc=bgCfg();
@@ -7540,12 +14531,12 @@ function setFontSizeLive(val){
 }
 function updateStijlPreview(){
   var m=S.d.meta||{};
-  var cv=m.cssVars||{};
-  var previewKey=activeStyleEditKey();
+  var previewKey=(S.opmPane==='info')?(INFO_SLIDE_KEY||'cover'):(STYLE_PREVIEW_KEY||'cover');
+  var cv=styleCssVarsForKey(m,previewKey);
   var font=cv['--pk-font']||'IBM Plex Sans';
   var fs=fontSizeCss(cv['--pk-font-size']||'12');
   var color=cv['--pk-set-text']||'rgba(48,96,136,0.95)';
-  var align=(S.opmPane==='info')?(cv['--pk-text-align']||'left'):(cv['--pk-text-align']||'center');
+  var align=cv['--pk-text-align']||'center';
   var valign=cv['--pk-text-valign']||'center';
   var cardBg=cardBgForKey(m,previewKey)||ADMIN_PREVIEW_CARD_BG;
   var globalWeight=cv['--pk-font-weight']||'regular';
@@ -7554,33 +14545,30 @@ function updateStijlPreview(){
   var globalTextBg=normalizeHexInput(cv['--pk-text-bg-color'])||'';
   var letterSpacing=cv['--pk-letter-spacing']||'0';
   var lineHeight=cv['--pk-line-height']||'1.4';
-  ['stijlCardTxt','qedCardTxt'].forEach(function(id){
-    var txt=g(id);if(!txt)return;
-    var inner=txt.querySelector('.cpFrontInner')||txt;
-    txt.style.fontFamily="'"+font+"', sans-serif";
-    txt.style.fontSize=fs;
-    txt.style.color=color;
-    txt.style.textAlign=align;
-    txt.style.letterSpacing=letterSpacing==='0'?'':letterSpacing+'px';
-    txt.style.lineHeight=lineHeight;
-    var infoMode=(S.opmPane==='info');
-    if(infoMode){
-      // Info mode: card shows image only, richCe below handles its own styles
-      txt.style.fontWeight='';txt.style.fontStyle='';txt.style.textDecoration='';
-    }else{
-      txt.style.fontWeight=globalWeight==='bold'?'700':'400';
-      txt.style.fontStyle='normal';txt.style.textDecoration='none';
-      inner.style.fontWeight=globalWeight==='bold'?'700':globalWeight==='semibold'?'600':globalWeight==='medium'?'500':'400';
-      inner.style.fontStyle=globalItalic?'italic':'normal';
-      inner.style.textDecoration=globalUnderline?'underline':'none';
-      inner.style.background=globalTextBg||'transparent';
-      inner.style.padding=globalTextBg?'4px 8px':'0';
-    }
-    var overlay=txt.parentElement;
-    if(overlay){
-      overlay.style.alignItems=valign==='top'?'flex-start':valign==='bottom'?'flex-end':'center';
-      overlay.style.justifyContent=align==='left'?'flex-start':align==='right'?'flex-end':'center';
-    }
+  var backCfg=backPreviewConfig(previewKey);
+  var backCv=backCfg.cssVars||cv;
+  var backFont=backCv['--pk-font']||font;
+  var backFs=fontSizeCss(backCv['--pk-font-size']||cv['--pk-font-size']||'12');
+  var backColor=backCv['--pk-set-text']||color;
+  var backAlign=backCv['--pk-text-align']||'center';
+  var backValign=backCv['--pk-text-valign']||'center';
+  var backWeight=backCv['--pk-font-weight']||'regular';
+  var backItalic=backCv['--pk-font-italic']==='1';
+  var backUnderline=backCv['--pk-font-underline']==='1';
+  var backTextBg=normalizeHexInput(backCv['--pk-text-bg-color'])||'';
+  var backLetterSpacing=backCv['--pk-letter-spacing']||'0';
+  var backLineHeight=backCv['--pk-line-height']||'1.4';
+  applyPreviewTextStyles(previewKey);
+  ['stijlCardBack','qedCardBack'].forEach(function(id){
+    var back=g(id);if(!back)return;
+    back.classList.toggle('is-reflect',!!backCfg.reflect);
+    back.style.background=(backCfg.custom&&!backCfg.seedFromFront)?backCfg.bg:'transparent';
+    var backEmpty=back.querySelector('.cpBgEmpty');
+    if(backEmpty&&backCfg.custom&&!backCfg.seedFromFront)backEmpty.style.background=cardBgValue(backCfg.bg);
+    var backImg=back.querySelector('.cpBg');
+    if(backImg)backImg.classList.toggle('is-reflect',!!backCfg.reflect);
+    var backShapeLayer=back.querySelector('.cpShapeLayer');
+    if(backShapeLayer)backShapeLayer.classList.toggle('is-reflect',!!backCfg.reflect);
   });
   ['stijlCardPrevWrap','qedCardPrevWrap'].forEach(function(id){
     var prev=g(id);if(!prev)return;
@@ -7591,6 +14579,7 @@ function updateStijlPreview(){
   });
   renderCardShapeTargets();
   renderCoverTextTargets();
+  patchCoverElemTargets();
   var coverBlocks=coverTextStore();
   coverEditorQueryAll('.cpTextLayer[data-cover-texts="1"] .cpTextBlockText').forEach(function(node){
     var wrap=node.parentElement;
@@ -7609,6 +14598,7 @@ function updateStijlPreview(){
     node.classList.toggle('hasBg',!!bgHex);
     node.style.setProperty('--cp-text-bg',bgHex||'transparent');
   });
+  syncCanvasPreviewLayout();
 }
 function setTextAlign(val){
   if(RT.richCeTarget&&RT.richCeTarget.dataset.richType!=='question'){var ac={left:'justifyLeft',center:'justifyCenter',right:'justifyRight'};if(ac[val])applyRichCeCmd(ac[val]);return;}
@@ -7686,8 +14676,18 @@ function selectedBgShapes(bg){
   if(!list.length)list=['organic'];
   return list;
 }
+function buildBgAutoPalettePreview(pal){
+  var list=(Array.isArray(pal)?pal:[]).filter(Boolean);
+  if(!list.length)return '';
+  return '<div class="bgAutoPaletteRow">'+list.map(function(c,i){
+    var isLight=String(c||'').toLowerCase()==='#ffffff'||String(c||'').toLowerCase()==='ffffff';
+    return '<span class="brandSw bgAutoSw'+(isLight?' brandSwLight':'')+(i===0?' sel':'')+'" style="background:'+esc(c)+'"></span>';
+  }).join('')+'</div>';
+}
 function buildBgCtrls(bg,accent,title,canvas){
   var count=typeof bg.blobCount==='number'?bg.blobCount:6,alpha=typeof bg.alphaBoost==='number'?bg.alphaBoost:1.0,size=typeof bg.sizeScale==='number'?bg.sizeScale:1.0,irr=typeof bg.blobIrregularity==='number'?bg.blobIrregularity:0.35,pal=Array.isArray(bg.palette)&&bg.palette.length?bg.palette:[accent],autoMode=bg.autoMode!==false,shapes=selectedBgShapes(bg);
+  var autoSettings=autoMode?deriveAutoBgSettings():null;
+  var autoPal=autoSettings&&Array.isArray(autoSettings.palette)&&autoSettings.palette.length?autoSettings.palette:[accent];
   var SHAPES=[{v:'organic',l:'Organisch'},{v:'circle',l:'Cirkels'},{v:'grid',l:'Raster'},{v:'triangle',l:'Driehoeken'},{v:'diamond',l:'Diamanten'}];
   if(canvas){
     // Flat canvas layout: no nested card wrappers, no accordion
@@ -7700,6 +14700,7 @@ function buildBgCtrls(bg,accent,title,canvas){
           '<div class="bgAutoHint" style="margin:0 0 9px">De witte achtergrond kleurt subtiel mee met je kaartkleur.</div>'+
           '<div class="togR2" style="margin:4px 0 13px"><label style="font-size:11.5px;color:var(--k2)">Achtergrond tint</label><label class="tog"><input type="checkbox" id="bg_at"'+(bg.autoTint!==false?' checked':'')+'><span class="togSl"></span></label></div>'+
           '<div id="bg_pal">'+buildPalEd(pal)+'</div>'+
+          '<div class="bgAutoHint" style="margin:10px 0 0">Actieve kleuren volgen nu de automatisch afgeleide palette.</div>'+
         '</div>'+
         '<div class="bgCanvasFlatSec"><div class="sLbl">Vormen</div>'+
           '<div class="bgShapeBar" style="margin:4px 0 8px">'+SHAPES.map(function(s){return'<button class="shapeTypeBtn'+(shapes.indexOf(s.v)>=0?' sel':'')+'" type="button" title="'+esc(s.l)+'" aria-label="'+esc(s.l)+'" data-action="bgshape" data-v="'+s.v+'">'+shapeIconSvg(s.v==='grid'?'diamond':s.v)+'</button>';}).join('')+'</div>'+
@@ -7742,8 +14743,6 @@ function buildBgCtrls(bg,accent,title,canvas){
   '</div>';
 }
 function buildPalEd(pal){
-  var cur=pal.map(function(c){return String(c).toLowerCase();});
-  var gridIcon='<svg viewBox="0 0 14 14" width="11" height="11" fill="currentColor" opacity=".75"><rect x="1.5" y="1.5" width="3" height="3" rx=".8"/><rect x="5.5" y="1.5" width="3" height="3" rx=".8"/><rect x="9.5" y="1.5" width="3" height="3" rx=".8"/><rect x="1.5" y="5.5" width="3" height="3" rx=".8"/><rect x="5.5" y="5.5" width="3" height="3" rx=".8"/><rect x="9.5" y="5.5" width="3" height="3" rx=".8"/><rect x="1.5" y="9.5" width="3" height="3" rx=".8"/><rect x="5.5" y="9.5" width="3" height="3" rx=".8"/><rect x="9.5" y="9.5" width="3" height="3" rx=".8"/></svg>';
   var trashIcon='<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12h10l1-12"/><path d="M9 7V4h6v3"/></svg>';
   var swBtn=function(p){
     var hex=String(p.a||'').toLowerCase();
@@ -7751,7 +14750,6 @@ function buildPalEd(pal){
     return '<button class="brandSw'+(isLight?' brandSwLight':'')+'" type="button" data-action="addp" data-hex="'+esc(p.a)+'" title="'+esc(p.n)+'" style="background:'+esc(p.a)+'"></button>';
   };
   var isExpanded=!!STYLE_PAL_EXPANDED['bgpal'];
-  var bgQuick=BRAND_FAM_BG[0];
   var selIdx=Math.max(0,Math.min((pal.length?pal.length-1:0),parseInt(BG_ACTIVE_PAL_INDEX,10)||0));
   BG_ACTIVE_PAL_INDEX=selIdx;
   var currentHex=normalizeHexInput(pal[selIdx])||'#ffffff';
@@ -7763,20 +14761,16 @@ function buildPalEd(pal){
   });
   if(pal.length)html+='<button class="shapeLayerDelete bgPalDelete" type="button" title="Geselecteerde kleur verwijderen" aria-label="Geselecteerde kleur verwijderen" data-action="delp">'+trashIcon+'</button>';
   html+='</div></div>';
-  html+='<div class="brandCompact" style="margin-top:10px">';
+  html+='<div class="brandCompact brandCompact-shared" style="margin-top:10px">';
   html+='<div class="sLbl" style="margin:0 0 4px">Voeg toe</div>';
   html+='<div class="brandQSection">';
-  var bgExtQuick=bgQuick.slice();
-  (function(){var ext=BRAND_FAMILIES;for(var _qi=0;_qi<ext.length&&bgExtQuick.length<24;_qi+=2){var _fc=ext[_qi];if(_fc&&!bgExtQuick.some(function(q){return q.a===_fc.base;}))bgExtQuick.push({n:_fc.n,a:_fc.base});}})();
-  html+='<div class="brandQuickRow">';
-  html+='<div class="brandSwsGroup">'+bgExtQuick.map(swBtn).join('')+'</div>';
-  html+='<div class="brandQuickActions">';
-  html+='<button class="brandExpandBtn'+(isExpanded?' on':'')+'" type="button" data-action="expandpicker" data-target="bgpal" title="'+(isExpanded?'Minder':'Meer kleuren')+'">'+gridIcon+'</button>';
-  html+='<span class="brandQSep"></span>';
-  html+='<label class="brandCurrentSw" style="background:'+esc(currentHex)+'" title="Eigen kleur kiezen">'+
-    '<input type="color" value="'+esc(currentHex)+'" oninput="applyBgPaletteColor(this.value);this.parentElement.style.background=this.value">'+
-  '</label>';
-  html+='</div></div></div>';
+  html+=brandColorQuickRowHtml('bgpal',currentHex,BRAND_FAM_BG,{
+    swatchAction:'addp',
+    expandTarget:'bgpal',
+    currentTarget:false,
+    colorInputHandler:'applyBgPaletteColor(this.value);this.parentElement.style.background=this.value'
+  });
+  html+='</div>';
   if(isExpanded){
     html+='<div class="brandExpandedWrap">';
     var extraRows=BRAND_FAM_BG.slice(1);
@@ -7807,12 +14801,50 @@ function wireBgCtrls(){
   function wire(id,field,fmt){var el2=g(id);if(!el2)return;el2.oninput=function(){var v=parseFloat(this.value);if(isNaN(v))return;if(fmt==='int')v=Math.round(v);var vEl=g(id+'_v');if(vEl)vEl.innerHTML=fmt==='int'?sliderValueHtml(v,''):(fmt==='pct'?sliderValueHtml(Math.round(v*100),'%'):sliderValueHtml(v,'×'));bgCfg()[field]=v;markDirty();scheduleBg();};}
   wire('bg_n','blobCount','int');wire('bg_sz','sizeScale','x');wire('bg_al','alphaBoost','x');wire('bg_irr','blobIrregularity','pct');
   var at=g('bg_at');if(at)at.onchange=function(){bgCfg().autoTint=this.checked;markDirty();scheduleBg();};
-  var auto=g('bg_auto');if(auto)auto.onchange=function(){bgCfg().autoMode=this.checked;markDirty();buildStijlPreserveBg(g('pw'));};
+  var auto=g('bg_auto');if(auto)auto.onchange=function(){
+    var bc=bgCfg();
+    var wasAuto=bc.autoMode!==false;
+    bc.autoMode=this.checked;
+    if(wasAuto&&!bc.autoMode){
+      var derived=deriveAutoBgSettings();
+      if(derived&&Array.isArray(derived.palette)&&derived.palette.length){
+        bc.palette=derived.palette.slice();
+        BG_ACTIVE_PAL_INDEX=0;
+      }
+    }
+    markDirty();
+    buildStijlPreserveBg(g('pw'));
+  };
 }
 function scheduleBg(){clearTimeout(bgTimer);bgTimer=setTimeout(renderBgPreview,90);}
+function sharedAutoBackgroundHelper(){
+  return window.PK&&window.PK.autoBackground&&typeof window.PK.autoBackground==='object'
+    ? window.PK.autoBackground
+    : null;
+}
 function deriveAutoBgSettings(){
   var bg=bgCfg();
-  var accent=(S.d.meta.cssVars||{})['--pk-set-accent']||'#CFE6DF';
+  var helper=sharedAutoBackgroundHelper();
+  if(helper&&typeof helper.derivePaletteAndShapesFromLayers==='function'){
+    var derived=helper.derivePaletteAndShapesFromLayers({
+      meta:(S.d&&S.d.meta)||{},
+      getCardShapeLayers:getCardShapeLayers,
+      cardShapeStore:cardShapeStore,
+      fallbackPalette:DEFAULT_INDEX_BG_PALETTE.slice()
+    })||{};
+    var sharedShapes=Array.isArray(derived.shapes)&&derived.shapes.length?derived.shapes.slice():['organic'];
+    var sharedWeighted=Array.isArray(derived.weightedShapes)&&derived.weightedShapes.length?derived.weightedShapes.slice():sharedShapes.slice();
+    return {
+      palette:Array.isArray(derived.palette)&&derived.palette.length?derived.palette.slice():DEFAULT_INDEX_BG_PALETTE.slice(),
+      shapes:sharedShapes,
+      weightedShapes:sharedWeighted,
+      count:typeof bg.blobCount==='number'?Math.max(2,Math.min(22,Math.round(bg.blobCount))):7,
+      alphaBoost:typeof bg.alphaBoost==='number'?Math.max(0.4,Math.min(3.2,bg.alphaBoost)):1.05,
+      sizeScale:typeof bg.sizeScale==='number'?Math.max(0.3,Math.min(2.4,bg.sizeScale)):0.85,
+      irregularity:typeof bg.blobIrregularity==='number'?Math.max(0.05,Math.min(0.65,bg.blobIrregularity)):0.35,
+      seedKey:derived.seedKey||((derived.palette||[]).join('|')+'__'+sharedWeighted.join('|'))
+    };
+  }
   var themeKeys=((S.d.meta||{}).themes||[]).map(function(th){return th&&th.key;}).filter(Boolean);
   var shapeKeys=Object.keys(cardShapeStore()).filter(function(key){
     return getCardShapeLayers(key).length>0;
@@ -7836,18 +14868,253 @@ function deriveAutoBgSettings(){
     });
   });
   var palette=Object.keys(paletteCount).sort(function(a,b){return paletteCount[b]-paletteCount[a];}).slice(0,6);
-  var shapes=Object.keys(shapeCount).sort(function(a,b){return shapeCount[b]-shapeCount[a];}).slice(0,4);
+  var expandedShapes=adminExpandWeightedBgShapes(shapeCount);
+  var shapes=expandedShapes.ordered||['organic'];
+  var weightedShapes=expandedShapes.expanded||shapes;
   if(!palette.length)palette=DEFAULT_INDEX_BG_PALETTE.slice();
   if(!shapes.length)shapes=['organic'];
   return {
     palette:palette,
     shapes:shapes,
+    weightedShapes:weightedShapes,
     count:typeof bg.blobCount==='number'?Math.max(2,Math.min(22,Math.round(bg.blobCount))):7,
     alphaBoost:typeof bg.alphaBoost==='number'?Math.max(0.4,Math.min(3.2,bg.alphaBoost)):1.05,
     sizeScale:typeof bg.sizeScale==='number'?Math.max(0.3,Math.min(2.4,bg.sizeScale)):0.85,
     irregularity:typeof bg.blobIrregularity==='number'?Math.max(0.05,Math.min(0.65,bg.blobIrregularity)):0.35,
-    seedKey:themeKeys.join('|')+'__'+palette.join('|')+'__'+shapes.join('|')
+    seedKey:themeKeys.join('|')+'__'+palette.join('|')+'__'+weightedShapes.join('|')
   };
+}
+function focusPreviewBgShapeScaleFactor(W,H){
+  var currentW=Math.max(1,Number(W)||0);
+  var currentH=Math.max(1,Number(H)||0);
+  var refW=Math.max(1,PREVIEW_BG_SCALE_REF.width||600);
+  var refH=Math.max(1,PREVIEW_BG_SCALE_REF.height||780);
+  var scaleX=currentW/refW;
+  var scaleY=currentH/refH;
+  var scale=Math.sqrt(scaleX*scaleY);
+  return Math.max(1,Math.min(3.2,scale));
+}
+
+function paintSharedPreviewBackground(ctx,W,H,opts){
+  opts=opts||{};
+  var bg=bgCfg();
+  var isNight=!!opts.isNight;
+  var presentationMode=!!opts.presentationMode;
+  var autoSettings=bg.autoMode!==false?deriveAutoBgSettings():null;
+  var pal=autoSettings?autoSettings.palette:(Array.isArray(bg.palette)&&bg.palette.length?bg.palette:DEFAULT_INDEX_BG_PALETTE.slice(0,1));
+  var darkPalette=(Array.isArray(bg.darkPalette)&&bg.darkPalette.length?bg.darkPalette:['#67C5BB','#74CEC4','#7FD1C8','#8AD8D0','#93DCD4']);
+  var count=Math.max(1,Math.round(autoSettings?autoSettings.count:(typeof bg.blobCount==='number'?bg.blobCount:6)));
+  var alphaBoost=autoSettings?autoSettings.alphaBoost:(typeof bg.alphaBoost==='number'?bg.alphaBoost:1);
+  var darkAlphaBoost=(typeof bg.darkAlphaBoost==='number'?bg.darkAlphaBoost:1.02);
+  var sizeScale=autoSettings?autoSettings.sizeScale:(typeof bg.sizeScale==='number'?bg.sizeScale:1);
+  var darkSizeScale=(typeof bg.darkSizeScale==='number'?bg.darkSizeScale:1.0);
+  var darkMix=(typeof bg.darkMix==='number'?bg.darkMix:0.12);
+  var irr=autoSettings?autoSettings.irregularity:(typeof bg.blobIrregularity==='number'?bg.blobIrregularity:0.35);
+  var shapeSource=autoSettings?(autoSettings.weightedShapes&&autoSettings.weightedShapes.length?autoSettings.weightedShapes:autoSettings.shapes):selectedBgShapes(bg);
+  var seedShapes=autoSettings?(autoSettings.weightedShapes&&autoSettings.weightedShapes.length?autoSettings.weightedShapes:autoSettings.shapes):shapeSource;
+  var presentationScale=presentationMode
+    ?((typeof opts.presentationScale==='number'&&isFinite(opts.presentationScale)&&opts.presentationScale>0)
+      ?opts.presentationScale
+      :focusPreviewBgShapeScaleFactor(W,H))
+    :1;
+  if(window.PK&&window.PK.previewBackground&&typeof window.PK.previewBackground.drawToCanvas==='function'){
+    window.PK.previewBackground.drawToCanvas(ctx,{
+      width:W,
+      height:H,
+      isNight:isNight,
+      baseFill:opts.baseFill,
+      palette:pal,
+      darkPalette:darkPalette,
+      count:count,
+      alphaBoost:alphaBoost,
+      darkAlphaBoost:darkAlphaBoost,
+      sizeScale:sizeScale*presentationScale,
+      darkSizeScale:darkSizeScale*presentationScale,
+      darkMix:darkMix,
+      irregularity:irr,
+      shapeSource:shapeSource,
+      seedShapes:seedShapes,
+      seedKey:(autoSettings&&autoSettings.seedKey)?autoSettings.seedKey:(pal.join('|')+'|'+count+'|'+seedShapes.join('|'))
+    });
+    return;
+  }
+  var useGrid=shapeSource.indexOf('grid')>=0;
+  var drawShapes=shapeSource.filter(function(s){return s!=='grid';});
+  if(!drawShapes.length)drawShapes=['organic'];
+  ctx.fillStyle=opts.baseFill||(isNight?'#1b1840':'#F8FAFA');
+  ctx.fillRect(0,0,W,H);
+  var seed=0;
+  var seedSource=(autoSettings&&autoSettings.seedKey)?autoSettings.seedKey:pal.join('|')+'|'+count+'|'+seedShapes.join('|');
+  for(var si=0;si<seedSource.length;si++)seed=((seed*31+seedSource.charCodeAt(si))|0)>>>0;
+  var rnd=prng(seed+count*997);
+  var pos=[];
+  var aspect=W/Math.max(H,1);
+  var phoneRef=780;
+  var maxDim=Math.max(W,H);
+  var scaleUp=Math.max(1,Math.pow(maxDim/phoneRef,0.3));
+  var baseDim=phoneRef*(aspect>1?0.8:1)*scaleUp;
+  if(useGrid){
+    var cols=Math.ceil(Math.sqrt(count)),rows=Math.ceil(count/cols);
+    for(var i=0;i<count;i++){
+      var col=i%cols,row=Math.floor(i/cols);
+      pos.push({x:W*((col+.2+rnd()*.6)/cols*1.16-.08),y:H*((row+.2+rnd()*.6)/rows*1.16-.08)});
+    }
+  }else{
+    for(var j=0;j<count;j++)pos.push({x:(rnd()*1.1-.05)*W,y:(rnd()*1.1-.05)*H});
+  }
+  for(var k=0;k<count;k++){
+    var raw=(isNight?darkPalette:pal)[k%(isNight?darkPalette.length:pal.length)],rgb=h2r(raw),hsl=r2h(rgb[0],rgb[1],rgb[2]);
+    var warm=(hsl[0]>=0&&hsl[0]<=70)||(hsl[0]>=290&&hsl[0]<=360),amt=warm?.12:.1;
+    if(hsl[2]>.75)amt=warm?.18:.14;
+    var alpha=isNight?Math.min((0.22+rnd()*.10)*darkAlphaBoost,.6):Math.min(((warm?.19:.24)+rnd()*.1)*alphaBoost,.68);
+    if(presentationMode)alpha*=isNight?0.92:0.86;
+    var radius=(baseDim*(.19+rnd()*.16))*(isNight?darkSizeScale:sizeScale)*presentationScale;
+    var shapeType=drawShapes[k%drawShapes.length]||'organic';
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle=isNight?mixHexAdmin(raw,'#1b1840',darkMix):mixW(raw,amt);
+    if(isNight){
+      ctx.shadowColor=ctx.fillStyle;
+      ctx.shadowBlur=22;
+    }else{
+      ctx.shadowColor='transparent';
+      ctx.shadowBlur=0;
+    }
+    if(shapeType==='circle'){ctx.beginPath();ctx.arc(pos[k].x,pos[k].y,radius,0,Math.PI*2);ctx.closePath();ctx.fill();}
+    else if(shapeType==='triangle'){triPath(ctx,pos[k].x,pos[k].y,radius,rnd);ctx.fill();}
+    else if(shapeType==='diamond'){diamondPath(ctx,pos[k].x,pos[k].y,radius,rnd);ctx.fill();}
+    else{blobPath(ctx,pos[k].x,pos[k].y,radius,irr,8+Math.floor(rnd()*5),rnd);ctx.fill();}
+  }
+  ctx.globalAlpha=1;
+  ctx.shadowBlur=0;
+  ctx.shadowColor='transparent';
+}
+
+var PREVIEW_BG_RENDER_REF={windowW:0,logicalH:0};
+var PREVIEW_BG_SCALE_REF={width:0,height:0};
+var PREVIEW_BG_CARD_REF={logicalW:0,logicalH:0,cardX:0,cardY:0,cardW:0,cardH:0};
+var PREVIEW_BG_SNAPSHOT={canvas:null,width:0,height:0,cardX:0,cardY:0,cardW:0,cardH:0};
+function previewBgLogicalSize(wrap,W,H){
+  var win=wrap&&typeof wrap.closest==='function'?wrap.closest('.stijlCanvasWindow'):null;
+  if(!win)return {width:W,height:H};
+  if(Math.abs((PREVIEW_BG_RENDER_REF.windowW||0)-W)>2){
+    PREVIEW_BG_RENDER_REF.windowW=W;
+    PREVIEW_BG_RENDER_REF.logicalH=H;
+  }else{
+    PREVIEW_BG_RENDER_REF.logicalH=Math.max(PREVIEW_BG_RENDER_REF.logicalH||0,H);
+  }
+  return {width:W,height:PREVIEW_BG_RENDER_REF.logicalH||H};
+}
+function previewBgCardMetrics(wrap){
+  if(!wrap||!wrap.getBoundingClientRect)return null;
+  var card=wrap.querySelector('.cardFaceOuter, .adminInfoSlide');
+  if(!card||!card.getBoundingClientRect)return null;
+  var wrapRect=wrap.getBoundingClientRect();
+  var cardRect=card.getBoundingClientRect();
+  if(!(wrapRect.width>0&&wrapRect.height>0&&cardRect.width>0&&cardRect.height>0))return null;
+  return {
+    x:cardRect.left-wrapRect.left,
+    y:cardRect.top-wrapRect.top,
+    w:cardRect.width,
+    h:cardRect.height
+  };
+}
+function capturePreviewBackgroundReferenceMetrics(wrap){
+  if(!wrap||!wrap.getBoundingClientRect)return null;
+  var wrapRect=wrap.getBoundingClientRect();
+  if(!(wrapRect.width>0&&wrapRect.height>0))return null;
+  var logical=previewBgLogicalSize(wrap,Math.round(wrapRect.width),Math.round(wrapRect.height));
+  var cardMetrics=previewBgCardMetrics(wrap);
+  if(!cardMetrics)return null;
+  PREVIEW_BG_SCALE_REF.width=logical.width;
+  PREVIEW_BG_SCALE_REF.height=logical.height;
+  PREVIEW_BG_CARD_REF.logicalW=logical.width;
+  PREVIEW_BG_CARD_REF.logicalH=logical.height;
+  PREVIEW_BG_CARD_REF.cardX=cardMetrics.x;
+  PREVIEW_BG_CARD_REF.cardY=cardMetrics.y;
+  PREVIEW_BG_CARD_REF.cardW=cardMetrics.w;
+  PREVIEW_BG_CARD_REF.cardH=cardMetrics.h;
+  return {
+    logical:logical,
+    card:cardMetrics
+  };
+}
+function capturePreviewBackgroundSnapshot(wrap){
+  if(!wrap||!wrap.getBoundingClientRect)return null;
+  var srcCanvas=wrap.querySelector('canvas');
+  var wrapRect=wrap.getBoundingClientRect();
+  var cardMetrics=previewBgCardMetrics(wrap);
+  if(!srcCanvas||!cardMetrics||!(wrapRect.width>0&&wrapRect.height>0&&srcCanvas.width>0&&srcCanvas.height>0))return null;
+  var snap=document.createElement('canvas');
+  snap.width=srcCanvas.width;
+  snap.height=srcCanvas.height;
+  var snapCtx=snap.getContext('2d');
+  if(!snapCtx)return null;
+  snapCtx.drawImage(srcCanvas,0,0);
+  var scaleX=srcCanvas.width/wrapRect.width;
+  var scaleY=srcCanvas.height/wrapRect.height;
+  PREVIEW_BG_SNAPSHOT.canvas=snap;
+  PREVIEW_BG_SNAPSHOT.width=srcCanvas.width;
+  PREVIEW_BG_SNAPSHOT.height=snap.height;
+  PREVIEW_BG_SNAPSHOT.cardX=cardMetrics.x*scaleX;
+  PREVIEW_BG_SNAPSHOT.cardY=cardMetrics.y*scaleY;
+  PREVIEW_BG_SNAPSHOT.cardW=cardMetrics.w*scaleX;
+  PREVIEW_BG_SNAPSHOT.cardH=cardMetrics.h*scaleY;
+  return PREVIEW_BG_SNAPSHOT;
+}
+function drawPreviewSnapshotIntoCanvas(ctx,actualW,actualH,snap){
+  if(!ctx||!snap||!snap.canvas||!(snap.width>0&&snap.height>0))return false;
+  // The visible preview background is already a final cropped composition.
+  // Focus mode should enlarge that preview window itself, not re-anchor the
+  // composition on the card. Center-cover scaling keeps the same background
+  // feeling as the source preview, only at presentation size.
+  var scale=Math.max(
+    actualW/Math.max(1,snap.width),
+    actualH/Math.max(1,snap.height)
+  );
+  var drawW=snap.width*scale;
+  var drawH=snap.height*scale;
+  var dx=(actualW-drawW)/2;
+  var dy=(actualH-drawH)/2;
+  ctx.clearRect(0,0,actualW,actualH);
+  ctx.drawImage(snap.canvas,0,0,snap.width,snap.height,dx,dy,drawW,drawH);
+  return true;
+}
+function drawPreviewBackgroundIntoCanvas(ctx,actualW,actualH,logicalW,logicalH,opts){
+  if(!ctx)return;
+  if(logicalW===actualW&&logicalH===actualH){
+    paintSharedPreviewBackground(ctx,actualW,actualH,opts);
+    return;
+  }
+  var off=document.createElement('canvas');
+  off.width=logicalW;
+  off.height=logicalH;
+  var offCtx=off.getContext('2d');
+  if(!offCtx){
+    paintSharedPreviewBackground(ctx,actualW,actualH,opts);
+    return;
+  }
+  paintSharedPreviewBackground(offCtx,logicalW,logicalH,opts);
+  ctx.clearRect(0,0,actualW,actualH);
+  var refCard=opts&&opts.referenceCard;
+  var curCard=opts&&opts.currentCard;
+  var useCardAnchoredFit=!!(refCard&&curCard&&refCard.w>0&&refCard.h>0&&curCard.w>0&&curCard.h>0);
+  var scale,drawW,drawH,dx,dy;
+  if(useCardAnchoredFit){
+    var cardScaleX=curCard.w/refCard.w;
+    var cardScaleY=curCard.h/refCard.h;
+    scale=(cardScaleX+cardScaleY)/2;
+    drawW=logicalW*scale;
+    drawH=logicalH*scale;
+    dx=(curCard.x+(curCard.w/2)) - ((refCard.x+(refCard.w/2))*scale);
+    dy=(curCard.y+(curCard.h/2)) - ((refCard.y+(refCard.h/2))*scale);
+  }else{
+    scale=Math.max(actualW/Math.max(1,logicalW),actualH/Math.max(1,logicalH));
+    drawW=logicalW*scale;
+    drawH=logicalH*scale;
+    dx=(actualW-drawW)/2;
+    dy=(actualH-drawH)/2;
+  }
+  ctx.drawImage(off,0,0,logicalW,logicalH,dx,dy,drawW,drawH);
 }
 
 // Canvas BG preview follows the actual preview window ratio.
@@ -7860,57 +15127,49 @@ function renderBgPreview(){
     var H2=Math.round(rect.height)||wrap.offsetHeight||Math.round(W2*(10/16));
     if(W2<20||H2<20){setTimeout(renderBgPreview,100);return;}
     canvas.width=W2*2;canvas.height=H2*2;canvas.style.width=W2+'px';canvas.style.height=H2+'px';
-    var ctx=canvas.getContext('2d');if(!ctx)return;var W=W2*2,H=H2*2;
-    var bg=bgCfg(),accent=(S.d.meta.cssVars||{})['--pk-set-accent']||'#CFE6DF';
+    var ctx=canvas.getContext('2d');if(!ctx)return;
     var isNight=previewNightMode()||adminNightMode();
-    var autoSettings=bg.autoMode!==false?deriveAutoBgSettings():null;
-    var pal=autoSettings?autoSettings.palette:(Array.isArray(bg.palette)&&bg.palette.length?bg.palette:[accent]);
-    var darkPalette=(Array.isArray(bg.darkPalette)&&bg.darkPalette.length?bg.darkPalette:['#67C5BB','#74CEC4','#7FD1C8','#8AD8D0','#93DCD4']);
-    var count=Math.max(1,Math.round(autoSettings?autoSettings.count:(typeof bg.blobCount==='number'?bg.blobCount:6)));
-    var alphaBoost=autoSettings?autoSettings.alphaBoost:(typeof bg.alphaBoost==='number'?bg.alphaBoost:1);
-    var darkAlphaBoost=(typeof bg.darkAlphaBoost==='number'?bg.darkAlphaBoost:1.02);
-    var sizeScale=autoSettings?autoSettings.sizeScale:(typeof bg.sizeScale==='number'?bg.sizeScale:1);
-    var darkSizeScale=(typeof bg.darkSizeScale==='number'?bg.darkSizeScale:1.0);
-    var darkMix=(typeof bg.darkMix==='number'?bg.darkMix:0.12);
-    var irr=autoSettings?autoSettings.irregularity:(typeof bg.blobIrregularity==='number'?bg.blobIrregularity:0.35);
-    var shapes=autoSettings?autoSettings.shapes:selectedBgShapes(bg);
-    var useGrid=shapes.indexOf('grid')>=0;
-    var drawShapes=shapes.filter(function(s){return s!=='grid';});
-    if(!drawShapes.length)drawShapes=['organic'];
-    ctx.fillStyle=isNight?'#1b1840':'#F8FAFA';ctx.fillRect(0,0,W,H);
-    var seed=0;
-    var seedSource=(autoSettings&&autoSettings.seedKey)?autoSettings.seedKey:pal.join('|')+'|'+count+'|'+shapes.join('|');
-    for(var si=0;si<seedSource.length;si++)seed=((seed*31+seedSource.charCodeAt(si))|0)>>>0;
-    var rnd=prng(seed+count*997);
-    var pos=[];
-    var posRefH=Math.round(W*1.6);
-    var aspect=W/Math.max(posRefH,1);
-    var phoneRef=780;var baseDim=phoneRef*(aspect>1?0.8:1);
-    if(useGrid){var cols=Math.ceil(Math.sqrt(count)),rows=Math.ceil(count/cols);for(var i=0;i<count;i++){var col=i%cols,row=Math.floor(i/cols);pos.push({x:W*((col+.2+rnd()*.6)/cols*1.16-.08),y:posRefH*((row+.2+rnd()*.6)/rows*1.16-.08)});}}
-    else{for(var i=0;i<count;i++)pos.push({x:(rnd()*1.1-.05)*W,y:(rnd()*1.1-.05)*posRefH});}
-    var extraH=H-posRefH;
-    if(extraH>40){var extraCount=Math.max(1,Math.round(count*extraH/posRefH));var rnd2=prng(seed+7919);for(var ei=0;ei<extraCount;ei++)pos.push({x:(rnd2()*1.1-.05)*W,y:posRefH+(rnd2()*.9+.05)*extraH});count+=extraCount;}
-    for(var i=0;i<count;i++){
-      var raw=(isNight?darkPalette:pal)[i%(isNight?darkPalette.length:pal.length)],rgb=h2r(raw),hsl=r2h(rgb[0],rgb[1],rgb[2]);
-      var warm=(hsl[0]>=0&&hsl[0]<=70)||(hsl[0]>=290&&hsl[0]<=360),amt=warm?.12:.1;if(hsl[2]>.75)amt=warm?.18:.14;
-      var alpha=isNight?Math.min((0.22+rnd()*.10)*darkAlphaBoost,.6):Math.min(((warm?.19:.24)+rnd()*.1)*alphaBoost,.68),radius=(baseDim*(.19+rnd()*.16))*(isNight?darkSizeScale:sizeScale);
-      var shapeType=drawShapes[i%drawShapes.length]||'organic';
-      ctx.globalAlpha=alpha;ctx.fillStyle=isNight?mixHexAdmin(raw,'#1b1840',darkMix):mixW(raw,amt);
-      if(isNight){
-        ctx.shadowColor=ctx.fillStyle;
-        ctx.shadowBlur=22;
-      }else{
-        ctx.shadowColor='transparent';
-        ctx.shadowBlur=0;
-      }
-      if(shapeType==='circle'){ctx.beginPath();ctx.arc(pos[i].x,pos[i].y,radius,0,Math.PI*2);ctx.closePath();ctx.fill();}
-      else if(shapeType==='triangle'){triPath(ctx,pos[i].x,pos[i].y,radius,rnd);ctx.fill();}
-      else if(shapeType==='diamond'){diamondPath(ctx,pos[i].x,pos[i].y,radius,rnd);ctx.fill();}
-      else{blobPath(ctx,pos[i].x,pos[i].y,radius,irr,8+Math.floor(rnd()*5),rnd);ctx.fill();}
+    var presentationMode=isViewCardsFocusModeActive();
+    var focusSurface=focusPreviewSurfacePalette(isNight,STYLE_PREVIEW_KEY||'cover');
+    applyFocusPreviewSurfaceVars(presentationMode?focusSurface:null);
+    var currentCard=previewBgCardMetrics(wrap);
+    var logical=(presentationMode&&PREVIEW_BG_SCALE_REF.width&&PREVIEW_BG_SCALE_REF.height)
+      ?{width:PREVIEW_BG_SCALE_REF.width,height:PREVIEW_BG_SCALE_REF.height}
+      :previewBgLogicalSize(wrap,W2,H2);
+    if(presentationMode&&PREVIEW_BG_SNAPSHOT.canvas){
+      var usedSnapshot=drawPreviewSnapshotIntoCanvas(ctx,W2*2,H2*2,PREVIEW_BG_SNAPSHOT);
+      if(usedSnapshot)return;
     }
-    ctx.globalAlpha=1;
-    ctx.shadowBlur=0;
-    ctx.shadowColor='transparent';
+    if(!presentationMode&&currentCard){
+      PREVIEW_BG_SCALE_REF.width=logical.width;
+      PREVIEW_BG_SCALE_REF.height=logical.height;
+      PREVIEW_BG_CARD_REF.logicalW=logical.width;
+      PREVIEW_BG_CARD_REF.logicalH=logical.height;
+      PREVIEW_BG_CARD_REF.cardX=currentCard.x;
+      PREVIEW_BG_CARD_REF.cardY=currentCard.y;
+      PREVIEW_BG_CARD_REF.cardW=currentCard.w;
+      PREVIEW_BG_CARD_REF.cardH=currentCard.h;
+    }
+    var presentationScale=1;
+    drawPreviewBackgroundIntoCanvas(ctx,W2*2,H2*2,logical.width*2,logical.height*2,{
+      isNight:isNight,
+      presentationMode:presentationMode,
+      presentationScale:presentationScale,
+      baseFill:presentationMode?focusSurface.canvas:previewCardsBaseFill(isNight),
+      referenceCard:(presentationMode&&PREVIEW_BG_CARD_REF.cardW&&PREVIEW_BG_CARD_REF.cardH)?{
+        x:PREVIEW_BG_CARD_REF.cardX*2,
+        y:PREVIEW_BG_CARD_REF.cardY*2,
+        w:PREVIEW_BG_CARD_REF.cardW*2,
+        h:PREVIEW_BG_CARD_REF.cardH*2
+      }:null,
+      currentCard:(presentationMode&&currentCard)?{
+        x:currentCard.x*2,
+        y:currentCard.y*2,
+        w:currentCard.w*2,
+        h:currentCard.h*2
+      }:null
+    });
+    if(!presentationMode&&currentCard)capturePreviewBackgroundSnapshot(wrap);
   });
 }
 function prng(s){var a=s>>>0;return function(){a|=0;a=(a+0x6D2B79F5)|0;var t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
@@ -7932,20 +15191,9 @@ function buildInst(target){
     return '<div class="togRow"><div><label for="'+id+'">'+esc(label)+'</label>'+(sub?'<span class="togRowSub">'+esc(sub)+'</span>':'')+'</div>'+
       '<label class="tog"><input type="checkbox" id="'+id+'"'+(checked?' checked':'')+'><span class="togSl"></span></label></div>';
   }
-
-  var currentFmtId=getCardFormatId();
-  var formatPickerHtml='<section class="instSection instSectionWide">'+
-    '<div class="sLbl" style="margin-top:0">Kaartformaat</div>'+
-    '<div class="instCard">'+
-      fmtStripHtml(currentFmtId,'setCardFormat')+
-      '<p class="fHint" style="margin-top:10px">De editor bewaart kaartbeelden centraal in <code>cards/</code>. Het gekozen formaat bepaalt de verhouding ('+esc(cardFormatDimensionsText(S.d.meta))+') en wat je in previews en cropkaders ziet.</p>'+
-    '</div>'+
-  '</section>';
-
-  var backIcon='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3 4.5 8l5 5"/><path d="M5 8h6.5"/></svg>';
   target.innerHTML='<div class="panel instPanel"><div class="instShell">'+
-    '<div class="instTopbar"><div class="instIntro"><p>Bepaal welke knoppen zichtbaar zijn en hoe de kaartenviewer zich gedraagt.</p></div><button class="btnS instBackBtn" type="button" onclick="closeInstPage()">'+backIcon+'<span>Terug naar opmaak</span></button></div>'+
-    '<div class="instGrid">'+formatPickerHtml+
+    '<div class="instTopbar"><div class="instIntro"><p>Bepaal welke knoppen zichtbaar zijn en hoe de kaartenviewer zich gedraagt.</p></div></div>'+
+    '<div class="instGrid">'+
       '<section class="instSection">'+
         '<div class="sLbl" style="margin-top:0">Menu</div>'+
         '<div class="instCard">'+
@@ -8022,6 +15270,7 @@ function revertSetChanges(){
 function saveSet(cb){
   collectCurrent();
   var saveLabel=(S.clTab==='opmaken'&&S.opmPane==='kaart')?'Kaart opslaan':'Opslaan';
+  setTopSaveStatus('saving','Opslaan…');
   var btn=g('saveBtn');if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span> '+saveLabel+'…';}
   var id=S.activeId,d=S.d,msg='Update set: '+id;
   var steps=[
@@ -8057,17 +15306,20 @@ function saveSet(cb){
       resetHistory(S.d);
       syncDirtyFromSnapshot();
       lsDel('pk_draft_'+id);
-      if(btn){btn.disabled=false;btn.innerHTML=saveLabel;}
+      if(btn){btn.disabled=false;btn.innerHTML=buildTopSaveBtnInnerHtml(saveLabel);}
+      setTopSaveStatus('saved','Opgeslagen',2600);
       renderSidebar();refreshChecklistChrome();toast('Opgeslagen ✓','green');if(typeof cb==='function')cb();
     }).catch(function(e){
-      if(btn){btn.disabled=false;btn.innerHTML=saveLabel;}
+      if(btn){btn.disabled=false;btn.innerHTML=buildTopSaveBtnInnerHtml(saveLabel);}
+      setTopSaveStatus('error','Opslaan mislukt',3400);
       toast('Fout: '+e.message,'red');
     });
   }
   Promise.all([refreshSetShas(id,d),refreshIndexSha()]).then(function(){
     return doSave();
   }).catch(function(e){
-    if(btn){btn.disabled=false;btn.innerHTML=saveLabel;}
+    if(btn){btn.disabled=false;btn.innerHTML=buildTopSaveBtnInnerHtml(saveLabel);}
+    setTopSaveStatus('error','Opslaan mislukt',3400);
     toast('Fout: '+e.message,'red');
   });
 }
@@ -8076,6 +15328,13 @@ function saveSet(cb){
 // NEW / DUPLICATE / DELETE
 // ═══════════════════════════════════════════
 function showNewSetModal(){
+  if(!canCreateSet()){
+    var lim=planLimits().maxSets;
+    showModal('<h3>Limiet bereikt</h3>'+
+      '<p>Je hebt het maximum van <strong>'+lim+' sets</strong> bereikt.</p>'+
+      '<div class="mAct"><button class="mCa" onclick="closeModal()">Sluiten</button></div>');
+    return;
+  }
   var _setNames=['bijv. Diep Luisteren','bijv. Eerlijk Vertellen','bijv. Moeilijke Gesprekken','bijv. Goed Nadenken','bijv. Vriendelijk Botsen','bijv. Rustig Reflecteren','bijv. Helder Kijken','bijv. Nieuwsgierig Zijn','bijv. Dapper Delen','bijv. Stil Staan','bijv. Vertrouwen Opbouwen','bijv. Grenzen Verkennen','bijv. Loslaten en Leren','bijv. Iets Nieuws Wagen','bijv. Patronen Doorbreken','bijv. Beter Begrijpen','bijv. Keuzes Maken','bijv. Wat Speelt Er','bijv. Terugkijken en Vooruitkijken','bijv. De Essentie Raken','bijv. Voelen wat Telt','bijv. Ongemak Omarmen','bijv. Buiten de Lijntjes','bijv. De Volgende Stap'];
   var _ph=_setNames[Math.floor(Math.random()*_setNames.length)];
   showModal('<h3>Nieuwe kaartenset</h3>'+
@@ -8142,7 +15401,7 @@ function deleteCardFile(path,sid){
     });
     refreshLibGrid(S.activeId);
     refreshAdminPanel();
-    setTimeout(loadCardPreviews,50);
+    scheduleCardPreviewWarmup(120);
     toast('Verwijderd','green');
   }).catch(function(e){toast('Fout: '+e.message,'red');});
 }
@@ -8164,7 +15423,7 @@ function removeLibraryFile(path){
     });
     refreshLibGrid(S.activeId);
     refreshAdminPanel();
-    setTimeout(loadCardPreviews,50);
+    scheduleCardPreviewWarmup(120);
     toast('Verwijderd','green');
   }).catch(function(e){toast('Fout bij verwijderen: '+e.message,'red');});
 }
@@ -8176,7 +15435,7 @@ function deleteGhFolder(folderPath){  return api('/contents/'+folderPath).then(f
     }));
   }).catch(function(){});
 }
-function doDelete(){showModal('<h3>Set verwijderen?</h3><p>Verwijdert <strong>'+esc(S.d&&S.d.meta&&S.d.meta.title||S.activeId)+'</strong> en alle bijbehorende data permanent.</p><div class="mAct"><button class="mCa" onclick="closeModal()">Annuleren</button><button class="mDng" onclick="execDel()">Verwijderen</button></div>');}
+function doDelete(){showModal('<h3>Naar prullenbak?</h3><p>Zet <strong>'+esc(S.d&&S.d.meta&&S.d.meta.title||S.activeId)+'</strong> in de prullenbak. Je kunt hem binnen 30 dagen herstellen.</p><div class="mAct"><button class="mCa" onclick="closeModal()">Annuleren</button><button class="mDng" onclick="execDel()">Naar prullenbak</button></div>');}
 function execDel(){
   closeModal();var id=S.activeId;
   S.sets=S.sets.filter(function(s){return s.id!==id;});
@@ -8268,11 +15527,12 @@ document.addEventListener('click',function(ev){
           if(tgt0==='settc'){
             var tcHex0=pk0==='cover'&&acb0?(acb0.color||'#1a1a2e'):((m0.cssVars||{})['--pk-set-text']||'#1a1a2e');
             var tcMeta0=stylePaletteMeta('settc');
-            popEl0.innerHTML=brandPaletteHtml('settc',tcHex0,[tcMeta0.quick.slice(0,8)].concat(BRAND_FAM_BG.slice(1)));
+            var tcRows0=[tcMeta0.quick.slice(0,8)].concat(BRAND_FAM_BG.slice(1));
+            popEl0.innerHTML=brandTextColorPaletteHtml('settc',tcHex0,tcRows0,{universal:true});
           } else {
             var tbHex0=pk0==='cover'&&acb0?(acb0.bg||''):((m0.cssVars||{})['--pk-text-bg-color']||'');
             var tbNoSw0='<button class="brandSw brandNoColorSw'+(tbHex0?'':' sel')+'" type="button" title="Geen vlak" onclick="setTextBgMode(\'\')"><svg viewBox="0 0 18 18" width="18" height="18"><line x1="3" y1="15" x2="15" y2="3" stroke="#d05050" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
-            popEl0.innerHTML=brandPaletteHtml('settb',tbHex0||'',BRAND_FAM_BG,{prefixHtml:tbNoSw0});
+            popEl0.innerHTML=brandTextColorPaletteHtml('settb',tbHex0||'',BRAND_FAM_BG,{prefixHtml:tbNoSw0});
           }
         } else {
           buildStijlPreserveBg(g('pw'));
@@ -8342,7 +15602,7 @@ document.addEventListener('click',function(ev){
   closeTileMenus();
   var toolbar=getFloatingTextBar();
   if(toolbar&&toolbar.contains(ev.target)) return;
-  var textTarget=ev.target.closest&&ev.target.closest('textarea.richTa, textarea.bulkArea');
+  var textTarget=ev.target.closest&&ev.target.closest('textarea.richTa');
   if(textTarget){
     showFloatingTextBar(textTarget);
     return;
@@ -8387,6 +15647,9 @@ document.addEventListener('selectionchange',function(){
   }catch(e){}
 });
 document.addEventListener('mousedown',function(e){
+  if(!(e.target&&e.target.closest&&e.target.closest('.tbRProfileMenu'))){
+    closeAllTopProfileMenus();
+  }
   var inToolbar=!!(e.target.closest&&e.target.closest('.stijlCanvasTopTools,.stijlCanvasToolbar'));
   if(!inToolbar||!RT.richCeTarget)return;
   try{var sel=window.getSelection();if(sel&&sel.rangeCount)RT.savedRange=sel.getRangeAt(0).cloneRange();}catch(e){}
@@ -8394,7 +15657,30 @@ document.addEventListener('mousedown',function(e){
     e.preventDefault();
   }
 },true);
+document.addEventListener('toggle',function(e){
+  var det=e.target;
+  if(!det||!det.classList||!det.classList.contains('tbRProfileMenu'))return;
+  if(det.open){
+    closeAllTopProfileMenus(det);
+    scheduleTopProfileMenuAutoClose(det,2800);
+  }else{
+    clearTopProfileMenuAutoClose(det);
+  }
+},true);
+document.addEventListener('mouseover',function(e){
+  var det=e.target&&e.target.closest?e.target.closest('.tbRProfileMenu'):null;
+  if(det)clearTopProfileMenuAutoClose(det);
+},true);
+document.addEventListener('mouseout',function(e){
+  var det=e.target&&e.target.closest?e.target.closest('.tbRProfileMenu'):null;
+  if(!det)return;
+  if(e.relatedTarget&&det.contains(e.relatedTarget))return;
+  if(det.open)scheduleTopProfileMenuAutoClose(det,1200);
+},true);
 document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){
+    closeAllTopProfileMenus();
+  }
   if(!e.target||!e.target.classList||!e.target.classList.contains('richCe'))return;
   if(!(e.ctrlKey||e.metaKey))return;
   if(e.key==='b'||e.key==='B'){e.preventDefault();document.execCommand('bold');}
@@ -8504,6 +15790,16 @@ document.addEventListener('drop',function(ev){
     return;
   }
 });
+function handleFocusPresentationFullscreenChange(){
+  var active=isFocusPresentationFullscreenActive();
+  var app=g('app');
+  if(app)app.classList.toggle('focus-presentation-active',active&&isViewCardsFocusModeActive());
+  if(!active&&isViewCardsFocusModeActive())exitViewCardsFocusMode();
+}
+document.addEventListener('fullscreenchange',handleFocusPresentationFullscreenChange);
+document.addEventListener('webkitfullscreenchange',handleFocusPresentationFullscreenChange);
+document.addEventListener('mozfullscreenchange',handleFocusPresentationFullscreenChange);
+document.addEventListener('MSFullscreenChange',handleFocusPresentationFullscreenChange);
 document.addEventListener('focusin',function(ev){
   if(isTextToolbarTarget(ev.target)) showFloatingTextBar(ev.target);
 });
@@ -8514,6 +15810,24 @@ document.addEventListener('mousedown',function(ev){
   if(editingText&&(editingText===ev.target||editingText.contains(ev.target)))return;
   finishCoverTextInlineEdit(editingIdx);
 },true);
+function isShapeEditorChromeTarget(target){
+  return !!(target&&target.closest&&(
+    target.closest('.shapeEditor')||
+    target.closest('.shapeLayerBar')||
+    target.closest('.shapeTypeBar')||
+    target.closest('.shapePaintRow')||
+    target.closest('.shapeSliderRow')||
+    target.closest('.iconLibrary')
+  ));
+}
+document.addEventListener('mousedown',function(ev){
+  if(S.clTab!=='opmaken'||ev.button!==0||COVER_ELEM_DRAG||COVER_ELEM_EDITING)return;
+  if(!COVER_ELEM_SEL)return;
+  var target=ev.target;
+  if(!target||!target.closest)return;
+  if(target.closest('.adminInfoCoverElem')||isShapeEditorChromeTarget(target))return;
+  setCoverElemSelection(null);
+});
 document.addEventListener('mousedown',function(ev){
   if(ev.target&&ev.target.closest&&ev.target.closest('.shapeContextMenu'))return;
   clearShapeContextMenu();
@@ -8521,15 +15835,7 @@ document.addEventListener('mousedown',function(ev){
   var key=activeStyleEditKey();
   if(getShapeActiveIndex(key,false)<0)return;
   var target=ev.target;
-  if(target&&target.closest&&(
-    target.closest('.cpShape')||
-    target.closest('.shapeEditor')||
-    target.closest('.shapeLayerBar')||
-    target.closest('.shapeTypeBar')||
-    target.closest('.shapePaintRow')||
-    target.closest('.shapeSliderRow')||
-    target.closest('.iconLibrary')
-  )) return;
+  if(target&&target.closest&&(target.closest('.cpShape')||isShapeEditorChromeTarget(target))) return;
   clearActiveShapeSelection(key);
 });
 document.addEventListener('mousedown',function(ev){
@@ -8554,7 +15860,12 @@ window.addEventListener('scroll',function(){
 },true);
 window.addEventListener('resize',function(){
   if(RT.target) syncFloatingTextBar();
+  scheduleCanvasViewportSync();
 });
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',scheduleCanvasViewportSync);
+  window.visualViewport.addEventListener('scroll',scheduleCanvasViewportSync);
+}
 var floatingBar=getFloatingTextBar();
 if(floatingBar){
   floatingBar.addEventListener('mousedown',function(ev){ev.preventDefault();});
@@ -8577,7 +15888,24 @@ document.addEventListener('keydown',function(e){
     }
   }
   if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();if(S.activeId&&S.dirty)saveSet();return;}
-  if(e.key==='Escape'){closeModal();return;}
+  var aeNav=document.activeElement;
+  var tagNav=aeNav&&aeNav.tagName?aeNav.tagName.toLowerCase():'';
+  var typingNav=!!(aeNav&&(aeNav.isContentEditable||tagNav==='input'||tagNav==='textarea'||tagNav==='select'));
+  var focusPresentationMode=isViewCardsFocusModeActive()&&!typingNav&&!e.metaKey&&!e.ctrlKey&&!e.altKey;
+  var overlay=g('ovl');
+  var modalOpen=!!(overlay&&!overlay.classList.contains('hidden'));
+  if(e.key==='Escape'){
+    if(modalOpen){closeModal();return;}
+    if(focusPresentationMode){e.preventDefault();exitViewCardsFocusMode();return;}
+    closeModal();
+    return;
+  }
+  if(focusPresentationMode&&/^Arrow(Left|Right|Up|Down)$/.test(e.key)){
+    e.preventDefault();
+    if(e.key==='ArrowLeft'||e.key==='ArrowUp')viewPreviewNavBack();
+    else viewPreviewNavForward();
+    return;
+  }
   if(S.clTab==='opmaken'&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&/^Arrow(Left|Right|Up|Down)$/.test(e.key)){
     var aeMove=document.activeElement;
     var tagMove=aeMove&&aeMove.tagName?aeMove.tagName.toLowerCase():'';
@@ -8622,6 +15950,18 @@ document.addEventListener('keydown',function(e){
   if(e.key==='Enter'&&!g('setup').classList.contains('hidden'))connect();
 });
 window.addEventListener('beforeunload',function(e){if(S.dirty){e.preventDefault();e.returnValue='';}});
+window.addEventListener('message',function(e){
+  if(!e.data||e.data.uitgesproken!==1)return;
+  if(e.data.type==='openSet'&&e.data.id)openSpacePreviewCards(e.data.id);
+  if(e.data.type==='wizardHeaderSync'){
+    syncDashboardWizardHeader(e.data.payload||{});
+    return;
+  }
+  if(e.data.type==='wizardPreviewSync'){
+    syncDashboardWizardPreview(e.data.payload||null);
+    return;
+  }
+});
 
 // ═══════════════════════════════════════════
 // HELPERS
@@ -8632,12 +15972,30 @@ function fR(label,type,id,value,hint,readonly){
     :'<input type="text" class="fIn" id="'+id+'" value="'+esc(value)+'"'+(hint?' placeholder="'+esc(hint)+'"':'')+(readonly?' readonly':'')+' oninput="markDirty()">';
   return'<div class="fRow"><label class="fLbl">'+esc(label)+'</label>'+inp+'</div>';
 }
-function markDirty(){
+function markDirty(mode){
   S.dirty=true;
+  if(S.activeKind==='set')setTopSaveStatus('dirty','Wijzigingen…');
+  if(mode==='soft'){
+    if(markDirtySoftTimer)clearTimeout(markDirtySoftTimer);
+    if(markDirtySoftSidebarTimer)clearTimeout(markDirtySoftSidebarTimer);
+    markDirtySoftTimer=setTimeout(function(){
+      pushHistorySnapshot();
+      refreshTopBarControls();
+      refreshChecklistChrome();
+      scheduleSpaceSitePreviewRefresh();
+      markDirtySoftTimer=null;
+    },90);
+    markDirtySoftSidebarTimer=setTimeout(function(){
+      renderSidebar();
+      markDirtySoftSidebarTimer=null;
+    },180);
+    return;
+  }
   pushHistorySnapshot();
   refreshTopBarControls();
   renderSidebar();
   refreshChecklistChrome();
+  scheduleSpaceSitePreviewRefresh();
 }
 function safeid(s){return btoa(s).replace(/[^a-zA-Z0-9]/g,'').slice(0,20);}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
@@ -8650,9 +16008,162 @@ function lsDel(k){try{localStorage.removeItem(k);}catch(e){}}
 function parse(s){try{return JSON.parse(s);}catch(_){return null;}}
 function timeAgo(ts){var d=Math.round((Date.now()-ts)/60000);return d<1?'zojuist':d<60?d+' min geleden':Math.round(d/60)+' uur geleden';}
 var toastTm;
+var markDirtySoftTimer=null;
+var markDirtySoftSidebarTimer=null;
 function toast(msg,type){var t=g('toast');t.textContent=msg;t.className='toast on'+(type?' '+type:'');clearTimeout(toastTm);toastTm=setTimeout(function(){t.className='toast';},3200);}
 function livePreviewUrl(){
+  var activeSet=(S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||null;
+  if(S.spaceSlug&&activeSet&&(activeSet.slug||activeSet.id)){
+    return '/'+encodeURIComponent(S.spaceSlug)+'/'+encodeURIComponent(activeSet.slug||activeSet.id)+'/';
+  }
   return '../kaarten/?set='+encodeURIComponent(S.activeId||'');
+}
+function dashboardStartupIntent(){
+  var intent={setRef:'',mode:'',wizard:false,editor:false};
+  try{
+    var params=new URLSearchParams(location.search||'');
+    intent.setRef=String(params.get('set')||'').trim();
+    intent.mode=String(params.get('mode')||'').trim().toLowerCase();
+  }catch(_err){}
+  var path=String(location.pathname||'');
+  intent.wizard=/\/dashboard\/wizard\/?$/.test(path);
+  intent.editor=/\/dashboard\/editor\/?$/.test(path);
+  if(intent.editor)intent.mode='edit';
+  if(intent.mode!=='view'&&intent.mode!=='edit')intent.mode='';
+  return intent;
+}
+function dashboardFindSetByRef(ref){
+  var needle=String(ref||'').trim();
+  if(!needle)return null;
+  return (S.sets||[]).find(function(set){
+    return set && (String(set.id||'')===needle || String(set.slug||'')===needle);
+  })||null;
+}
+function dashboardBaseUrl(){
+  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'').trim();
+  return spaceSlug?('/'+encodeURIComponent(spaceSlug)+'/dashboard/'):'/dashboard/';
+}
+function wizardSessionSetKey(){
+  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'default').trim()||'default';
+  return 'pk_dashboard_wizard_set_'+spaceSlug;
+}
+function wizardSessionFallbackSetKey(){
+  return 'pk_dashboard_wizard_set_active';
+}
+function rememberedWizardSetRef(){
+  try{
+    return String(sessionStorage.getItem(wizardSessionSetKey())||sessionStorage.getItem(wizardSessionFallbackSetKey())||'').trim();
+  }catch(_err){
+    return '';
+  }
+}
+function resolveDashboardWizardSetRef(){
+  var remembered=rememberedWizardSetRef();
+  if(remembered==='__new__')return '';
+  return String(
+    S._wizardSetId ||
+    remembered ||
+    ((S.activeId&&(S.sets||[]).some(function(set){return set&&set.id===S.activeId;})) ? S.activeId : '') ||
+    ''
+  ).trim();
+}
+function rememberWizardSetRef(setRef){
+  var ref=String(setRef||'').trim();
+  try{
+    if(ref){
+      sessionStorage.setItem(wizardSessionSetKey(),ref);
+      sessionStorage.setItem(wizardSessionFallbackSetKey(),ref);
+    }else{
+      sessionStorage.setItem(wizardSessionSetKey(),'__new__');
+      sessionStorage.setItem(wizardSessionFallbackSetKey(),'__new__');
+    }
+  }catch(_err){}
+}
+function setWizardUrl(setRef){
+  var ref=String(setRef||'').trim();
+  rememberWizardSetRef(ref);
+  return dashboardBaseUrl()+'wizard/';
+}
+function standaloneWizardIframeUrl(setRef){
+  var params=[];
+  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'').trim();
+  if(spaceSlug)params.push('space='+encodeURIComponent(spaceSlug));
+  var ref=String(setRef||'').trim();
+  if(ref)params.push('set='+encodeURIComponent(ref));
+  params.push('embedded=1');
+  params.push('v='+encodeURIComponent(WIZARD_IFRAME_BUILD));
+  return '/wizard/new/'+(params.length?('?'+params.join('&')):'');
+}
+function dashboardWizardIframeSrcdoc(src,setRef){
+  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'').trim();
+  var paramsJson=JSON.stringify({
+    embedded:true,
+    space:spaceSlug,
+    set:String(setRef||'').trim(),
+    src:String(src||''),
+    parentOrigin:window.location.origin
+  }).replace(/</g,'\\u003c');
+  return '<!doctype html>'+
+    '<html lang="nl"><head>'+
+      '<meta charset="utf-8">'+
+      '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'+
+      '<meta name="theme-color" content="#f7f6f2">'+
+      '<base href="/"> '+
+      '<title>Nieuwe kaartenset wizard - Uitgesproken</title>'+
+      '<link rel="preconnect" href="https://fonts.googleapis.com">'+
+      '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'+
+      '<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Fraunces:opsz,wght@9..144,400;9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&family=Merriweather:wght@400;700&family=Playfair+Display:wght@400;600&display=swap" rel="stylesheet">'+
+      '<link rel="stylesheet" href="/css/cards.css?v=20260517a">'+
+      '<link rel="stylesheet" href="/admin/admin.css?v='+esc(WIZARD_IFRAME_BUILD)+'">'+
+      '<link rel="stylesheet" href="/css/wizard.css?v='+esc(WIZARD_IFRAME_BUILD)+'">'+
+    '</head><body class="wizardPage">'+
+      '<div id="wizardApp" class="wizardApp"></div>'+
+      '<script>window.WIZARD_EMBEDDED_PARAMS='+paramsJson+';'+
+      '(function(){function showWizardBootError(message){var root=document.getElementById("wizardApp");if(!root||root.children.length)return;root.innerHTML="<div class=\\"appBoot wizardBoot\\"><div class=\\"appBootInner\\"><div class=\\"appBootWordmark\\">Wizard kon niet laden</div><div class=\\"appBootSub\\">"+String(message||"Onbekende fout")+"</div></div></div>";}'+
+      'window.addEventListener("error",function(event){var where=(event&&event.filename)?(" in "+event.filename.split("/").pop()+":"+event.lineno+":"+event.colno):"";showWizardBootError(((event&&event.message)||"Script kon niet starten")+where);});'+
+      'window.addEventListener("unhandledrejection",function(event){var reason=event&&event.reason;showWizardBootError((reason&&reason.message)||String(reason||"Promise fout"));});'+
+      'setTimeout(function(){var root=document.getElementById("wizardApp");if(root&&!root.children.length)showWizardBootError("Startscript reageert niet");},2200);})();<\/script>'+
+      '<script src="/js/shared-background-preview.js?v=20260517a"><\/script>'+
+      '<script src="/js/shared-card-renderer.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
+      '<script src="/js/shared-preview-shell.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
+      '<script src="/js/shared-preview-interactions.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
+      '<script type="module" src="/js/wizard.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
+    '</body></html>';
+}
+function newSetWizardUrl(){
+  return setWizardUrl('');
+}
+function navigateToWizardUrl(url){
+  var target=String(url||'').trim();
+  if(!target)return;
+  if(S.activeKind==='set'&&S.dirty&&S.activeId){
+    var activeName=((S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||{}).title||S.activeId;
+    showModal('<h3>Niet opgeslagen wijzigingen</h3><p>Wat wil je doen met de wijzigingen in <strong>'+esc(activeName)+'</strong> voordat je naar de wizard gaat?</p>'+
+      '<div class="mAct">'+
+      '<button class="mCa" onclick="closeModal()">Annuleren</button>'+
+      '<button class="mCa" onclick="closeModal();location.href=\''+esc(target)+'\'">Niet opslaan</button>'+
+      '<button class="mOk" onclick="closeModal();saveSet(function(){location.href=\''+esc(target)+'\';})">Opslaan</button>'+
+      '</div>');
+    return;
+  }
+  location.href=target;
+}
+function openNewSetWizard(){
+  navigateToWizardUrl(newSetWizardUrl());
+}
+function openCurrentSetWizard(){
+  if(S.activeKind==='set'&&S.activeId){
+    navigateToWizardUrl(setWizardUrl(S.activeId));
+    return;
+  }
+  openNewSetWizard();
+}
+function exposeDashboardWizardBridge(){
+  try{
+    window.UITGESPROKEN_DASHBOARD_STATE=S;
+    window.UITGESPROKEN_DASHBOARD_CACHE=SC;
+    window.UITGESPROKEN_DASHBOARD_SUPABASE=window._supa||null;
+  }catch(_err){}
 }
 function showLivePreview(){
   if(!S.activeId){toast('Kies eerst een kaartenset','red');return;}
@@ -8675,12 +16186,30 @@ function showLivePreview(){
     'livePreviewModal'
   );
 }
+function focusHomePreview(){
+  var target=g('spaceLiveFrameScale');
+  if(!target){toast('Live preview niet gevonden','red');return;}
+  try{
+    target.scrollIntoView({behavior:'smooth',block:'center'});
+  }catch(_e){
+    target.scrollIntoView();
+  }
+  target.classList.add('is-focused');
+  clearTimeout(focusHomePreview._tm);
+  focusHomePreview._tm=setTimeout(function(){
+    target.classList.remove('is-focused');
+  },1200);
+}
 function showModal(html,extraClass){var mb=g('mb');mb.className='modal'+(extraClass?' '+extraClass:'');mb.innerHTML=html;g('ovl').classList.remove('hidden');}
 function closeModal(){var mb=g('mb'),ovl=g('ovl');ovl.classList.add('hidden');ovl.classList.remove('palPopover');mb.className='modal';mb.style.cssText='';mb.innerHTML='';_stylePalDrag=null;_stylePalAnchor=null;_stylePalState=null;}
 g('ovl').addEventListener('click',function(e){if(e.target===this)closeModal();});
 document.addEventListener('mousemove',function(ev){
   if(SHAPE_MARQUEE){
     updateShapeMarquee(ev.clientX,ev.clientY);
+    return;
+  }
+  if(COVER_ELEM_DRAG){
+    dragCoverElemTo(ev.clientX,ev.clientY);
     return;
   }
   if(COVER_TEXT_DRAG){
@@ -8711,6 +16240,19 @@ document.addEventListener('mouseup',function(ev){
     finishShapeMarquee(ev.clientX,ev.clientY);
     return;
   }
+  if(COVER_ELEM_DRAG){
+    if(COVER_ELEM_DRAG.elemEl)COVER_ELEM_DRAG.elemEl.classList.remove('dragging');
+    if(COVER_ELEM_DRAG.moved){
+      if(S.clTab==='opmaken')buildStijlPreserveBg(g('pw'));
+      else{
+        patchCoverElemTargets();
+        refreshShapeEditors('cover');
+      }
+    }else{
+      setCoverElemSelection(COVER_ELEM_DRAG.type);
+    }
+  }
+  COVER_ELEM_DRAG=null;
   if(COVER_TEXT_DRAG){
     if(!COVER_TEXT_DRAG.moved){
       setActiveCoverText(COVER_TEXT_DRAG.idx,{silent:true});
@@ -8728,29 +16270,41 @@ document.addEventListener('mouseup',function(ev){
   _stylePalDrag=null;
 });
 function initSliderScrollHints(){
-  document.querySelectorAll('.stijlHeaderBar .stijlSlideRail').forEach(function(rail){
+  document.querySelectorAll('.stijlHeaderBar .stijlSlideRail, .stijlHeaderBar .homeSetSlideRail').forEach(function(rail){
     var bar=rail.closest('.stijlHeaderBar');
     if(!bar)return;
     var noOverflow=rail.scrollWidth<=rail.clientWidth+4;
     var atEnd=noOverflow||(rail.scrollLeft+rail.clientWidth>=rail.scrollWidth-8);
+    bar.classList.toggle('has-scroll-overflow',!noOverflow);
     bar.classList.toggle('scroll-end',atEnd);
+    rail.classList.toggle('overflows',!noOverflow);
   });
 }
 document.addEventListener('scroll',function(e){
   var rail=e.target;
-  if(rail&&rail.classList&&rail.classList.contains('stijlSlideRail')){
+  if(rail&&rail.classList&&(rail.classList.contains('stijlSlideRail')||rail.classList.contains('homeSetSlideRail'))){
     var bar=rail.closest('.stijlHeaderBar');
     if(bar){
+      var noOverflow=rail.scrollWidth<=rail.clientWidth+4;
       var atEnd=rail.scrollLeft+rail.clientWidth>=rail.scrollWidth-8;
+      bar.classList.toggle('has-scroll-overflow',!noOverflow);
       bar.classList.toggle('scroll-end',atEnd);
     }
   }
 },true);
 // ── Responsive swatch clamping ─────────────────────────────────────────────
-// Show only whole swatches in .brandSwsGroup; hides any that would be clipped.
+// Show only whole swatches in compact .brandSwsGroup rows; expanded/wrapping
+// palettes manage their own layout and should not be clamped.
 function clampSwatchGroup(g){
-  if(!g||!g.offsetParent)return; // not visible
-  var sw=18,gap=4,w=g.offsetWidth;
+  if(!g||!g.offsetParent)return;
+  if(g.closest('.brandQuickRow-textcolor,.brandQuickRow-text,.brandQuickRow-shared,.brandQuickRow-toolbar,.brandQuickRow-panel'))return;
+  var firstSw=g.querySelector('.brandSw');
+  if(!firstSw)return;
+  var styles=window.getComputedStyle(g);
+  var sw=Math.ceil(firstSw.getBoundingClientRect().width)||18;
+  var gap=parseFloat(styles.columnGap||styles.gap||0)||0;
+  var w=g.clientWidth||g.offsetWidth||0;
+  if(!w)return;
   var n=Math.max(1,Math.floor((w+gap)/(sw+gap)));
   g.querySelectorAll('.brandSw').forEach(function(s,i){s.style.display=i<n?'':'none';});
 }
@@ -8758,13 +16312,17 @@ function clampAllSwatchGroups(){
   document.querySelectorAll('.brandSwsGroup').forEach(clampSwatchGroup);
 }
 (function(){
-  // Re-clamp when any .brandSwsGroup is added or when the panel resizes
   new MutationObserver(function(muts){
     muts.forEach(function(m){
       m.addedNodes.forEach(function(nd){
         if(nd.nodeType!==1)return;
-        if(nd.classList&&nd.classList.contains('brandSwsGroup')){setTimeout(function(){clampSwatchGroup(nd);},0);}
-        else if(nd.querySelectorAll){nd.querySelectorAll('.brandSwsGroup').forEach(function(g){setTimeout(function(){clampSwatchGroup(g);},0);});}
+        if(nd.classList&&nd.classList.contains('brandSwsGroup')){
+          setTimeout(function(){clampSwatchGroup(nd);},0);
+        }else if(nd.querySelectorAll){
+          nd.querySelectorAll('.brandSwsGroup').forEach(function(g){
+            setTimeout(function(){clampSwatchGroup(g);},0);
+          });
+        }
       });
     });
   }).observe(document.body,{childList:true,subtree:true});

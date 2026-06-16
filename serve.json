@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    { "source": "/onboarding/**", "destination": "/onboarding/index.html" },
+    { "source": "/dashboard/wizard", "destination": "/dashboard/index.html" },
+    { "source": "/dashboard/wizard/**", "destination": "/dashboard/index.html" },
+    { "source": "/**/dashboard/wizard", "destination": "/dashboard/index.html" },
+    { "source": "/**/dashboard/wizard/**", "destination": "/dashboard/index.html" },
+    { "source": "/dashboard/**", "destination": "/dashboard/index.html" },
+    { "source": "/**/dashboard", "destination": "/dashboard/index.html" },
+    { "source": "/**/dashboard/**", "destination": "/dashboard/index.html" },
+    { "source": "/wizard/new", "destination": "/wizard/new/index.html" },
+    { "source": "/wizard/new/**", "destination": "/wizard/new/index.html" },
+    { "source": "/@:username", "destination": "/maker/index.html" },
+    { "source": "/@:username/**", "destination": "/maker/index.html" }
+  ]
+}

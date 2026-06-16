@@ -1,5 +1,17 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/space/index.html" }
+    { "source": "/dashboard/wizard", "destination": "/dashboard/index.html" },
+    { "source": "/dashboard/wizard/:path*", "destination": "/dashboard/index.html" },
+    { "source": "/dashboard/editor", "destination": "/dashboard/index.html" },
+    { "source": "/dashboard/editor/:path*", "destination": "/dashboard/index.html" },
+    { "source": "/:spaceSlug/dashboard/wizard", "destination": "/dashboard/index.html" },
+    { "source": "/:spaceSlug/dashboard/wizard/:path*", "destination": "/dashboard/index.html" },
+    { "source": "/:spaceSlug/dashboard/editor", "destination": "/dashboard/index.html" },
+    { "source": "/:spaceSlug/dashboard/editor/:path*", "destination": "/dashboard/index.html" },
+    { "source": "/wizard/new", "destination": "/wizard/new/index.html" },
+    { "source": "/wizard/new/:path*", "destination": "/wizard/new/index.html" },
+    { "source": "/@:username/:setSlug", "destination": "/maker/index.html" },
+    { "source": "/@:username",          "destination": "/maker/index.html" },
+    { "source": "/(.*)",                "destination": "/space/index.html" }
   ]
 }
