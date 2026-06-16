@@ -7,7 +7,7 @@ var CC={},KF={},SC={},SIDEBAR_SET_THUMB_CACHE={},SIDEBAR_SET_THUMB_PENDING={},SI
 var _mySetsFilter='all',_mySetsSearch='',_mySetsView='list',_mySetsSearchTimer=null;
 var SAVE_UI={state:'idle',text:'',hideTimer:null};
 var _savedSpaceSig=null;
-var WIZARD_IFRAME_BUILD='20260616y';
+var WIZARD_IFRAME_BUILD='20260616z';
 var SET_EDITOR_PANE='themes'; // 'themes' | 'format'
 var SPACE_PREVIEW_CARDS_MODE=false;
 var SPACE_PREVIEW_CURRENT_SET_ID='';
@@ -16167,7 +16167,7 @@ function navigateToWizardUrl(url){
   location.href=target;
 }
 function openNewSetWizard(){
-  navigateToWizardUrl(newSetWizardUrl());
+  showNewSetModal();
 }
 function openCurrentSetWizard(){
   if(S.activeKind==='set'&&S.activeId){
