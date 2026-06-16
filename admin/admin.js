@@ -7,7 +7,7 @@ var CC={},KF={},SC={},SIDEBAR_SET_THUMB_CACHE={},SIDEBAR_SET_THUMB_PENDING={},SI
 var _mySetsFilter='all',_mySetsSearch='',_mySetsView='list',_mySetsSearchTimer=null;
 var SAVE_UI={state:'idle',text:'',hideTimer:null};
 var _savedSpaceSig=null;
-var WIZARD_IFRAME_BUILD='20260616x';
+var WIZARD_IFRAME_BUILD='20260616y';
 var SET_EDITOR_PANE='themes'; // 'themes' | 'format'
 var SPACE_PREVIEW_CARDS_MODE=false;
 var SPACE_PREVIEW_CURRENT_SET_ID='';
@@ -12549,10 +12549,17 @@ function buildShapeEditorHtml(key){
   var layers=getCardShapeLayers(key);
   var active=getShapeActiveIndex(key);
   var layer=layers[active];
-  var coverTextEditing=!!(key==='cover'&&((typeof currentCoverTextIdx==='function'&&currentCoverTextIdx()>=0)||COVER_ELEM_SEL));
-  if(layers.length&&!layer&&!coverTextEditing){
+  if(layers.length&&!layer){
     active=ensureShapeActiveIndex(key);
     layer=layers[active];
+  }
+  function finiteShapeValue(value,fallback,min,max){
+    if(value==null||value==='')value=fallback;
+    var n=Number(value);
+    if(!isFinite(n))n=fallback;
+    if(typeof min==='number')n=Math.max(min,n);
+    if(typeof max==='number')n=Math.min(max,n);
+    return n;
   }
   var target=ensureShapeColorTarget(key);
   var shapesOpen=storedOpenState(STIJL_SHAPES_OPEN,key,true);
@@ -12639,11 +12646,11 @@ function buildShapeEditorHtml(key){
   }
   var fillColor=layer?(layer.fill||'#CFE6DF'):'#CFE6DF';
   var strokeColor=layer?(layer.stroke||'#ffffff'):'#ffffff';
-  var fillTone=layer?shapeColorToneValue(layer,'fill'):0;
-  var strokeTone=layer?shapeColorToneValue(layer,'stroke'):0;
-  var currentOpacity=layer?Math.round((Number(layer[target==='stroke'?'strokeOpacity':'fillOpacity'])||1)*100):100;
-  var sizeValue=layer?(layer.size||42):42;
-  var rotateValue=layer?(layer.rotate||0):0;
+  var fillTone=layer?finiteShapeValue(shapeColorToneValue(layer,'fill'),0,-100,100):0;
+  var strokeTone=layer?finiteShapeValue(shapeColorToneValue(layer,'stroke'),0,-100,100):0;
+  var currentOpacity=layer?Math.round(finiteShapeValue(layer[target==='stroke'?'strokeOpacity':'fillOpacity'],1,0,1)*100):100;
+  var sizeValue=layer?finiteShapeValue(layer.size,42,12,120):42;
+  var rotateValue=layer?finiteShapeValue(layer.rotate,0,-180,180):0;
   var selectedIndices=getShapeSelectedIndices(key);
   var selectedTextIndices=(key==='cover'?getCoverTextSelectedIndices():[]);
   var multiSelected=selectedIndices.length>1;

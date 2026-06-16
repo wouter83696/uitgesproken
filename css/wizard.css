@@ -4115,6 +4115,55 @@ body.wizardEmbedded .wizardEditorPalette .brandQuickActions{
   padding-left:0;
 }
 
+body.wizardEmbedded .wizardDesignWorkspaceSidebar .shapeSliderHRow{
+  grid-template-columns:minmax(0,1fr) auto;
+  row-gap:5px;
+  column-gap:8px;
+}
+
+body.wizardEmbedded .wizardDesignWorkspaceSidebar .shapeSliderHRow .shapeSlider{
+  grid-column:1 / -1;
+  min-width:0;
+}
+
+body.wizardEmbedded .wizardDesignWorkspaceSidebar .shapeSliderValPill{
+  width:auto;
+  min-width:28px;
+  max-width:54px;
+  overflow:visible;
+}
+
+body.wizardEmbedded .wizardDesignWorkspaceSidebar .wizardEditorPalette .brandQuickRow{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:6px;
+  align-items:start;
+  width:100%;
+}
+
+body.wizardEmbedded .wizardDesignWorkspaceSidebar .wizardEditorPalette .brandSwsGroup{
+  overflow:visible;
+  flex-wrap:wrap;
+  gap:5px;
+  min-height:0;
+  padding:2px 0;
+}
+
+body.wizardEmbedded .wizardDesignWorkspaceSidebar .wizardEditorPalette .brandQuickActions{
+  display:grid;
+  grid-template-columns:18px 1px 18px;
+  align-items:center;
+  justify-items:center;
+  gap:0;
+  min-height:22px;
+}
+
+body.wizardEmbedded .wizardDesignWorkspaceSidebar .wizardEditorPalette .brandExpandBtn,
+body.wizardEmbedded .wizardDesignWorkspaceSidebar .wizardEditorPalette .brandCurrentSw{
+  width:18px;
+  height:18px;
+}
+
 body.wizardEmbedded .wizardEditorBgFlat{
   padding:0 2px 2px;
 }

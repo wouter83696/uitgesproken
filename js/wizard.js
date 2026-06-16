@@ -2345,7 +2345,7 @@ function runWizardPreviewContextAction(action) {
 function renderShapeLayerChipRow() {
   var layers = ensureDesignShapeLayers();
   var active = getActiveDesignShapeLayer();
-  var selectionActive = wizardDesignSelectionActive();
+  var selectionActive = wizardDesignSelectionActive() || !!(active && active.id);
   return (
     '<div class="shapeLayerBar wizardShapeLayerBar">' +
       layers.map(function(layer, index){
@@ -2417,7 +2417,7 @@ function renderDesignShapesPanel() {
   }).filter(Boolean);
   var activeShape = currentDesignShapeState();
   var activeShapeId = String(activeShape && activeShape.type || '').trim();
-  var selectionActive = wizardDesignSelectionActive();
+  var selectionActive = wizardDesignSelectionActive() || !!(activeShape && activeShape.id);
   var quickIconItems = [ICON_PRESETS[0]].concat(quickIcons);
   var activeFill = effectiveShapeLayerColor(activeShape);
   var activeTone = clamp(Number(activeShape.fillTone), -100, 100);
