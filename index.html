@@ -25,11 +25,7 @@
     .launchLogo{width:72px;height:72px;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
     .launchLogo img{width:72px;height:72px;display:block}
     .launchWordmark{font-size:22px;font-weight:700;letter-spacing:0;line-height:1;color:#334455}
-    .launchSub{font-size:12.5px;margin-top:8px;color:#667789}
-    .launchBar{width:188px;height:8px;margin-top:12px;border-radius:999px;background:rgba(79,142,158,.14);overflow:hidden;box-shadow:inset 0 0 0 1px rgba(79,142,158,.08)}
-    .launchBarFill{width:42%;height:100%;border-radius:inherit;background:linear-gradient(90deg,#6fb0bc 0%,#4f95a3 100%);animation:launchPulse 1.8s cubic-bezier(.33,1,.68,1) infinite}
-    @keyframes launchPulse{0%{transform:translateX(-110%);width:38%}50%{width:56%}100%{transform:translateX(270%);width:38%}}
-    @media (prefers-reduced-motion:reduce){.launchBarFill{animation:none;width:64%}}
+    .launchSub{max-width:280px;font-size:13px;margin-top:9px;line-height:1.45;color:#667789}
   </style>
 </head>
 <body>
@@ -39,10 +35,7 @@
         <img src="/assets/logo-icons/masters/master-squircle.svg" alt="Uitgesproken">
       </div>
       <div class="launchWordmark">Uitgesproken</div>
-      <div class="launchSub">Ruimte aan het verkennen..</div>
-      <div class="launchBar" aria-hidden="true">
-        <div class="launchBarFill"></div>
-      </div>
+      <div class="launchSub">Nog even geduld, we zijn ruimte aan het verkennen</div>
     </div>
   </main>
 </body>
