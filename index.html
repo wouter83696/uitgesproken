@@ -18,14 +18,21 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
-    html,body{width:100%;min-height:100%;margin:0;background:#f7fafb}
-    body{overflow:hidden;font-family:'IBM Plex Sans',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#334455}
-    .launchPage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#fcfcfd 0%,#f7fafb 100%)}
-    .launchPageInner{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:24px;text-align:center}
-    .launchLogo{width:72px;height:72px;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
-    .launchLogo img{width:72px;height:72px;display:block}
-    .launchWordmark{font-size:22px;font-weight:700;letter-spacing:0;line-height:1;color:#334455}
-    .launchSub{max-width:280px;font-size:13px;margin-top:9px;line-height:1.45;color:#667789}
+    html,body{width:100%;min-height:100%;margin:0;background:#fafbfc}
+    body{overflow:hidden;font-family:'IBM Plex Sans',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#2f4358}
+    .launchPage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#fbfcfd}
+    .launchPageInner{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;width:min(92vw,640px);padding:24px;text-align:center;transform:translateY(-6vh)}
+    .launchLogo{width:132px;height:132px;display:flex;align-items:center;justify-content:center;margin-bottom:28px}
+    .launchLogo img{width:132px;height:132px;display:block}
+    .launchWordmark{font-size:42px;font-weight:700;letter-spacing:0;line-height:1;color:#344a60}
+    .launchSub{max-width:560px;font-size:22px;font-weight:400;margin-top:20px;line-height:1.45;color:#728092}
+    @media (max-width:640px){
+      .launchPageInner{transform:translateY(-4vh)}
+      .launchLogo,.launchLogo img{width:104px;height:104px}
+      .launchLogo{margin-bottom:22px}
+      .launchWordmark{font-size:32px}
+      .launchSub{font-size:17px;margin-top:14px}
+    }
   </style>
 </head>
 <body>
@@ -35,7 +42,7 @@
         <img src="/assets/logo-icons/masters/master-squircle.svg" alt="Uitgesproken">
       </div>
       <div class="launchWordmark">Uitgesproken</div>
-      <div class="launchSub">Nog even geduld, we zijn ruimte aan het verkennen</div>
+      <div class="launchSub">Deze ruimte krijgt binnenkort vorm.</div>
     </div>
   </main>
 </body>
