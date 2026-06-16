@@ -209,6 +209,7 @@
     const raw = String(target || '').trim();
     if (!raw) return '/dashboard/';
     if (raw === '/onboarding' || raw === '/onboarding/') return '/dashboard/';
+    if (!raw.startsWith('/') || raw.startsWith('//')) return '/dashboard/';
     return raw;
   }
 
