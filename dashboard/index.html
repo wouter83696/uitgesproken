@@ -6,7 +6,15 @@
 <title>Uitgesproken — Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/templates/page-background-tokens.css">
-<link rel="stylesheet" href="/admin/admin.css?v=20260517g">
+<link rel="stylesheet" href="/admin/admin.css?v=20260616z">
+<script>
+  (function(){
+    var host = String(location.hostname || '').toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+      location.replace('https://uitgesproken.me' + location.pathname + location.search + location.hash);
+    }
+  })();
+</script>
 <script src="/js/shared-background-preview.js"></script>
 </head>
 <body>
@@ -18,7 +26,7 @@
       <img src="/assets/logo-icons/masters/master-squircle.svg" alt="Uitgesproken">
     </div>
     <div class="appBootWordmark">Uitgesproken</div>
-    <div class="appBootSub">Ruimte aan het verkennen...</div>
+    <div class="appBootSub">Ruimte aan het verkennen</div>
     <div class="appBootBar" aria-hidden="true">
       <div class="appBootBarFill" id="appBootFill"></div>
     </div>
@@ -77,7 +85,7 @@
   </aside>
   <main class="content" id="mc">
     <div class="welcome" style="opacity:.3">
-      <p style="font-size:11.5px;color:var(--k3)">Ruimte aan het verkennen...</p>
+      <p style="font-size:11.5px;color:var(--k3)">Ruimte aan het verkennen</p>
     </div>
   </main>
 </div>
@@ -99,8 +107,10 @@
 <script>window.PK_USE_SUPABASE = true;</script>
 <script src="/js/public-index-shell.js?v=20260513b"></script>
 <script type="module" src="/js/components/autoBackground.js"></script>
-<script src="/js/shared-preview-shell.js?v=20260519a"></script>
-<script src="/admin/admin.js?v=20260517g"></script>
+<script src="/js/shared-card-renderer.js?v=20260616z"></script>
+<script src="/js/shared-preview-shell.js?v=20260616z"></script>
+<script src="/js/shared-preview-interactions.js?v=20260616z"></script>
+  <script src="/admin/admin.js?v=20260616z"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
   window._supa = window.supabase.createClient(
@@ -116,6 +126,6 @@
   //   }
   // });
 </script>
-<script src="/admin/supabase-data.js?v=20260516ak"></script>
+<script src="/admin/supabase-data.js?v=20260616w"></script>
 </body>
 </html>

@@ -7,6 +7,7 @@ var CC={},KF={},SC={},SIDEBAR_SET_THUMB_CACHE={},SIDEBAR_SET_THUMB_PENDING={},SI
 var _mySetsFilter='all',_mySetsSearch='',_mySetsView='list',_mySetsSearchTimer=null;
 var SAVE_UI={state:'idle',text:'',hideTimer:null};
 var _savedSpaceSig=null;
+var WIZARD_IFRAME_BUILD='20260616z';
 var SET_EDITOR_PANE='themes'; // 'themes' | 'format'
 var SPACE_PREVIEW_CARDS_MODE=false;
 var SPACE_PREVIEW_CURRENT_SET_ID='';
@@ -819,11 +820,31 @@ function loadIndex(){
       renderSelectSetWelcome();
       return Promise.resolve();
     }
-    var preferredId=(S.indexData&&S.indexData.default)||((S.sets[0]||{}).id)||null;
+    var startupIntent=dashboardStartupIntent();
+    var startupSet=dashboardFindSetByRef(startupIntent.setRef) || ((startupIntent.wizard||startupIntent.editor) ? dashboardFindSetByRef(rememberedWizardSetRef()) : null);
+    if(startupSet&&startupSet.id&&(startupIntent.setRef||startupIntent.editor||startupIntent.wizard))rememberWizardSetRef(startupSet.id);
+    var preferredId=(startupSet&&startupSet.id)||(S.indexData&&S.indexData.default)||((S.sets[0]||{}).id)||null;
+    if(startupIntent.mode==='view')S.editorMode='view';
+    else if(startupIntent.mode==='edit')S.editorMode='edit';
     return preloadAllSets()
       .catch(function(){ return null; })
       .then(function(){
         renderSidebar();
+        if(startupIntent.wizard){
+          S.activeKind='space';
+          S._view='wizard';
+          S._wizardSetId=startupSet?startupSet.id:null;
+          if(startupSet){
+            S.activeId=startupSet.id;
+            if(SC[startupSet.id]){
+              S.d=cloneSetBundle(SC[startupSet.id]);
+              normalizeLegacyCardSurfaceMeta(S.d.meta);
+            }
+          }
+          rememberWizardSetRef(startupSet?startupSet.id:'');
+          renderEditor();
+          return;
+        }
         if(preferredId&&S.sets.some(function(s){return s.id===preferredId;})){
           return loadSet(preferredId,{silent:true}).catch(function(){
             renderSidebar();
@@ -1382,7 +1403,7 @@ function loadSpaceEditor(opts){
   document.documentElement.classList.remove('card-fmt-narrow');
   if(!opts.silent){
     lbStart();
-    g('mc').innerHTML='<div class="welcome" style="opacity:.3"><p style="font-size:11.5px;color:var(--k3)">Ruimte aan het verkennen...</p></div>';
+    g('mc').innerHTML='<div class="welcome" style="opacity:.3"><p style="font-size:11.5px;color:var(--k3)">Ruimte aan het verkennen</p></div>';
   }
   if(!syncSidebarSelectionState())renderSidebar();
   var sid=(Array.isArray(S.sets)&&S.sets.length)
@@ -2325,6 +2346,7 @@ function renderEditor(){
   hideFloatingTextBar(true);
   var saveStatus=buildTopSaveStatusHtml();
   var currentSet=(S.sets||[]).find(function(s){return s.id===S.activeId;})||{};
+  cleanVisibleDashboardEditorUrl();
   var setTitle=esc((S.d&&S.d.meta&&S.d.meta.title)||S.activeId||'');
   var statusCls=_setStatusCls(currentSet);
   var statusLabel=_setStatusLabel(currentSet);
@@ -2904,6 +2926,10 @@ function renderChromeShell(headTitle,headActions,headCenter,opts){
   });
 }
 function markDashboardWizardReady(){
+  if(S._wizardReadyTimer){
+    clearTimeout(S._wizardReadyTimer);
+    S._wizardReadyTimer=null;
+  }
   var pw=g('pw');
   var shell=g('wizardWorkspaceShell');
   var frame=g('wizardWorkspaceFrame');
@@ -2922,6 +2948,9 @@ function dashboardWizardFrameHasRenderableContent(){
     var doc=frame.contentDocument;
     var appRoot=doc&&doc.getElementById('wizardApp');
     if(!appRoot)return false;
+    if(doc.querySelector('.wizardLoadingPanel,.wizardLoadingWindow,.wizardLoadingField,.wizardLoadingPreviewCard')) return false;
+    if(doc.querySelector('.appBoot.wizardBoot')) return false;
+    if(appRoot.querySelector&&appRoot.querySelector('.wizardShell,.wizardEmpty')) return true;
     if(appRoot.children&&appRoot.children.length)return true;
     return String(appRoot.innerHTML||'').trim().length>0;
   }catch(_err){
@@ -2934,7 +2963,7 @@ function queueDashboardWizardReadyCheck(attempt){
     markDashboardWizardReady();
     return;
   }
-  if((attempt||0)>=24){
+  if((attempt||0)>=35){
     markDashboardWizardReady();
     return;
   }
@@ -2952,6 +2981,418 @@ function postWizardFrameAction(action){
   try{
     frame.contentWindow.postMessage({uitgesproken:1,type:'wizardAction',action:String(action||'')},window.location.origin);
   }catch(_err){}
+}
+function postWizardFramePreviewCommand(action,value){
+  var frame=g('wizardWorkspaceFrame');
+  if(!frame||!frame.contentWindow)return;
+  try{
+    frame.contentWindow.postMessage({
+      uitgesproken:1,
+      type:'wizardPreviewCommand',
+      action:String(action||''),
+      value:value
+    },window.location.origin);
+  }catch(_err){}
+}
+function dashboardWizardPreviewPayload(){
+  return S&&S._wizardPreviewPayload&&typeof S._wizardPreviewPayload==='object'?S._wizardPreviewPayload:null;
+}
+function dashboardWizardPreviewNavigate(delta){
+  postWizardFramePreviewCommand('navigate',Number(delta)||0);
+}
+function dashboardWizardPreviewNavigateHome(){
+  postWizardFramePreviewCommand('navigateHome');
+}
+function dashboardWizardPreviewToggleFlip(){
+  postWizardFramePreviewCommand('toggleFlip');
+}
+function dashboardWizardPreviewToggleGrid(){
+  postWizardFramePreviewCommand('toggleGrid');
+}
+function dashboardWizardPreviewToggleNight(){
+  postWizardFramePreviewCommand('toggleNight');
+}
+function dashboardWizardPreviewSetBackMode(mode){
+  postWizardFramePreviewCommand('setBackMode',String(mode||'mirror'));
+}
+function dashboardWizardPreviewSetBackEditSurface(surface){
+  postWizardFramePreviewCommand('setBackEditSurface',String(surface||'front'));
+}
+function dashboardWizardPreviewSetBackScope(scope){
+  postWizardFramePreviewCommand('setBackScope',String(scope||'set'));
+}
+function dashboardWizardPreviewStepZoom(delta){
+  postWizardFramePreviewCommand('zoomStep',Number(delta)||0);
+}
+function dashboardWizardPreviewResetZoom(){
+  postWizardFramePreviewCommand('zoomReset');
+}
+function withDashboardWizardPreviewState(payload,fn){
+  payload=payload&&typeof payload==='object'?payload:{};
+  var bundle=payload.bundle&&typeof payload.bundle==='object'?payload.bundle:null;
+  if(!bundle||!bundle.meta)return typeof fn==='function'?fn():null;
+  var actualBackMode=String(payload.backModeActual||payload.backMode||bundle.meta.backMode||'mirror');
+  var uiBackMode=String(payload.backMode||actualBackMode||'mirror');
+  var uiBackSurface=String(payload.backEditSurfaceUi||payload.backEditSurface||'front');
+  var prevState={
+    d:S.d,
+    activeKind:S.activeKind,
+    stylePreviewKey:STYLE_PREVIEW_KEY,
+    flipped:CANVAS_CARD_FLIPPED,
+    backSurface:STYLE_BACK_EDIT_SURFACE,
+    backModeOverride:BACK_MODE_UI_OVERRIDE,
+    backSurfaceOverride:BACK_SURFACE_UI_OVERRIDE,
+    backExtraDelayed:BACK_EXTRA_CONTROLS_DELAYED
+  };
+  var tempBundle={
+    meta:cloneJson(bundle.meta||{}),
+    questions:cloneJson(bundle.questions||{}),
+    uitleg:cloneJson(bundle.uitleg||{}),
+    intro:cloneJson(bundle.intro||{})
+  };
+  tempBundle.meta=tempBundle.meta||{};
+  tempBundle.meta.ui=tempBundle.meta.ui||{};
+  tempBundle.meta.ui.previewGrid=!!payload.gridMode;
+  tempBundle.meta.ui.previewNight=!!payload.nightMode;
+  // Render the preview content from the actual target back mode.
+  // The UI may temporarily keep the previous button selected during
+  // a transition, but the back face itself should already represent
+  // the requested mode (mirror / reflect / blank).
+  tempBundle.meta.backMode=actualBackMode;
+  try{
+    S.activeKind='set';
+    S.d=tempBundle;
+    STYLE_PREVIEW_KEY=payload.previewKey||'cover';
+    CANVAS_CARD_FLIPPED=!!payload.flipped;
+    STYLE_BACK_EDIT_SURFACE=(actualBackMode==='blank' && String(payload.backEditSurface||'back')==='back')?'back':'front';
+    BACK_MODE_UI_OVERRIDE=uiBackMode!==actualBackMode?uiBackMode:'';
+    BACK_SURFACE_UI_OVERRIDE=(uiBackSurface!==STYLE_BACK_EDIT_SURFACE)?uiBackSurface:'';
+    BACK_EXTRA_CONTROLS_DELAYED=!!payload.backExtraDelayed;
+    return typeof fn==='function'?fn(tempBundle):null;
+  }finally{
+    S.d=prevState.d;
+    S.activeKind=prevState.activeKind;
+    STYLE_PREVIEW_KEY=prevState.stylePreviewKey;
+    CANVAS_CARD_FLIPPED=prevState.flipped;
+    STYLE_BACK_EDIT_SURFACE=prevState.backSurface;
+    BACK_MODE_UI_OVERRIDE=prevState.backModeOverride;
+    BACK_SURFACE_UI_OVERRIDE=prevState.backSurfaceOverride;
+    BACK_EXTRA_CONTROLS_DELAYED=prevState.backExtraDelayed;
+  }
+}
+function rewriteDashboardWizardPreviewActions(html){
+  return String(html||'')
+    .replace(/stepCanvasZoom\(-25\)/g,'dashboardWizardPreviewStepZoom(-25)')
+    .replace(/stepCanvasZoom\(25\)/g,'dashboardWizardPreviewStepZoom(25)')
+    .replace(/resetCanvasZoom\(\)/g,'dashboardWizardPreviewResetZoom()')
+    .replace(/cardPreviewNavBack\(\)/g,'dashboardWizardPreviewNavigate(-1)')
+    .replace(/cardPreviewNavHome\(\)/g,'dashboardWizardPreviewNavigateHome()')
+    .replace(/cardPreviewNavForward\(\)/g,'dashboardWizardPreviewNavigate(1)')
+    .replace(/toggleCanvasFlip\(\)/g,'dashboardWizardPreviewToggleFlip()')
+    .replace(/togglePreviewGrid\(\)/g,'dashboardWizardPreviewToggleGrid()')
+    .replace(/togglePreviewNight\(\)/g,'dashboardWizardPreviewToggleNight()')
+    .replace(/setBackMode\('mirror'\)/g,'dashboardWizardPreviewSetBackMode(\'mirror\')')
+    .replace(/setBackMode\('reflect'\)/g,'dashboardWizardPreviewSetBackMode(\'reflect\')')
+    .replace(/setBackMode\('blank'\)/g,'dashboardWizardPreviewSetBackMode(\'blank\')')
+    .replace(/setBackEditSurface\('front'\)/g,'dashboardWizardPreviewSetBackEditSurface(\'front\')')
+    .replace(/setBackEditSurface\('back'\)/g,'dashboardWizardPreviewSetBackEditSurface(\'back\')')
+    .replace(/setBackDesignScope\('set'\)/g,'dashboardWizardPreviewSetBackScope(\'set\')')
+    .replace(/setBackDesignScope\('card'\)/g,'dashboardWizardPreviewSetBackScope(\'card\')');
+}
+function exactDashboardWizardPreviewHtml(payload){
+  return withDashboardWizardPreviewState(payload,function(){
+    var layoutHtml=buildSharedCardEditor({
+      layoutMode:'canvas',
+      hideToolbar:true,
+      hideShapeCard:true,
+      hideColorCard:true,
+      hideBgCard:true,
+      hideToolbar:true,
+      disableSticky:true,
+      previewFile:payload.previewFile||'voorkant.svg',
+      previewKey:payload.previewKey||'cover',
+      themeKey:payload.previewKey||'cover',
+      frontTxt:payload.frontTxt||'',
+      backTxt:payload.backTxt||'',
+      backDesignKey:payload.backDesignKey||'',
+      flipped:!!payload.flipped,
+      forceNoImage:true,
+      suppressEmptyFrontHint:true
+    });
+    var probe=document.createElement('div');
+    probe.innerHTML=layoutHtml;
+    var previewSide=probe.querySelector('.stijlCanvasSide.preview');
+    var previewWindow=probe.querySelector('.stijlCanvasWindow');
+    if(previewWindow)previewWindow.setAttribute('data-dashboard-wizard-preview','1');
+    if(previewSide)previewSide.classList.add('home-static-preview');
+    return rewriteDashboardWizardPreviewActions(previewSide?previewSide.outerHTML:layoutHtml);
+  })||'';
+}
+function paintDashboardWizardPreviewBackground(host,payload){
+  withDashboardWizardPreviewState(payload,function(){
+    var wrap=host&&host.querySelector?host.querySelector('#bgWrap'):null;
+    var canvas=host&&host.querySelector?host.querySelector('#bgCanvas'):null;
+    if(!wrap||!canvas)return;
+    var rect=wrap.getBoundingClientRect();
+    var W=Math.round(rect.width)||wrap.offsetWidth||300;
+    var H=Math.round(rect.height)||wrap.offsetHeight||468;
+    if(W<20||H<20)return;
+    canvas.width=W*2;
+    canvas.height=H*2;
+    canvas.style.width=W+'px';
+    canvas.style.height=H+'px';
+    var ctx=canvas.getContext('2d');
+    if(!ctx)return;
+    paintSharedPreviewBackground(ctx,W*2,H*2,{
+      isNight:!!payload.nightMode,
+      presentationMode:false,
+      baseFill:previewCardsBaseFill(!!payload.nightMode)
+    });
+  });
+}
+function dashboardWizardPreviewHtml(payload){
+  payload=payload&&typeof payload==='object'?payload:{};
+  return exactDashboardWizardPreviewHtml(payload);
+}
+function clearDashboardWizardPreviewTimers(){
+  if(S._dashboardWizardPreviewSwapTimer){
+    clearTimeout(S._dashboardWizardPreviewSwapTimer);
+    S._dashboardWizardPreviewSwapTimer=0;
+  }
+  if(S._dashboardWizardPreviewTurnTimer){
+    clearTimeout(S._dashboardWizardPreviewTurnTimer);
+    S._dashboardWizardPreviewTurnTimer=0;
+  }
+}
+function dashboardWizardPreviewWindow(host){
+  return host&&host.querySelector?host.querySelector('.stijlCanvasWindow[data-dashboard-wizard-preview="1"]'):null;
+}
+function buildDashboardWizardPreviewProbe(payload){
+  var probe=document.createElement('div');
+  probe.innerHTML=dashboardWizardPreviewHtml(payload);
+  return probe;
+}
+function replaceDashboardWizardPreviewBackFace(host,payload){
+  var currentWin=dashboardWizardPreviewWindow(host);
+  if(!currentWin)return false;
+  var probe=buildDashboardWizardPreviewProbe(payload);
+  var nextWin=dashboardWizardPreviewWindow(probe);
+  var currentBack=currentWin.querySelector('.cardFaceBack');
+  var nextBack=nextWin&&nextWin.querySelector?nextWin.querySelector('.cardFaceBack'):null;
+  if(!currentBack||!nextBack)return false;
+  currentBack.replaceWith(nextBack);
+  return true;
+}
+function replaceDashboardWizardPreviewBackbar(host,payload){
+  var currentWin=dashboardWizardPreviewWindow(host);
+  if(!currentWin)return false;
+  var probe=buildDashboardWizardPreviewProbe(payload);
+  var nextWin=dashboardWizardPreviewWindow(probe);
+  var currentBar=currentWin.querySelector('.stijlCanvasBackbar');
+  var nextBar=nextWin&&nextWin.querySelector?nextWin.querySelector('.stijlCanvasBackbar'):null;
+  if(currentBar&&nextBar){
+    currentBar.replaceWith(nextBar);
+    return true;
+  }
+  if(currentBar&&!nextBar){
+    currentBar.remove();
+    return true;
+  }
+  if(!currentBar&&nextBar){
+    var inner=currentWin.querySelector('.stijlCanvasWindowInner');
+    if(inner&&inner.parentNode){
+      inner.insertAdjacentElement('afterend',nextBar);
+      return true;
+    }
+  }
+  return false;
+}
+function applyDashboardWizardPreviewUi(host,payload,opts){
+  opts=opts||{};
+  var win=dashboardWizardPreviewWindow(host);
+  if(!win)return false;
+  var flipped=!!payload.flipped;
+  var gridMode=!!payload.gridMode;
+  var nightMode=!!payload.nightMode;
+  var zoomPct=Math.max(40,Math.min(200,Number(payload.zoomPct)||100));
+  var backMode=String(payload.backMode||payload.backModeActual||'mirror');
+  var backEditSurface=(String(payload.backEditSurfaceUi||payload.backEditSurface||'back')==='front')?'front':'back';
+  var backScope=(String(payload.backScope||'set')==='card')?'card':'set';
+  var showBackExtra=backMode==='blank'&&backEditSurface==='back'&&!payload.backExtraDelayed;
+  var canCardBackScope=!!payload.canCardBackScope;
+  var navLabel=String(payload.navLabel||'Cover');
+  var inner=win.querySelector('.cardFaceInner');
+  if(inner&&!opts.skipFlipState)inner.classList.toggle('flipped',flipped);
+  win.classList.toggle('grid-on',gridMode);
+  win.classList.toggle('night',nightMode);
+  var visual=win.querySelector('.cardFaceOuter, .adminInfoSlide');
+  if(visual)visual.style.zoom=(zoomPct/100);
+  var zoomPctEl=win.querySelector('.cvZoomPct');
+  if(zoomPctEl)zoomPctEl.textContent=zoomPct+'%';
+  Array.prototype.slice.call(win.querySelectorAll('.previewNavPosText')).forEach(function(el){
+    el.textContent=navLabel;
+  });
+  Array.prototype.slice.call(win.querySelectorAll('.stijlCanvasFlipBtn')).forEach(function(btn){
+    btn.classList.toggle('sel',flipped);
+  });
+  Array.prototype.slice.call(win.querySelectorAll('.stijlCanvasGridBtn')).forEach(function(btn){
+    var label=gridMode?'Raster uitzetten':'Raster tonen';
+    btn.classList.toggle('sel',gridMode);
+    btn.setAttribute('aria-label',label);
+    btn.setAttribute('title',label);
+  });
+  Array.prototype.slice.call(win.querySelectorAll('[data-preview-night-toggle="1"]')).forEach(function(btn){
+    var label=nightMode?'Nachtmodus uitzetten':'Nachtmodus aanzetten';
+    btn.classList.toggle('sel',nightMode);
+    btn.setAttribute('aria-label',label);
+    btn.setAttribute('title',label);
+    btn.innerHTML=previewNightToggleIconHtml(nightMode);
+  });
+  Array.prototype.slice.call(win.querySelectorAll('[data-back-mode]')).forEach(function(btn){
+    btn.classList.toggle('sel',btn.getAttribute('data-back-mode')===backMode);
+  });
+  Array.prototype.slice.call(win.querySelectorAll('.previewEditSurfaceStack')).forEach(function(stack){
+    stack.classList.toggle('is-visible',showBackExtra);
+    stack.classList.toggle('is-hidden',!showBackExtra);
+    if(showBackExtra) stack.removeAttribute('aria-hidden');
+    else stack.setAttribute('aria-hidden','true');
+  });
+  Array.prototype.slice.call(win.querySelectorAll('[data-back-edit-surface]')).forEach(function(btn){
+    var surface=btn.getAttribute('data-back-edit-surface');
+    btn.classList.toggle('sel',(surface==='back'?backEditSurface==='back':backEditSurface!=='back'));
+    if(showBackExtra) btn.removeAttribute('tabindex');
+    else btn.setAttribute('tabindex','-1');
+  });
+  Array.prototype.slice.call(win.querySelectorAll('[data-back-scope]')).forEach(function(btn){
+    var scope=btn.getAttribute('data-back-scope');
+    var isCard=scope==='card';
+    btn.classList.toggle('sel',isCard?backScope==='card':backScope!=='card');
+    btn.classList.toggle('is-disabled',isCard&&!canCardBackScope);
+    if(isCard&&!canCardBackScope) btn.setAttribute('aria-disabled','true');
+    else btn.removeAttribute('aria-disabled');
+    if(showBackExtra&&(!isCard||canCardBackScope)) btn.removeAttribute('tabindex');
+    else btn.setAttribute('tabindex','-1');
+  });
+  syncSingleCanvasPreviewLayout(win);
+  paintDashboardWizardPreviewBackground(host,payload);
+  return true;
+}
+function tryApplyDashboardWizardPreviewDelta(prevPayload,nextPayload){
+  prevPayload=prevPayload&&typeof prevPayload==='object'?prevPayload:null;
+  nextPayload=nextPayload&&typeof nextPayload==='object'?nextPayload:null;
+  if(!prevPayload||!nextPayload||!prevPayload.external||!nextPayload.external)return false;
+  if(String(prevPayload.stepId||'')!==String(nextPayload.stepId||''))return false;
+  if(String(prevPayload.previewKey||'')!==String(nextPayload.previewKey||''))return false;
+  if(String(prevPayload.previewFile||'')!==String(nextPayload.previewFile||''))return false;
+  var host=g('dashboardWizardPreviewHost');
+  var win=dashboardWizardPreviewWindow(host);
+  if(!host||!win)return false;
+  var inner=win.querySelector('.cardFaceInner');
+  if(!inner)return false;
+  var prevFlipped=!!prevPayload.flipped;
+  var nextFlipped=!!nextPayload.flipped;
+  var flippedChanged=prevFlipped!==nextFlipped;
+  var prevMode=String(prevPayload.backModeActual||prevPayload.backMode||'mirror');
+  var nextMode=String(nextPayload.backModeActual||nextPayload.backMode||'mirror');
+  var modeChanged=prevMode!==nextMode;
+  var frontChanged=String(prevPayload.frontTxt||'')!==String(nextPayload.frontTxt||'');
+  var backChanged=String(prevPayload.backTxt||'')!==String(nextPayload.backTxt||'');
+  var htmlChanged=String(prevPayload.html||'')!==String(nextPayload.html||'');
+  clearDashboardWizardPreviewTimers();
+  if(modeChanged&&prevFlipped&&nextFlipped){
+    applyDashboardWizardPreviewUi(host,nextPayload,{skipFlipState:true});
+    inner.classList.remove('back-swap-turn');
+    void inner.offsetWidth;
+    inner.classList.add('back-swap-turn');
+    S._dashboardWizardPreviewSwapTimer=setTimeout(function(){
+      S._dashboardWizardPreviewSwapTimer=0;
+      replaceDashboardWizardPreviewBackFace(host,nextPayload);
+      replaceDashboardWizardPreviewBackbar(host,nextPayload);
+      applyDashboardWizardPreviewUi(host,nextPayload,{skipFlipState:true});
+    },170);
+    S._dashboardWizardPreviewTurnTimer=setTimeout(function(){
+      S._dashboardWizardPreviewTurnTimer=0;
+      var liveWin=dashboardWizardPreviewWindow(host);
+      var liveInner=liveWin&&liveWin.querySelector?liveWin.querySelector('.cardFaceInner'):null;
+      if(liveInner)liveInner.classList.remove('back-swap-turn');
+    },420);
+    return true;
+  }
+  if(modeChanged&&!prevFlipped&&nextFlipped){
+    applyDashboardWizardPreviewUi(host,nextPayload,{skipFlipState:true});
+    inner.classList.add('flipped');
+    S._dashboardWizardPreviewSwapTimer=setTimeout(function(){
+      S._dashboardWizardPreviewSwapTimer=0;
+      replaceDashboardWizardPreviewBackFace(host,nextPayload);
+      replaceDashboardWizardPreviewBackbar(host,nextPayload);
+      applyDashboardWizardPreviewUi(host,nextPayload,{skipFlipState:true});
+    },220);
+    return true;
+  }
+  if(flippedChanged&&!modeChanged&&!frontChanged&&!backChanged&&!htmlChanged){
+    applyDashboardWizardPreviewUi(host,nextPayload,{skipFlipState:true});
+    inner.classList.toggle('flipped',nextFlipped);
+    return true;
+  }
+  if(!flippedChanged&&!frontChanged&&!backChanged&&!htmlChanged){
+    applyDashboardWizardPreviewUi(host,nextPayload);
+    return true;
+  }
+  return false;
+}
+function renderDashboardWizardPreviewHost(){
+  var shell=g('wizardWorkspaceShell');
+  var pane=g('wizardWorkspacePreviewPane');
+  var host=g('dashboardWizardPreviewHost');
+  if(!shell||!pane||!host)return;
+  var payload=dashboardWizardPreviewPayload();
+  var useParentPreview=!!(payload&&payload.external);
+  shell.classList.toggle('has-parent-preview',useParentPreview);
+  shell.classList.toggle('has-iframe-preview',!useParentPreview);
+  shell.setAttribute('data-wizard-preview-step',payload&&payload.stepId?String(payload.stepId):'');
+  pane.classList.toggle('hidden',!useParentPreview);
+  if(!useParentPreview){
+    host.innerHTML='';
+    return;
+  }
+  host.innerHTML=dashboardWizardPreviewHtml(payload);
+  requestAnimationFrame(function(){
+    var win=host.querySelector('.stijlCanvasWindow[data-dashboard-wizard-preview="1"]');
+    if(win)win.removeAttribute('data-wizard-preview');
+    syncSingleCanvasPreviewLayout(win);
+    paintDashboardWizardPreviewBackground(host,payload);
+  });
+}
+function syncDashboardWizardPreview(payload){
+  var nextPayload=(payload&&typeof payload==='object')?payload:null;
+  var prevPayload=dashboardWizardPreviewPayload();
+  S._wizardPreviewPayload=nextPayload;
+  if(tryApplyDashboardWizardPreviewDelta(prevPayload,nextPayload))return;
+  renderDashboardWizardPreviewHost();
+}
+function currentDashboardWizardSet(){
+  var ref=resolveDashboardWizardSetRef();
+  return dashboardFindSetByRef(ref)||dashboardFindSetByRef(S.activeId)||null;
+}
+function dashboardSetModeUrl(setRef,mode){
+  var set=dashboardFindSetByRef(setRef)||null;
+  var ref=(set&&set.id)||String(setRef||'').trim();
+  var cleanMode=String(mode||'edit').trim().toLowerCase();
+  if(cleanMode!=='view'&&cleanMode!=='edit')cleanMode='edit';
+  if(cleanMode==='edit'){
+    if(ref)rememberWizardSetRef(ref);
+    return dashboardUrlWithParams(ref?{set:ref,mode:'edit'}:{mode:'edit'});
+  }
+  return dashboardUrlWithParams(ref?{set:ref,mode:cleanMode}:{mode:cleanMode});
+}
+function openWizardSetMode(mode){
+  var currentSet=currentDashboardWizardSet();
+  var ref=(currentSet&&currentSet.id)||resolveDashboardWizardSetRef()||S.activeId||'';
+  if(currentSet&&currentSet.id){
+    S.activeId=currentSet.id;
+    rememberWizardSetRef(currentSet.id);
+  }
+  location.href=dashboardSetModeUrl(ref,mode);
 }
 function wizardUndoAction(){
   postWizardFrameAction('undo');
@@ -2975,7 +3416,11 @@ function syncDashboardWizardHeader(payload){
   var undoBtn=g('wizardUndoBtn');
   var redoBtn=g('wizardRedoBtn');
   var deleteBtn=g('wizardDeleteBtn');
-  if(data.setId)S._wizardSetId=String(data.setId);
+  if(data.setId){
+    S._wizardSetId=String(data.setId);
+    S.activeId=String(data.setId);
+    rememberWizardSetRef(S._wizardSetId);
+  }
   if(titleEl&&title)titleEl.value=title;
   if(stepEl)stepEl.value=stepLabel||'Wizard';
   if(sepEl)sepEl.style.display=stepLabel?'inline-block':'none';
@@ -2987,12 +3432,12 @@ function syncDashboardWizardHeader(payload){
 }
 function openWizardMoreMenu(btn){
   document.querySelectorAll('.clMoreMenu').forEach(function(m){m.remove();});
-  var currentSet=(S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||null;
+  var currentSet=currentDashboardWizardSet();
   var hasSet=!!(currentSet&&currentSet.id);
-  var editHref=hasSet?(dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=edit'):dashboardBaseUrl();
-  var viewHref=hasSet?(dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=view'):'';
-  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+S._username+'/'+currentSet.slug):'';
-  var restartHref=dashboardBaseUrl()+'wizard/';
+  var editHref=hasSet?dashboardSetModeUrl(currentSet.id,'edit'):dashboardBaseUrl();
+  var viewHref=hasSet?dashboardSetModeUrl(currentSet.id,'view'):'';
+  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+encodeURIComponent(S._username)+'/'+encodeURIComponent(currentSet.slug)+'/'):'';
+  var restartHref=setWizardUrl('');
   var editIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
   var viewIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
   var restartIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>';
@@ -3017,10 +3462,20 @@ function openWizardMoreMenu(btn){
   },0);
 }
 function renderDashboardWizardPage(){
+  cleanVisibleDashboardWizardUrl();
+  setAppPreparing(true);
   hideFloatingTextBar(true);
-  var currentSet=(S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||null;
+  var wizardSetRef=resolveDashboardWizardSetRef();
+  var currentSet=(S.sets||[]).find(function(set){
+    return set && wizardSetRef && (String(set.id||'')===wizardSetRef || String(set.slug||'')===wizardSetRef);
+  })||null;
   var hasSet=!!(currentSet&&currentSet.id);
   S._wizardSetId=hasSet?currentSet.id:null;
+  if(hasSet&&SC[currentSet.id]){
+    S.activeId=currentSet.id;
+    S.d=cloneSetBundle(SC[currentSet.id]);
+    normalizeLegacyCardSurfaceMeta(S.d.meta);
+  }
   var titleHtml=
     '<div class="clHeadMeta">'+
       '<div class="clHeadTitle">'+
@@ -3029,26 +3484,22 @@ function renderDashboardWizardPage(){
         '<input id="editorThemeTitle" class="clHeadThemeInput is-static" type="text" value="Naam" readonly>'+
       '</div>'+
     '</div>';
-  var backHref=hasSet
-    ? (dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=edit')
-    : dashboardBaseUrl();
-  var viewHref=hasSet
-    ? (dashboardBaseUrl()+'?set='+encodeURIComponent(currentSet.id)+'&mode=view')
-    : '';
-  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+S._username+'/'+currentSet.slug):'';
+  var backHref=hasSet?dashboardSetModeUrl(currentSet.id,'edit'):dashboardBaseUrl();
+  var viewHref=hasSet?dashboardSetModeUrl(currentSet.id,'view'):'';
+  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+encodeURIComponent(S._username)+'/'+encodeURIComponent(currentSet.slug)+'/'):'';
   var wizardModeBtns=
     '<div class="edModeSwitcher">'+
       (hasSet
-        ? '<a class="edModeBtn" href="'+esc(backHref)+'" title="Bewerken" aria-label="Bewerken">'+
+        ? '<button class="edModeBtn" type="button" onclick="openWizardSetMode(\'edit\')" data-href="'+esc(backHref)+'" title="Bewerken" aria-label="Bewerken">'+
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
-          '</a>'
+          '</button>'
         : '<button class="edModeBtn is-disabled" type="button" disabled title="Bewerken" aria-label="Bewerken">'+
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'+
           '</button>')+
       (hasSet
-        ? '<a class="edModeBtn" href="'+esc(viewHref)+'" title="Bekijken" aria-label="Bekijken">'+
+        ? '<button class="edModeBtn" type="button" onclick="openWizardSetMode(\'view\')" data-href="'+esc(viewHref)+'" title="Bekijken" aria-label="Bekijken">'+
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'+
-          '</a>'
+          '</button>'
         : '<button class="edModeBtn is-disabled" type="button" disabled title="Bekijken" aria-label="Bekijken">'+
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'+
           '</button>')+
@@ -3070,17 +3521,61 @@ function renderDashboardWizardPage(){
       quickActions+
       '<button class="btnIcon clMoreBtn" id="wizardMoreBtn" type="button" title="Meer opties" aria-label="Meer opties" onclick="openWizardMoreMenu(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg></button>'+
     '</div></div>';
+  exposeDashboardWizardBridge();
   renderChromeShell(titleHtml,headActions,null,{keepPreparing:true});
   var pw=g('pw');
   if(pw){
+    S._wizardPreviewPayload=null;
+    var wizardFrameSrc=standaloneWizardIframeUrl(hasSet?currentSet.id:'');
     pw.classList.add('wizardWorkspaceBody');
     pw.classList.remove('is-preparing');
     pw.innerHTML=
       '<div class="wizardWorkspaceShell is-loading" id="wizardWorkspaceShell">'+
-        '<iframe id="wizardWorkspaceFrame" class="wizardWorkspaceFrame" src="'+esc(standaloneWizardIframeUrl(hasSet?currentSet.id:''))+'" title="Kaartenset wizard" loading="eager" onload="markDashboardWizardIframeLoaded()"></iframe>'+
+        '<div class="wizardWorkspaceSplit">'+
+          '<div class="wizardWorkspaceMain">'+
+            '<iframe id="wizardWorkspaceFrame" class="wizardWorkspaceFrame" src="about:blank" title="Kaartenset wizard" loading="eager" onload="markDashboardWizardIframeLoaded()"></iframe>'+
+          '</div>'+
+          '<aside class="wizardWorkspacePreviewPane hidden" id="wizardWorkspacePreviewPane" aria-label="Kaart preview">'+
+            '<div class="wizardWorkspacePreviewHost" id="dashboardWizardPreviewHost"></div>'+
+          '</aside>'+
+        '</div>'+
       '</div>';
+    var wizardFrame=g('wizardWorkspaceFrame');
+    if(wizardFrame){
+      wizardFrame.dataset.src=wizardFrameSrc;
+      wizardFrame.srcdoc=dashboardWizardIframeSrcdoc(wizardFrameSrc,hasSet?currentSet.id:'');
+    }
+    renderDashboardWizardPreviewHost();
   }
+  if(S._wizardReadyTimer)clearTimeout(S._wizardReadyTimer);
+  S._wizardReadyTimer=setTimeout(function(){
+    if(S._view==='wizard')markDashboardWizardReady();
+  },2800);
   syncEditorHeaderWidths();
+}
+function cleanVisibleDashboardWizardUrl(){
+  try{
+    if(!/\/dashboard\/wizard\/?$/.test(String(location.pathname||'')) || !location.search)return;
+    history.replaceState({space:S.spaceSlug||((S.space&&S.space.slug)||'')||''},'',location.pathname+(location.hash||''));
+  }catch(_err){}
+}
+function cleanVisibleDashboardEditorUrl(){
+  try{
+    if(S.activeKind!=='set'||!S.activeId||S.editorMode!=='edit')return;
+    rememberWizardSetRef(S.activeId);
+    var path=String(location.pathname||'');
+    var search=String(location.search||'');
+    var params=new URLSearchParams(search);
+    var isEditorPath=/\/dashboard\/editor\/?$/.test(path);
+    var isDashboardPath=/\/dashboard\/?$/.test(path);
+    var shouldClean=(isEditorPath&&!!search)||(isDashboardPath&&(params.has('set')||String(params.get('mode')||'').toLowerCase()==='edit'));
+    if(!shouldClean)return;
+    history.replaceState(
+      {space:S.spaceSlug||((S.space&&S.space.slug)||''),set:S.activeId,mode:'edit'},
+      '',
+      dashboardSetModeUrl(S.activeId,'edit')+(location.hash||'')
+    );
+  }catch(_err){}
 }
 function renderSpaceEditor(){
   hideFloatingTextBar(true);
@@ -7270,7 +7765,7 @@ function cpSetSide(key,side,btn){
   var backEl=g('cpback-'+key);
   if(backEl){
     var backCfg=backPreviewConfig(key);
-    backEl.style.background=backCfg.custom?backCfg.bg:'transparent';
+    backEl.style.background=(backCfg.custom&&!backCfg.seedFromFront)?backCfg.bg:'transparent';
     var backOverlay=backEl.querySelector('.cpOverlay');
     if(backOverlay)backOverlay.innerHTML=q2.achterkant?esc(q2.achterkant):'';
   }
@@ -7306,7 +7801,7 @@ function updateCardPreview(key,frontTxt,backTxt){
     var backColor=backCv['--pk-set-text']||color;
     var backAlign=backCv['--pk-text-align']||halign;
     var backValign=backCv['--pk-text-valign']||valign;
-    backEl.style.background=backCfg.custom?backCfg.bg:'transparent';
+    backEl.style.background=(backCfg.custom&&!backCfg.seedFromFront)?backCfg.bg:'transparent';
     backEl.style.fontFamily=backFont;
     backEl.style.fontSize=backFs;
     backEl.style.color=backColor;
@@ -7366,6 +7861,29 @@ function cardBgToneForKey(meta,key){
 function cardBgForKey(meta,key){
   return normalizedCardSurface(colorToneAdjust(cardBgBaseForKey(meta,key),cardBgToneForKey(meta,key)));
 }
+function hasExplicitBackShapeLayers(meta,key){
+  var store=((((meta||{}).ui||{}).cardShapes)||{});
+  return Array.isArray(store[key||''])&&store[key||''].length>0;
+}
+function hasExplicitBackCssVars(meta,key){
+  var vars=key===BACK_STYLE_KEY?backStyleCssVarStore(meta):backStyleCardEntry(meta,key).cssVars;
+  if(!vars||typeof vars!=='object')return false;
+  return Object.keys(vars).some(function(name){
+    return String(vars[name]==null?'':vars[name]).trim()!=='';
+  });
+}
+function hasExplicitBackBackground(meta,key,blankColor){
+  var maps=cardBgMaps(meta);
+  var safeKey=key||'';
+  if(Object.prototype.hasOwnProperty.call(maps.tone,safeKey)&&(Number(maps.tone[safeKey])||0)!==0)return true;
+  if(!Object.prototype.hasOwnProperty.call(maps.base,safeKey))return false;
+  var value=normalizedCardSurface(maps.base[safeKey]||'');
+  return !!value&&value!==normalizedCardSurface(blankColor);
+}
+function shouldSeedBlankBackFromFront(meta,styleKey,blankColor){
+  return !hasExplicitBackShapeLayers(meta,styleKey)
+    && !hasExplicitBackBackground(meta,styleKey,blankColor);
+}
 function sharedCardPreviewHtml(opts){
   opts=opts||{};
   var viewerOnlyPreview=!!opts.viewerOnlyPreview;
@@ -7376,7 +7894,7 @@ function sharedCardPreviewHtml(opts){
   var sharedRenderer=window.PK&&window.PK.sharedCardRenderer&&typeof window.PK.sharedCardRenderer.render==='function'
     ?window.PK.sharedCardRenderer
     :null;
-  if(sharedRenderer&&!opts.infoRichCe&&previewKey!=='cover'){
+  if(sharedRenderer&&!opts.infoRichCe){
     return sharedRenderer.render({
       meta:(S.d&&S.d.meta)||{},
       wrapId:opts.wrapId||'',
@@ -7396,6 +7914,8 @@ function sharedCardPreviewHtml(opts){
       emptyBg:opts.emptyBg,
       backDesignKey:opts.backDesignKey||'',
       label:opts.label||'',
+      showCoverTexts:!!opts.showCoverTexts,
+      coverTextsHtml:opts.showCoverTexts?coverTextLayerHtml():'',
       suppressEmptyFrontHint:!!opts.suppressEmptyFrontHint
     });
   }
@@ -7420,8 +7940,9 @@ function sharedCardPreviewHtml(opts){
   var backValign=backCv['--pk-text-valign']||valign;
   var backAlignItems=backValign==='top'?'flex-start':backValign==='bottom'?'flex-end':'center';
   var backJustifyContent=backHalign==='left'?'flex-start':backHalign==='right'?'flex-end':'center';
-  var backShapeKey=backCfg.styleKey||previewKey;
-  var backBgHtml=backCfg.mirrorImage
+  var backUsesFrontDesign=backCfg.mirrorImage||backCfg.seedFromFront;
+  var backShapeKey=backUsesFrontDesign?previewKey:(backCfg.styleKey||previewKey);
+  var backBgHtml=backUsesFrontDesign
     ?(imgSrc?'<img class="cpBg'+(backCfg.reflect?' is-reflect':'')+'" src="'+imgSrc+'" alt="">':'<div class="cpBgEmpty" style="'+cardBgStyle(emptyBg)+';position:absolute;inset:0"></div>')
     :'<div class="cpBgEmpty" style="'+cardBgStyle(backCfg.bg)+';position:absolute;inset:0"></div>';
   var alignItems=valign==='top'?'flex-start':valign==='bottom'?'flex-end':'center';
@@ -7500,9 +8021,9 @@ function sharedCardPreviewHtml(opts){
             '</div>'+
           '</div>'+
         '</div>'+
-        '<div class="cardFaceBack'+(backCfg.reflect?' is-reflect':'')+'"'+(opts.backId?' id="'+esc(opts.backId)+'"':'')+' style="background:'+(backCfg.custom?esc(backCfg.bg):'transparent')+';font-family:\''+esc(backFont)+'\',sans-serif;font-size:'+esc(backFs)+';color:'+esc(backTextColor)+'">'+
+        '<div class="cardFaceBack'+(backCfg.reflect?' is-reflect':'')+'"'+(opts.backId?' id="'+esc(opts.backId)+'"':'')+' style="background:'+((backCfg.custom&&!backCfg.seedFromFront)?esc(backCfg.bg):'transparent')+';font-family:\''+esc(backFont)+'\',sans-serif;font-size:'+esc(backFs)+';color:'+esc(backTextColor)+'">'+
           backBgHtml+
-          '<div class="cpShapeLayer'+(backCfg.reflect?' is-reflect':'')+'" data-shape-key="'+esc(backShapeKey)+'">'+cardShapesLayerHtml(backShapeKey)+'</div>'+
+          '<div class="cpShapeLayer'+(backCfg.reflect?' is-reflect':'')+'" data-shape-key="'+esc(backShapeKey)+'">'+(backUsesFrontDesign?cardShapesLayerHtml(previewKey):cardShapesLayerHtml(backShapeKey))+'</div>'+
           '<div class="cpOverlay" style="position:absolute;inset:0;display:flex;align-items:'+backAlignItems+';justify-content:'+backJustifyContent+';padding:10px;text-align:'+backHalign+'">'+(opts.backTxt?esc(opts.backTxt):'')+'</div>'+
         '</div>'+
       '</div>'+
@@ -8614,6 +9135,8 @@ function backStyleCssVarStore(meta){
 }
 function backStyleCardStore(meta){
   var ui=backStyleUi(meta);
+  if(ui.byCard&&typeof ui.byCard==='object')return ui.byCard;
+  if(ui.cardEntries&&typeof ui.cardEntries==='object')return ui.cardEntries;
   ui.byCard=ui.byCard||{};
   return ui.byCard;
 }
@@ -8679,16 +9202,292 @@ function setBackDesignScope(scope){
   ui.scope=(scope==='card')?'card':'set';
   if(STYLE_BACK_EDIT_SURFACE==='back')ensureBackDesignDefaults(S.d.meta||{});
   buildStijlPreserveBg(g('pw'));
+  animateEditorPaneSwitch();
   updateStijlPreview();
 }
-function setBackEditSurface(surface){
-  STYLE_BACK_EDIT_SURFACE=(surface==='back')?'back':'front';
-  if(STYLE_BACK_EDIT_SURFACE==='back')ensureBackDesignDefaults(S.d.meta||{});
-  CANVAS_CARD_FLIPPED=STYLE_BACK_EDIT_SURFACE==='back';
+var BACK_EDITOR_REFRESH_TIMER=0;
+var BACK_EDITOR_FINALIZE_TIMER=0;
+var BACK_EDITOR_FLIP_TIMER=0;
+var BACK_EDITOR_SPIN_TIMER=0;
+var BACK_PREVIEW_FLIP_DURATION=520;
+var BACK_PREVIEW_REBUILD_DELAY=260;
+var BACK_PREVIEW_SWAP_DELAY=140;
+var BACK_PREVIEW_FLIP_START_DELAY=24;
+var BACK_PREVIEW_SPIN_DURATION=380;
+var BACK_PREVIEW_SPIN_SWAP_DELAY=170;
+var BACK_EXTRA_CONTROLS_DELAYED=false;
+var BACK_MODE_UI_OVERRIDE='';
+var BACK_SURFACE_UI_OVERRIDE='';
+function currentBackModeActual(){
+  return ((((S.d||{}).meta||{}).backMode)||'mirror');
+}
+function currentBackEditSurfaceActual(){
+  return STYLE_BACK_EDIT_SURFACE||'front';
+}
+function currentBackModeForUi(){
+  return BACK_MODE_UI_OVERRIDE||currentBackModeActual();
+}
+function currentBackEditSurfaceForUi(){
+  return BACK_SURFACE_UI_OVERRIDE||currentBackEditSurfaceActual();
+}
+function shouldShowBackExtraControls(backMode){
+  var mode=backMode||currentBackModeForUi();
+  return mode==='blank'&&currentBackEditSurfaceForUi()==='back'&&!BACK_EXTRA_CONTROLS_DELAYED;
+}
+function previewCardInners(){
+  return Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasWindow:not([data-wizard-preview="1"]) .cardFaceInner'));
+}
+function previewCardBackFaces(){
+  return Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasWindow:not([data-wizard-preview="1"]) .cardFaceBack'));
+}
+function setPreviewCardFlipState(isFlipped){
+  CANVAS_CARD_FLIPPED=!!isFlipped;
+  syncBackSurfaceUiState();
+  previewCardInners().forEach(function(inner){
+    inner.classList.toggle('flipped',CANVAS_CARD_FLIPPED);
+  });
+}
+function startPreviewFlipState(isFlipped,afterFlipStart){
+  var after=typeof afterFlipStart==='function'?afterFlipStart:null;
+  previewCardInners().forEach(function(inner){
+    void inner.offsetWidth;
+  });
+  if(BACK_EDITOR_FLIP_TIMER)clearTimeout(BACK_EDITOR_FLIP_TIMER);
+  BACK_EDITOR_FLIP_TIMER=setTimeout(function(){
+    BACK_EDITOR_FLIP_TIMER=0;
+    setPreviewCardFlipState(isFlipped);
+    if(after)after();
+  },BACK_PREVIEW_FLIP_START_DELAY);
+}
+function startPreviewBackSwapTurn(){
+  if(BACK_EDITOR_SPIN_TIMER)clearTimeout(BACK_EDITOR_SPIN_TIMER);
+  previewCardInners().forEach(function(inner){
+    inner.classList.remove('back-swap-turn');
+    void inner.offsetWidth;
+    inner.classList.add('back-swap-turn');
+  });
+  BACK_EDITOR_SPIN_TIMER=setTimeout(function(){
+    BACK_EDITOR_SPIN_TIMER=0;
+    previewCardInners().forEach(function(inner){
+      inner.classList.remove('back-swap-turn');
+    });
+  },BACK_PREVIEW_SPIN_DURATION+40);
+}
+function syncPreviewBackFacesForCurrentState(){
+  var meta=S.d.meta||{};
+  previewCardBackFaces().forEach(function(back){
+    var inner=back&&back.closest?back.closest('.cardFaceInner'):null;
+    var front=inner&&inner.querySelector?inner.querySelector('.cardFaceFront'):null;
+    if(!front)return;
+    var frontShape=front.querySelector('.cpShapeLayer');
+    var previewKey=(frontShape&&frontShape.getAttribute('data-shape-key'))||STYLE_PREVIEW_KEY||'algemeen';
+    var frontCv=styleCssVarsForKey(meta,previewKey);
+    var backCfg=backPreviewConfig(previewKey);
+    var backCv=backCfg.cssVars||frontCv;
+    var backFont=backCv['--pk-font']||frontCv['--pk-font']||'IBM Plex Sans';
+    var backFs=fontSizeCss(backCv['--pk-font-size']||frontCv['--pk-font-size']||'12');
+    var backTextColor=backCv['--pk-set-text']||frontCv['--pk-set-text']||'rgba(48,96,136,0.95)';
+    var backHalign=backCv['--pk-text-align']||(frontCv['--pk-text-align']||'center');
+    var backValign=backCv['--pk-text-valign']||(frontCv['--pk-text-valign']||'center');
+    var backAlignItems=backValign==='top'?'flex-start':backValign==='bottom'?'flex-end':'center';
+    var backJustifyContent=backHalign==='left'?'flex-start':backHalign==='right'?'flex-end':'center';
+    var backUsesFrontDesign=backCfg.mirrorImage||backCfg.seedFromFront;
+    var backShapeKey=backUsesFrontDesign?previewKey:(backCfg.styleKey||previewKey);
+    var frontBg=front.querySelector('.cpBg');
+    var frontEmpty=front.querySelector('.cpBgEmpty');
+    var bgHtml='';
+    if(backUsesFrontDesign){
+      if(frontBg){
+        var bgClone=frontBg.cloneNode(true);
+        bgClone.classList.toggle('is-reflect',!!backCfg.reflect);
+        bgHtml=bgClone.outerHTML;
+      }else if(frontEmpty){
+        bgHtml=frontEmpty.outerHTML;
+      }
+    }else{
+      bgHtml='<div class="cpBgEmpty" style="'+cardBgStyle(backCfg.bg)+';position:absolute;inset:0"></div>';
+    }
+    back.classList.toggle('is-reflect',!!backCfg.reflect);
+    back.style.background=(backCfg.custom&&!backCfg.seedFromFront)?backCfg.bg:'transparent';
+    back.style.fontFamily="'"+backFont+"',sans-serif";
+    back.style.fontSize=backFs;
+    back.style.color=backTextColor;
+    var currentBg=back.querySelector('.cpBg, .cpBgEmpty');
+    if(bgHtml){
+      var bgWrap=document.createElement('div');
+      bgWrap.innerHTML=bgHtml;
+      var nextBg=bgWrap.firstElementChild;
+      if(nextBg){
+        if(currentBg)currentBg.replaceWith(nextBg);
+        else back.insertBefore(nextBg,back.firstChild||null);
+      }
+    }
+    var shapeLayer=back.querySelector('.cpShapeLayer');
+    if(!shapeLayer){
+      shapeLayer=document.createElement('div');
+      back.appendChild(shapeLayer);
+    }
+    shapeLayer.className='cpShapeLayer'+(backCfg.reflect?' is-reflect':'');
+    shapeLayer.setAttribute('data-shape-key',backShapeKey);
+    shapeLayer.innerHTML=backUsesFrontDesign
+      ?((frontShape&&frontShape.innerHTML)||'')
+      :cardShapesLayerHtml(backShapeKey);
+    var overlay=back.querySelector('.cpOverlay');
+    if(overlay){
+      overlay.style.alignItems=backAlignItems;
+      overlay.style.justifyContent=backJustifyContent;
+      overlay.style.textAlign=backHalign;
+    }
+  });
+}
+function animateBackFaceRefresh(state){
+  var phase=state||'in';
+  previewCardBackFaces().forEach(function(back){
+    back.classList.remove('is-refreshing','is-refreshing-out','is-refreshing-in');
+    void back.offsetWidth;
+    back.classList.add(phase==='out'?'is-refreshing-out':'is-refreshing-in','is-refreshing');
+    if(back._refreshTimer)clearTimeout(back._refreshTimer);
+    back._refreshTimer=setTimeout(function(){
+      back._refreshTimer=0;
+      back.classList.remove('is-refreshing','is-refreshing-out','is-refreshing-in');
+    },Math.max(BACK_PREVIEW_SWAP_DELAY+80,220));
+  });
+}
+function rebuildPreviewForCurrentBackState(){
   buildStijlPreserveBg(g('pw'));
+  syncBackModeUiState();
+  syncBackSurfaceUiState();
+  syncBackExtraControlsUiState();
+  updateStijlPreview();
+}
+function syncBackSurfaceUiState(){
+  var activeSurface=(currentBackEditSurfaceForUi()==='back')?'back':'front';
+  document.querySelectorAll('[data-back-edit-surface]').forEach(function(btn){
+    btn.classList.toggle('sel',btn.getAttribute('data-back-edit-surface')===activeSurface);
+  });
+  document.querySelectorAll('.stijlCanvasFlipBtn').forEach(function(btn){
+    btn.classList.toggle('sel',CANVAS_CARD_FLIPPED);
+  });
+}
+function syncBackModeUiState(){
+  var backMode=currentBackModeForUi();
+  document.querySelectorAll('[data-back-mode]').forEach(function(btn){
+    btn.classList.toggle('sel',btn.getAttribute('data-back-mode')===backMode);
+  });
+}
+function syncBackExtraControlsUiState(forceVisible){
+  var visible=(typeof forceVisible==='boolean')?forceVisible:shouldShowBackExtraControls();
+  document.querySelectorAll('.previewEditSurfaceStack').forEach(function(stack){
+    stack.classList.toggle('is-visible',visible);
+    stack.classList.toggle('is-hidden',!visible);
+    if(visible)stack.removeAttribute('aria-hidden');
+    else stack.setAttribute('aria-hidden','true');
+    stack.querySelectorAll('button').forEach(function(btn){
+      if(visible)btn.removeAttribute('tabindex');
+      else btn.setAttribute('tabindex','-1');
+    });
+  });
+}
+function runBackPreviewTransition(opts){
+  opts=opts||{};
+  var fromFlipped=!!opts.fromFlipped;
+  var toFlipped=!!opts.toFlipped;
+  var delayExtraReveal=!!opts.delayExtraReveal;
+  var roundTrip=!!opts.roundTrip;
+  var spinAdvance=!!opts.spinAdvance;
+  var afterTransition=typeof opts.afterTransition==='function'?opts.afterTransition:null;
+  if(BACK_EDITOR_REFRESH_TIMER)clearTimeout(BACK_EDITOR_REFRESH_TIMER);
+  if(BACK_EDITOR_FINALIZE_TIMER)clearTimeout(BACK_EDITOR_FINALIZE_TIMER);
+  if(BACK_EDITOR_FLIP_TIMER)clearTimeout(BACK_EDITOR_FLIP_TIMER);
+  if(BACK_EDITOR_SPIN_TIMER)clearTimeout(BACK_EDITOR_SPIN_TIMER);
+  function finalizeTransitionAfterDelay(duration){
+    if(!(delayExtraReveal||afterTransition))return;
+    BACK_EDITOR_FINALIZE_TIMER=setTimeout(function(){
+      BACK_EDITOR_FINALIZE_TIMER=0;
+      if(afterTransition)afterTransition();
+      BACK_EXTRA_CONTROLS_DELAYED=false;
+      syncBackExtraControlsUiState();
+    },duration||BACK_PREVIEW_FLIP_DURATION);
+  }
+  if(spinAdvance&&fromFlipped&&toFlipped){
+    CANVAS_CARD_FLIPPED=true;
+    syncBackModeUiState();
+    syncBackSurfaceUiState();
+    syncBackExtraControlsUiState();
+    startPreviewBackSwapTurn();
+    BACK_EDITOR_REFRESH_TIMER=setTimeout(function(){
+      BACK_EDITOR_REFRESH_TIMER=0;
+      syncPreviewBackFacesForCurrentState();
+      updateStijlPreview();
+    },BACK_PREVIEW_SPIN_SWAP_DELAY);
+    finalizeTransitionAfterDelay(BACK_PREVIEW_SPIN_DURATION);
+    return;
+  }
+  if(roundTrip&&fromFlipped&&toFlipped){
+    CANVAS_CARD_FLIPPED=true;
+    syncBackModeUiState();
+    syncBackSurfaceUiState();
+    syncBackExtraControlsUiState();
+    animateBackFaceRefresh('out');
+    BACK_EDITOR_REFRESH_TIMER=setTimeout(function(){
+      BACK_EDITOR_REFRESH_TIMER=0;
+      syncPreviewBackFacesForCurrentState();
+      updateStijlPreview();
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){
+          animateBackFaceRefresh('in');
+          finalizeTransitionAfterDelay(BACK_PREVIEW_FLIP_DURATION);
+        });
+      });
+    },BACK_PREVIEW_SWAP_DELAY);
+    return;
+  }
+  if(!fromFlipped&&toFlipped){
+    CANVAS_CARD_FLIPPED=false;
+    syncBackModeUiState();
+    syncBackSurfaceUiState();
+    syncBackExtraControlsUiState();
+    startPreviewFlipState(true);
+    BACK_EDITOR_REFRESH_TIMER=setTimeout(function(){
+      BACK_EDITOR_REFRESH_TIMER=0;
+      syncPreviewBackFacesForCurrentState();
+      updateStijlPreview();
+    },BACK_PREVIEW_REBUILD_DELAY);
+    finalizeTransitionAfterDelay(BACK_PREVIEW_FLIP_DURATION);
+    return;
+  }
+  CANVAS_CARD_FLIPPED=fromFlipped;
+  rebuildPreviewForCurrentBackState();
+  if(toFlipped!==fromFlipped){
+    startPreviewFlipState(toFlipped,finalizeTransitionAfterDelay);
+    return;
+  }
+  setPreviewCardFlipState(toFlipped);
+  if(delayExtraReveal||afterTransition){
+    if(afterTransition)afterTransition();
+    BACK_EXTRA_CONTROLS_DELAYED=false;
+    syncBackExtraControlsUiState();
+  }
+}
+function setBackEditSurface(surface){
+  var nextSurface=(surface==='back')?'back':'front';
+  var wasFlipped=CANVAS_CARD_FLIPPED;
+  STYLE_BACK_EDIT_SURFACE=nextSurface;
+  if(STYLE_BACK_EDIT_SURFACE==='back')ensureBackDesignDefaults(S.d.meta||{});
+  runBackPreviewTransition({
+    fromFlipped:wasFlipped,
+    toFlipped:STYLE_BACK_EDIT_SURFACE==='back',
+    afterTransition:function(){
+      buildStijlPreserveBg(g('pw'));
+      updateStijlPreview();
+      syncBackModeUiState();
+      syncBackSurfaceUiState();
+      syncBackExtraControlsUiState();
+    }
+  });
 }
 function isEditingBackDesign(){
-  return S.clTab==='opmaken'&&S.opmPane==='vragen'&&isCustomBackMode((S.d||{}).meta||{})&&STYLE_BACK_EDIT_SURFACE==='back';
+  return S.clTab==='opmaken'&&S.opmPane==='vragen'&&isCustomBackMode((S.d||{}).meta||{})&&currentBackEditSurfaceActual()==='back';
 }
 function backPreviewConfig(themeKey){
   var meta=S.d.meta||{};
@@ -8697,12 +9496,14 @@ function backPreviewConfig(themeKey){
   var blankColor=(meta.blankBackColors&&meta.blankBackColors[key])||meta.blankBackColor||'#F8E4D2';
   var custom=mode==='blank';
   var styleKey=custom?currentBackDesignKey(key):key;
+  var seedFromFront=custom&&shouldSeedBlankBackFromFront(meta,styleKey,blankColor);
   var bg=custom?(cardBgForKey(meta,styleKey)||normalizedCardSurface(blankColor)):'transparent';
   return {
     mode:mode,
     custom:custom,
     reflect:mode==='reflect',
     mirrorImage:(mode==='mirror'||mode==='reflect'),
+    seedFromFront:seedFromFront,
     styleKey:styleKey,
     cssVars:styleCssVarsForKey(meta,styleKey),
     bg:bg,
@@ -9988,19 +10789,47 @@ function closeTextMenu(el){
 }
 function setBackMode(mode){
   var m=S.d.meta=S.d.meta||{};
-  m.backMode=(mode==='blank'||mode==='reflect')?mode:'mirror';
+  var nextMode=(mode==='blank'||mode==='reflect')?mode:'mirror';
+  var changed=m.backMode!==nextMode;
+  var wasFlipped=CANVAS_CARD_FLIPPED;
+  var prevMode=m.backMode||'mirror';
+  var prevSurface=STYLE_BACK_EDIT_SURFACE||'front';
+  var spinAdvance=!!(changed&&wasFlipped);
+  var needsEditorRebuild=!!(prevMode==='blank'||nextMode==='blank');
+  m.backMode=nextMode;
   if(m.backMode==='blank'){
     ensureBackDesignDefaults(m);
     STYLE_BACK_EDIT_SURFACE='back';
-    CANVAS_CARD_FLIPPED=true;
   }else{
     STYLE_BACK_EDIT_SURFACE='front';
-    // When choosing a back mode, show the back immediately so the effect is visible.
-    CANVAS_CARD_FLIPPED=true;
   }
+  if(changed&&(!wasFlipped||spinAdvance)){
+    BACK_MODE_UI_OVERRIDE=prevMode;
+    BACK_SURFACE_UI_OVERRIDE=(prevMode==='blank'||m.backMode==='blank')?prevSurface:'';
+  }else{
+    BACK_MODE_UI_OVERRIDE='';
+    BACK_SURFACE_UI_OVERRIDE='';
+  }
+  BACK_EXTRA_CONTROLS_DELAYED=!!(m.backMode==='blank'&&changed&&!wasFlipped);
   markDirty();
-  buildStijlPreserveBg(g('pw'));
-  updateStijlPreview();
+  runBackPreviewTransition({
+    fromFlipped:wasFlipped,
+    toFlipped:true,
+    roundTrip:changed&&wasFlipped&&!spinAdvance,
+    spinAdvance:spinAdvance,
+    delayExtraReveal:BACK_EXTRA_CONTROLS_DELAYED,
+    afterTransition:function(){
+      BACK_MODE_UI_OVERRIDE='';
+      BACK_SURFACE_UI_OVERRIDE='';
+      if(needsEditorRebuild){
+        buildStijlPreserveBg(g('pw'));
+        updateStijlPreview();
+      }
+      syncBackModeUiState();
+      syncBackSurfaceUiState();
+      syncBackExtraControlsUiState();
+    }
+  });
 }
 function setTextWeight(val){
   val=(val==='medium'||val==='semibold'||val==='bold')?val:'regular';
@@ -10794,9 +11623,11 @@ function previewNightToggleIconHtml(isNight){
 function refreshPreviewNightUi(){
   var isNight=previewNightMode()||adminNightMode();
   Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasWindow')).forEach(function(win){
+    if(isWizardPreviewWindow(win))return;
     win.classList.toggle('night',isNight);
   });
   Array.prototype.slice.call(document.querySelectorAll('[data-preview-night-toggle="1"]')).forEach(function(btn){
+    if(isInsideWizardPreview(btn))return;
     var label=isNight?'Nachtmodus uitzetten':'Nachtmodus aanzetten';
     btn.classList.toggle('sel',isNight);
     btn.setAttribute('aria-label',label);
@@ -10810,6 +11641,21 @@ function previewGridMode(){
   var meta=((S.d||{}).meta=S.d.meta||{});
   meta.ui=meta.ui||{};
   return !!meta.ui.previewGrid;
+}
+function refreshPreviewGridUi(){
+  var isGrid=previewGridMode();
+  Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasWindow')).forEach(function(win){
+    if(isWizardPreviewWindow(win))return;
+    win.classList.toggle('grid-on',isGrid);
+  });
+  Array.prototype.slice.call(document.querySelectorAll('.stijlCanvasGridBtn')).forEach(function(btn){
+    if(isInsideWizardPreview(btn))return;
+    var label=isGrid?'Raster uitzetten':'Raster tonen';
+    btn.classList.toggle('sel',isGrid);
+    btn.setAttribute('aria-label',label);
+    btn.setAttribute('title',label);
+  });
+  syncPreviewGridAccentState();
 }
 function togglePreviewNight(){
   var meta=((S.d||{}).meta=S.d.meta||{});
@@ -10825,7 +11671,9 @@ function togglePreviewGrid(){
   meta.ui=meta.ui||{};
   meta.ui.previewGrid=!meta.ui.previewGrid;
   markDirty();
-  if(S.clTab==='opmaken')buildStijlPreserveBg(g('pw'));
+  if(S.clTab==='opmaken'){
+    refreshPreviewGridUi();
+  }
 }
 var CANVAS_CARD_FLIPPED=false;
 var CANVAS_ZOOM_PCT=100;
@@ -10865,11 +11713,18 @@ function previewWindowIsVisible(win){
   if(cs&&(cs.display==='none'||cs.visibility==='hidden'))return false;
   return true;
 }
+function isWizardPreviewWindow(win){
+  return !!(win&&win.getAttribute&&win.getAttribute('data-wizard-preview')==='1');
+}
+function isInsideWizardPreview(node){
+  return !!(node&&node.closest&&node.closest('.stijlCanvasWindow[data-wizard-preview="1"]'));
+}
 function currentCanvasZoomBounds(){
   var min=CANVAS_ZOOM_MIN_PCT;
   var max=CANVAS_ZOOM_MAX_PCT;
   var fitCaps=[];
   document.querySelectorAll('.stijlCanvasWindow').forEach(function(win){
+    if(isWizardPreviewWindow(win))return;
     if(!previewWindowIsVisible(win))return;
     if(!win||!win.getClientRects||!win.getClientRects().length)return;
     if(win.classList.contains('site-preview-window')){
@@ -10910,67 +11765,80 @@ function baseCanvasPreviewShellHeight(){
   var toolbarH=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-h'))||66;
   return Math.max(360,Math.min(window.innerHeight-toolbarH-154,468));
 }
+function syncSingleCanvasPreviewLayout(win){
+  if(!win||!win.querySelector)return;
+  var inner=win.querySelector('.stijlCanvasWindowInner');
+  var card=win.querySelector('.stijlCardPrevWrap');
+  if(!inner||!card)return;
+  var winRect=win.getBoundingClientRect();
+  if(!winRect.width||!winRect.height)return;
+  var topbar=win.querySelector('.stijlCanvasTopbar');
+  var backbar=win.querySelector('.stijlCanvasBackbar');
+  var visual=card.querySelector('.cardFaceOuter, .adminInfoSlide');
+  var sideInset=14;
+  var contentTop=34;
+  var contentBottom=70;
+  if(topbar){
+    var topbarRect=topbar.getBoundingClientRect();
+    sideInset=Math.max(8,Math.round(topbarRect.left-winRect.left));
+    contentTop=Math.max(0,Math.round(topbarRect.bottom-winRect.top)+8);
+  }
+  if(backbar){
+    var backbarRect=backbar.getBoundingClientRect();
+    contentBottom=Math.max(0,Math.round(winRect.bottom-backbarRect.top)-4);
+  }
+  var backbarExtra=win.querySelector('.previewEditSurfaceStack');
+  if(backbarExtra&&typeof backbarExtra.getBoundingClientRect==='function'){
+    var backbarExtraRect=backbarExtra.getBoundingClientRect();
+    if(backbarExtraRect.width>0&&backbarExtraRect.height>0){
+      var reserveTop=backbarExtraRect.top;
+      if(backbar&&typeof backbar.getBoundingClientRect==='function'){
+        reserveTop=Math.min(reserveTop,backbar.getBoundingClientRect().top);
+      }
+      contentBottom=Math.max(contentBottom,Math.max(0,Math.round(winRect.bottom-reserveTop)-4));
+    }
+  }
+  var effectiveBottom=contentBottom;
+  win.style.setProperty('--preview-side-inset',sideInset+'px');
+  win.style.setProperty('--preview-content-top',contentTop+'px');
+  win.style.setProperty('--preview-content-bottom',effectiveBottom+'px');
+  if(win.classList.contains('info-preview')){
+    var previewSide=win.closest('.stijlCanvasSide.preview');
+    var previewShellH=previewSide
+      ? parseFloat(getComputedStyle(previewSide).getPropertyValue('--preview-shell-max-h'))||0
+      : 0;
+    var basePreviewWindowH=previewShellH>0 ? previewShellH : baseCanvasPreviewShellHeight();
+    var infoAvailH=Math.max(0,basePreviewWindowH-contentTop-effectiveBottom);
+    var infoScale=parseFloat(visual&&visual.style.zoom||'')||1;
+    var infoCardFace=card.querySelector('.adminInfoSlideCard');
+    var infoCardFaceRect=infoCardFace&&infoCardFace.getBoundingClientRect?infoCardFace.getBoundingClientRect():null;
+    var infoCardH=(infoCardFaceRect&&infoCardFaceRect.height)?infoCardFaceRect.height:0;
+    if(!(infoCardH>0)){
+      var infoBaseCardW=parseFloat(getComputedStyle(card).getPropertyValue('--editor-preview-card-w'))||320;
+      infoCardH=Math.round((infoBaseCardW*(55/85))*infoScale);
+    }
+    var infoCardStart=contentTop+Math.max(0,Math.round((infoAvailH-infoCardH)/2));
+    card.style.top=infoCardStart+'px';
+    card.style.bottom='auto';
+    card.style.height='auto';
+    card.style.transform='none';
+    return;
+  }
+  card.style.top=contentTop+'px';
+  card.style.bottom=contentBottom+'px';
+  card.style.height='auto';
+  card.style.transform='none';
+}
 function syncCanvasPreviewLayout(){
   requestAnimationFrame(function(){
     document.querySelectorAll('.stijlCanvasWindow:not(.site-preview-window)').forEach(function(win){
-      var inner=win.querySelector('.stijlCanvasWindowInner');
-      var card=win.querySelector('.stijlCardPrevWrap');
-      if(!inner||!card)return;
-      var winRect=win.getBoundingClientRect();
-      if(!winRect.width||!winRect.height)return;
-      var topbar=win.querySelector('.stijlCanvasTopbar');
-      var backbar=win.querySelector('.stijlCanvasBackbar');
-      var visual=card.querySelector('.cardFaceOuter, .adminInfoSlide');
-      var setBackbarReserve=34;
-      var sideInset=14;
-      var contentTop=34;
-      var contentBottom=70;
-      if(topbar){
-        var topbarRect=topbar.getBoundingClientRect();
-        sideInset=Math.max(8,Math.round(topbarRect.left-winRect.left));
-        contentTop=Math.max(0,Math.round(topbarRect.bottom-winRect.top)+8);
-      }
-      if(backbar){
-        var backbarRect=backbar.getBoundingClientRect();
-        contentBottom=Math.max(0,Math.round(winRect.bottom-backbarRect.top)-4);
-      }
-      var effectiveBottom=contentBottom;
-      win.style.setProperty('--preview-side-inset',sideInset+'px');
-      win.style.setProperty('--preview-content-top',contentTop+'px');
-      win.style.setProperty('--preview-content-bottom',effectiveBottom+'px');
-      if(win.classList.contains('info-preview')){
-        // The infosheet must start from the exact same visual card baseline as
-        // the regular set preview. Only the extra infosheet text may extend
-        // the preview downward. So we anchor to the shared shell height
-        // instead of the enlarged info-preview height.
-        var previewSide=win.closest('.stijlCanvasSide.preview');
-        var previewShellH=previewSide
-          ? parseFloat(getComputedStyle(previewSide).getPropertyValue('--preview-shell-max-h'))||0
-          : 0;
-        var basePreviewWindowH=previewShellH>0 ? previewShellH : baseCanvasPreviewShellHeight();
-        var infoAvailH=Math.max(0,basePreviewWindowH-contentTop-effectiveBottom);
-        var infoScale=parseFloat(visual&&visual.style.zoom||'')||1;
-        var infoCardFace=card.querySelector('.adminInfoSlideCard');
-        var infoCardFaceRect=infoCardFace&&infoCardFace.getBoundingClientRect?infoCardFace.getBoundingClientRect():null;
-        var infoCardH=(infoCardFaceRect&&infoCardFaceRect.height)?infoCardFaceRect.height:0;
-        if(!(infoCardH>0)){
-          var infoBaseCardW=parseFloat(getComputedStyle(card).getPropertyValue('--editor-preview-card-w'))||320;
-          infoCardH=Math.round((infoBaseCardW*(55/85))*infoScale);
-        }
-        var infoCardStart=contentTop+Math.max(0,Math.round((infoAvailH-infoCardH)/2));
-        card.style.top=infoCardStart+'px';
-        card.style.bottom='auto';
-        card.style.height='auto';
-        card.style.transform='none';
-        return;
-      }
-      card.style.top=contentTop+'px';
-      card.style.bottom=contentBottom+'px';
-      card.style.height='auto';
-      card.style.transform='none';
+      if(isWizardPreviewWindow(win))return;
+      syncSingleCanvasPreviewLayout(win);
     });
   });
 }
+window.PK=window.PK||{};
+window.PK.syncCanvasPreviewWindowLayout=syncSingleCanvasPreviewLayout;
 var CANVAS_VIEWPORT_SYNC_RAF=0;
 function scheduleCanvasViewportSync(){
   if(CANVAS_VIEWPORT_SYNC_RAF)cancelAnimationFrame(CANVAS_VIEWPORT_SYNC_RAF);
@@ -10985,13 +11853,17 @@ function applyCanvasZoom(){
   rememberCanvasZoomForScope(currentCanvasZoomScopeKey(),CANVAS_ZOOM_PCT);
   var scale=CANVAS_ZOOM_PCT/100;
   document.querySelectorAll('.stijlCanvasCardWrap .cardFaceOuter, .stijlCanvasCardWrap .adminInfoSlide').forEach(function(el){
+    if(isInsideWizardPreview(el))return;
     el.style.zoom=scale;
   });
   document.querySelectorAll('.spaceLiveFrameScale').forEach(function(el){
     el.style.setProperty('--preview-scale',scale);
     el.style.height=Math.round(SPACE_PREVIEW_H*scale)+'px';
   });
-  document.querySelectorAll('.cvZoomPct').forEach(function(el){el.textContent=CANVAS_ZOOM_PCT+'%';});
+  document.querySelectorAll('.cvZoomPct').forEach(function(el){
+    if(isInsideWizardPreview(el))return;
+    el.textContent=CANVAS_ZOOM_PCT+'%';
+  });
   syncCanvasPreviewLayout();
 }
 var SPACE_PREVIEW_REFRESH_TM=0;
@@ -11020,7 +11892,7 @@ function stepCanvasZoom(delta){
   var prev=CANVAS_ZOOM_PCT;
   setCanvasZoom(CANVAS_ZOOM_PCT+delta);
   if(CANVAS_ZOOM_PCT===prev){
-    var ctrl=document.querySelector('.cvZoomControl');
+    var ctrl=document.querySelector('.stijlCanvasWindow:not([data-wizard-preview="1"]) .cvZoomControl');
     if(ctrl){ctrl.classList.remove('at-limit');void ctrl.offsetWidth;ctrl.classList.add('at-limit');setTimeout(function(){ctrl.classList.remove('at-limit');},500);}
   }
 }
@@ -11677,10 +12549,17 @@ function buildShapeEditorHtml(key){
   var layers=getCardShapeLayers(key);
   var active=getShapeActiveIndex(key);
   var layer=layers[active];
-  var coverTextEditing=!!(key==='cover'&&((typeof currentCoverTextIdx==='function'&&currentCoverTextIdx()>=0)||COVER_ELEM_SEL));
-  if(layers.length&&!layer&&!coverTextEditing){
+  if(layers.length&&!layer){
     active=ensureShapeActiveIndex(key);
     layer=layers[active];
+  }
+  function finiteShapeValue(value,fallback,min,max){
+    if(value==null||value==='')value=fallback;
+    var n=Number(value);
+    if(!isFinite(n))n=fallback;
+    if(typeof min==='number')n=Math.max(min,n);
+    if(typeof max==='number')n=Math.min(max,n);
+    return n;
   }
   var target=ensureShapeColorTarget(key);
   var shapesOpen=storedOpenState(STIJL_SHAPES_OPEN,key,true);
@@ -11767,11 +12646,11 @@ function buildShapeEditorHtml(key){
   }
   var fillColor=layer?(layer.fill||'#CFE6DF'):'#CFE6DF';
   var strokeColor=layer?(layer.stroke||'#ffffff'):'#ffffff';
-  var fillTone=layer?shapeColorToneValue(layer,'fill'):0;
-  var strokeTone=layer?shapeColorToneValue(layer,'stroke'):0;
-  var currentOpacity=layer?Math.round((Number(layer[target==='stroke'?'strokeOpacity':'fillOpacity'])||1)*100):100;
-  var sizeValue=layer?(layer.size||42):42;
-  var rotateValue=layer?(layer.rotate||0):0;
+  var fillTone=layer?finiteShapeValue(shapeColorToneValue(layer,'fill'),0,-100,100):0;
+  var strokeTone=layer?finiteShapeValue(shapeColorToneValue(layer,'stroke'),0,-100,100):0;
+  var currentOpacity=layer?Math.round(finiteShapeValue(layer[target==='stroke'?'strokeOpacity':'fillOpacity'],1,0,1)*100):100;
+  var sizeValue=layer?finiteShapeValue(layer.size,42,12,120):42;
+  var rotateValue=layer?finiteShapeValue(layer.rotate,0,-180,180):0;
   var selectedIndices=getShapeSelectedIndices(key);
   var selectedTextIndices=(key==='cover'?getCoverTextSelectedIndices():[]);
   var multiSelected=selectedIndices.length>1;
@@ -12278,9 +13157,11 @@ function buildSharedCardEditor(opts){
   var accentColor=((editorCv||{})['--pk-set-accent']||'#CFE6DF');
   var doubleSided=(m.doubleSided!==false);
   var backMode=(m.backMode||'mirror');
+  var backModeUi=currentBackModeForUi();
+  var backSurfaceUi=currentBackEditSurfaceForUi();
   var backScope=backStyleScope(m);
-  var editingBackSurface=(backMode==='blank'&&STYLE_BACK_EDIT_SURFACE==='back');
-  var activeBackDesignKey=currentBackDesignKey(previewKey);
+  var editingBackSurface=(backMode==='blank'&&currentBackEditSurfaceActual()==='back');
+  var activeBackDesignKey=opts.backDesignKey||currentBackDesignKey(previewKey);
   var canUseCardBackScope=previewKey!=='cover'&&((((S.d||{}).questions||{})[previewKey])||[]).length>0;
   var mode=cardBuildModeForKey(m,designKey);
   var alignIcons={
@@ -12383,8 +13264,8 @@ function buildSharedCardEditor(opts){
       ?previewNightBtnHtml
       :(isViewerFocusMode
         ?''
-        :(((backMode==='blank')?'':('<button class="stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" type="button" aria-label="Kaart omdraaien" title="Kaart omdraaien" onclick="toggleCanvasFlip()">'+flipIcon+'</button>'+
-          '<div class="previewTopPillSep"></div>'))+
+        :((doubleSided?('<button class="stijlCanvasFlipBtn'+(CANVAS_CARD_FLIPPED?' sel':'')+'" type="button" aria-label="Kaart omdraaien" title="Kaart omdraaien" onclick="toggleCanvasFlip()">'+flipIcon+'</button>'+
+          '<div class="previewTopPillSep"></div>'):'')+
           '<button class="stijlCanvasGridBtn'+(gridMode?' sel':'')+'" type="button" aria-label="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" title="'+(gridMode?'Raster uitzetten':'Raster tonen')+'" onclick="togglePreviewGrid()">'+gridIcon+'</button>'+
           previewNightBtnHtml)))+
     '</div>';
@@ -12424,7 +13305,7 @@ function buildSharedCardEditor(opts){
                 nightAttrText:' data-preview-night-toggle="1" onclick="togglePreviewNight()"'
               }
             :{
-                showFlip:!isViewerFocusMode&&backMode!=='blank',
+                showFlip:!isViewerFocusMode&&doubleSided,
                 flipSelected:CANVAS_CARD_FLIPPED,
                 flipAttrText:' onclick="toggleCanvasFlip()"',
                 showGrid:!isViewerFocusMode,
@@ -12436,18 +13317,18 @@ function buildSharedCardEditor(opts){
               }
         });
   }
-  var previewBackToolbarExtraHtml=(backMode==='blank'
-    ?('<div class="previewEditSurfaceStack">'+
-        '<div class="previewEditSurfacePill previewEditSurfacePill-surface">'+
-          '<button class="previewEditSurfaceBtn'+(!editingBackSurface?' sel':'')+'" type="button" title="Voorkant ontwerpen" onclick="setBackEditSurface(\'front\')">Voor</button>'+
-          '<button class="previewEditSurfaceBtn'+(editingBackSurface?' sel':'')+'" type="button" title="Achterkant ontwerpen" onclick="setBackEditSurface(\'back\')">Achter</button>'+
-        '</div>'+
-        '<div class="previewEditSurfacePill previewEditSurfacePill-scope">'+
-          '<button class="previewEditSurfaceBtn'+(backScope!=='card'?' sel':'')+'" type="button" title="Pas het achterkantontwerp toe op de hele set" onclick="setBackDesignScope(\'set\')">Hele set</button>'+
-          '<button class="previewEditSurfaceBtn'+(backScope==='card'?' sel':'')+(canUseCardBackScope?'':' is-disabled')+'" type="button" title="'+(canUseCardBackScope?'Pas het achterkantontwerp alleen toe op deze kaart':'Beschikbaar zodra je een vraag selecteert')+'" onclick="'+(canUseCardBackScope?'setBackDesignScope(\'card\')':'return false')+'"'+(canUseCardBackScope?'':' aria-disabled="true" tabindex="-1"')+'>Deze kaart</button>'+
-        '</div>'+
-      '</div>')
-    :'');
+  var showPreviewBackToolbarExtra=shouldShowBackExtraControls(backModeUi);
+  var previewBackToolbarExtraHtml=
+    '<div class="previewEditSurfaceStack'+(showPreviewBackToolbarExtra?' is-visible':' is-hidden')+'"'+(showPreviewBackToolbarExtra?'':' aria-hidden="true"')+'>'+
+      '<div class="previewEditSurfacePill previewEditSurfacePill-surface">'+
+        '<button class="previewEditSurfaceBtn'+(backSurfaceUi!=='back'?' sel':'')+'" data-back-edit-surface="front" type="button" title="Voorkant ontwerpen" onclick="setBackEditSurface(\'front\')"'+(showPreviewBackToolbarExtra?'':' tabindex="-1"')+'>Voor</button>'+
+        '<button class="previewEditSurfaceBtn'+(backSurfaceUi==='back'?' sel':'')+'" data-back-edit-surface="back" type="button" title="Achterkant ontwerpen" onclick="setBackEditSurface(\'back\')"'+(showPreviewBackToolbarExtra?'':' tabindex="-1"')+'>Achter</button>'+
+      '</div>'+
+      '<div class="previewEditSurfacePill previewEditSurfacePill-scope">'+
+        '<button class="previewEditSurfaceBtn'+(backScope!=='card'?' sel':'')+'" type="button" title="Pas het achterkantontwerp toe op de hele set" onclick="setBackDesignScope(\'set\')"'+(showPreviewBackToolbarExtra?'':' tabindex="-1"')+'>Hele set</button>'+
+        '<button class="previewEditSurfaceBtn'+(backScope==='card'?' sel':'')+(canUseCardBackScope?'':' is-disabled')+'" type="button" title="'+(canUseCardBackScope?'Pas het achterkantontwerp alleen toe op deze kaart':'Beschikbaar zodra je een vraag selecteert')+'" onclick="'+(canUseCardBackScope?'setBackDesignScope(\'card\')':'return false')+'"'+(canUseCardBackScope?'':' aria-disabled="true"')+((showPreviewBackToolbarExtra&&canUseCardBackScope)?'':' tabindex="-1"')+'>Deze kaart</button>'+
+      '</div>'+
+    '</div>';
   var previewBackToolbarHtml=(!viewerOnlyPreview&&!isSpaceSitePreview&&!opts.infoRichCe&&doubleSided)
     ?(canUseSharedPreviewShell
       ?sharedPreviewShell.buildBackbarHtml({
@@ -12456,21 +13337,21 @@ function buildSharedCardEditor(opts){
           modes:[
             {
               label:'Zelfde',
-              selected:backMode==='mirror',
+              selected:backModeUi==='mirror',
               title:'Zelfde ontwerp',
-              attrText:' onclick="setBackMode(\'mirror\')"'
+              attrText:' data-back-mode="mirror" onclick="setBackMode(\'mirror\')"'
             },
             {
               label:'Gespiegeld',
-              selected:backMode==='reflect',
+              selected:backModeUi==='reflect',
               title:'Zelfde ontwerp gespiegeld',
-              attrText:' onclick="setBackMode(\'reflect\')"'
+              attrText:' data-back-mode="reflect" onclick="setBackMode(\'reflect\')"'
             },
             {
               label:'Eigen',
-              selected:backMode==='blank',
+              selected:backModeUi==='blank',
               title:'Eigen achterkant',
-              attrText:' onclick="setBackMode(\'blank\')"'
+              attrText:' data-back-mode="blank" onclick="setBackMode(\'blank\')"'
             }
           ],
           extraHtml:previewBackToolbarExtraHtml
@@ -12478,9 +13359,9 @@ function buildSharedCardEditor(opts){
       :'<div class="stijlCanvasBackbar">'+
           '<div class="stijlCanvasBackbarLabel">Achterkant</div>'+
           '<div class="stijlCanvasBackbarGroup">'+
-            '<button class="stijlBackModeBtn'+(backMode==='mirror'?' sel':'')+'" type="button" onclick="setBackMode(\'mirror\')" title="Zelfde ontwerp">Zelfde</button>'+
-            '<button class="stijlBackModeBtn'+(backMode==='reflect'?' sel':'')+'" type="button" onclick="setBackMode(\'reflect\')" title="Zelfde ontwerp gespiegeld">Gespiegeld</button>'+
-            '<button class="stijlBackModeBtn'+(backMode==='blank'?' sel':'')+'" type="button" onclick="setBackMode(\'blank\')" title="Eigen achterkant">Eigen</button>'+
+            '<button class="stijlBackModeBtn'+(backModeUi==='mirror'?' sel':'')+'" data-back-mode="mirror" type="button" onclick="setBackMode(\'mirror\')" title="Zelfde ontwerp">Zelfde</button>'+
+            '<button class="stijlBackModeBtn'+(backModeUi==='reflect'?' sel':'')+'" data-back-mode="reflect" type="button" onclick="setBackMode(\'reflect\')" title="Zelfde ontwerp gespiegeld">Gespiegeld</button>'+
+            '<button class="stijlBackModeBtn'+(backModeUi==='blank'?' sel':'')+'" data-back-mode="blank" type="button" onclick="setBackMode(\'blank\')" title="Eigen achterkant">Eigen</button>'+
           '</div>'+
           previewBackToolbarExtraHtml+
         '</div>')
@@ -13478,7 +14359,7 @@ function buildStijl(target){
         forceBold:false,
         previewHint:previewFile,
         suppressEmptyFrontHint:true,
-        flipped:!contentIsInfoMode&&isEditingBackDesign(),
+        flipped:!contentIsInfoMode&&CANVAS_CARD_FLIPPED,
         infoRichCe:contentIsInfoMode,
         infoRichCeKey:contentIsInfoMode?infoKey:null,
         showInfoMidTitle:contentIsInfoMode&&infoKey!=='cover'&&!!(((m.themes||[]).find(function(t){return t.key===infoKey;}))||((m.infoPages||[]).find(function(p){return p.key===infoKey;}))),
@@ -13687,9 +14568,14 @@ function updateStijlPreview(){
   applyPreviewTextStyles(previewKey);
   ['stijlCardBack','qedCardBack'].forEach(function(id){
     var back=g(id);if(!back)return;
-    back.style.background=backCfg.custom?backCfg.bg:'transparent';
+    back.classList.toggle('is-reflect',!!backCfg.reflect);
+    back.style.background=(backCfg.custom&&!backCfg.seedFromFront)?backCfg.bg:'transparent';
     var backEmpty=back.querySelector('.cpBgEmpty');
-    if(backEmpty&&backCfg.custom)backEmpty.style.background=cardBgValue(backCfg.bg);
+    if(backEmpty&&backCfg.custom&&!backCfg.seedFromFront)backEmpty.style.background=cardBgValue(backCfg.bg);
+    var backImg=back.querySelector('.cpBg');
+    if(backImg)backImg.classList.toggle('is-reflect',!!backCfg.reflect);
+    var backShapeLayer=back.querySelector('.cpShapeLayer');
+    if(backShapeLayer)backShapeLayer.classList.toggle('is-reflect',!!backCfg.reflect);
   });
   ['stijlCardPrevWrap','qedCardPrevWrap'].forEach(function(id){
     var prev=g(id);if(!prev)return;
@@ -15078,6 +15964,10 @@ window.addEventListener('message',function(e){
     syncDashboardWizardHeader(e.data.payload||{});
     return;
   }
+  if(e.data.type==='wizardPreviewSync'){
+    syncDashboardWizardPreview(e.data.payload||null);
+    return;
+  }
 });
 
 // ═══════════════════════════════════════════
@@ -15130,19 +16020,87 @@ var markDirtySoftSidebarTimer=null;
 function toast(msg,type){var t=g('toast');t.textContent=msg;t.className='toast on'+(type?' '+type:'');clearTimeout(toastTm);toastTm=setTimeout(function(){t.className='toast';},3200);}
 function livePreviewUrl(){
   var activeSet=(S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||null;
-  if(S.spaceSlug&&activeSet&&(activeSet.slug||activeSet.id)){
-    return '/'+encodeURIComponent(S.spaceSlug)+'/'+encodeURIComponent(activeSet.slug||activeSet.id)+'/';
+  if(S._username&&activeSet&&(activeSet.slug||activeSet.id)){
+    return '/@'+encodeURIComponent(S._username)+'/'+encodeURIComponent(activeSet.slug||activeSet.id)+'/';
   }
   return '../kaarten/?set='+encodeURIComponent(S.activeId||'');
 }
+function dashboardStartupIntent(){
+  var intent={setRef:'',mode:'',wizard:false,editor:false};
+  try{
+    var params=new URLSearchParams(location.search||'');
+    intent.setRef=String(params.get('set')||'').trim();
+    intent.mode=String(params.get('mode')||'').trim().toLowerCase();
+    var view=String(params.get('view')||'').trim().toLowerCase();
+    if(view==='wizard')intent.wizard=true;
+    if(view==='editor')intent.editor=true;
+  }catch(_err){}
+  var path=String(location.pathname||'');
+  intent.wizard=intent.wizard||/\/dashboard\/wizard\/?$/.test(path);
+  intent.editor=intent.editor||/\/dashboard\/editor\/?$/.test(path);
+  if(intent.editor)intent.mode='edit';
+  if(intent.mode!=='view'&&intent.mode!=='edit')intent.mode='';
+  return intent;
+}
+function dashboardFindSetByRef(ref){
+  var needle=String(ref||'').trim();
+  if(!needle)return null;
+  return (S.sets||[]).find(function(set){
+    return set && (String(set.id||'')===needle || String(set.slug||'')===needle);
+  })||null;
+}
 function dashboardBaseUrl(){
-  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'').trim();
-  return spaceSlug?('/'+encodeURIComponent(spaceSlug)+'/dashboard/'):'/dashboard/';
+  return dashboardUrlWithParams({});
+}
+function dashboardUrlWithParams(extra){
+  var params=new URLSearchParams();
+  Object.keys(extra||{}).forEach(function(key){
+    var value=extra[key];
+    if(value!==undefined&&value!==null&&String(value).trim()!=='')params.set(key,String(value));
+  });
+  var query=params.toString();
+  return '/dashboard/'+(query?('?'+query):'');
+}
+function wizardSessionSetKey(){
+  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'default').trim()||'default';
+  return 'pk_dashboard_wizard_set_'+spaceSlug;
+}
+function wizardSessionFallbackSetKey(){
+  return 'pk_dashboard_wizard_set_active';
+}
+function rememberedWizardSetRef(){
+  try{
+    return String(sessionStorage.getItem(wizardSessionSetKey())||sessionStorage.getItem(wizardSessionFallbackSetKey())||'').trim();
+  }catch(_err){
+    return '';
+  }
+}
+function resolveDashboardWizardSetRef(){
+  var remembered=rememberedWizardSetRef();
+  if(remembered==='__new__')return '';
+  return String(
+    S._wizardSetId ||
+    remembered ||
+    ((S.activeId&&(S.sets||[]).some(function(set){return set&&set.id===S.activeId;})) ? S.activeId : '') ||
+    ''
+  ).trim();
+}
+function rememberWizardSetRef(setRef){
+  var ref=String(setRef||'').trim();
+  try{
+    if(ref){
+      sessionStorage.setItem(wizardSessionSetKey(),ref);
+      sessionStorage.setItem(wizardSessionFallbackSetKey(),ref);
+    }else{
+      sessionStorage.setItem(wizardSessionSetKey(),'__new__');
+      sessionStorage.setItem(wizardSessionFallbackSetKey(),'__new__');
+    }
+  }catch(_err){}
 }
 function setWizardUrl(setRef){
   var ref=String(setRef||'').trim();
-  var base=dashboardBaseUrl()+'wizard/';
-  return ref?base+'?set='+encodeURIComponent(ref):base;
+  rememberWizardSetRef(ref);
+  return dashboardUrlWithParams(ref?{view:'wizard',set:ref}:{view:'wizard'});
 }
 function standaloneWizardIframeUrl(setRef){
   var params=[];
@@ -15151,7 +16109,44 @@ function standaloneWizardIframeUrl(setRef){
   var ref=String(setRef||'').trim();
   if(ref)params.push('set='+encodeURIComponent(ref));
   params.push('embedded=1');
-  return '/wizard/new'+(params.length?('?'+params.join('&')):'');
+  params.push('v='+encodeURIComponent(WIZARD_IFRAME_BUILD));
+  return '/wizard/new/'+(params.length?('?'+params.join('&')):'');
+}
+function dashboardWizardIframeSrcdoc(src,setRef){
+  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'').trim();
+  var paramsJson=JSON.stringify({
+    embedded:true,
+    space:spaceSlug,
+    set:String(setRef||'').trim(),
+    src:String(src||''),
+    parentOrigin:window.location.origin
+  }).replace(/</g,'\\u003c');
+  return '<!doctype html>'+
+    '<html lang="nl"><head>'+
+      '<meta charset="utf-8">'+
+      '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'+
+      '<meta name="theme-color" content="#f7f6f2">'+
+      '<base href="/"> '+
+      '<title>Nieuwe kaartenset wizard - Uitgesproken</title>'+
+      '<link rel="preconnect" href="https://fonts.googleapis.com">'+
+      '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'+
+      '<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Fraunces:opsz,wght@9..144,400;9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&family=Merriweather:wght@400;700&family=Playfair+Display:wght@400;600&display=swap" rel="stylesheet">'+
+      '<link rel="stylesheet" href="/css/cards.css?v='+esc(WIZARD_IFRAME_BUILD)+'">'+
+      '<link rel="stylesheet" href="/admin/admin.css?v='+esc(WIZARD_IFRAME_BUILD)+'">'+
+      '<link rel="stylesheet" href="/css/wizard.css?v='+esc(WIZARD_IFRAME_BUILD)+'">'+
+    '</head><body class="wizardPage">'+
+      '<div id="wizardApp" class="wizardApp"></div>'+
+      '<script>window.WIZARD_EMBEDDED_PARAMS='+paramsJson+';'+
+      '(function(){function showWizardBootError(message){var root=document.getElementById("wizardApp");if(!root||root.children.length)return;root.innerHTML="<div class=\\"appBoot wizardBoot\\"><div class=\\"appBootInner\\"><div class=\\"appBootWordmark\\">Wizard kon niet laden</div><div class=\\"appBootSub\\">"+String(message||"Onbekende fout")+"</div></div></div>";}'+
+      'window.addEventListener("error",function(event){var where=(event&&event.filename)?(" in "+event.filename.split("/").pop()+":"+event.lineno+":"+event.colno):"";showWizardBootError(((event&&event.message)||"Script kon niet starten")+where);});'+
+      'window.addEventListener("unhandledrejection",function(event){var reason=event&&event.reason;showWizardBootError((reason&&reason.message)||String(reason||"Promise fout"));});'+
+      'setTimeout(function(){var root=document.getElementById("wizardApp");if(root&&!root.children.length)showWizardBootError("Startscript reageert niet");},2200);})();<\/script>'+
+      '<script src="/js/shared-background-preview.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
+      '<script src="/js/shared-card-renderer.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
+      '<script src="/js/shared-preview-shell.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
+      '<script src="/js/shared-preview-interactions.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
+      '<script type="module" src="/js/wizard.js?v='+esc(WIZARD_IFRAME_BUILD)+'"><\/script>'+
+    '</body></html>';
 }
 function newSetWizardUrl(){
   return setWizardUrl('');
@@ -15172,7 +16167,7 @@ function navigateToWizardUrl(url){
   location.href=target;
 }
 function openNewSetWizard(){
-  navigateToWizardUrl(newSetWizardUrl());
+  showNewSetModal();
 }
 function openCurrentSetWizard(){
   if(S.activeKind==='set'&&S.activeId){
@@ -15180,6 +16175,13 @@ function openCurrentSetWizard(){
     return;
   }
   openNewSetWizard();
+}
+function exposeDashboardWizardBridge(){
+  try{
+    window.UITGESPROKEN_DASHBOARD_STATE=S;
+    window.UITGESPROKEN_DASHBOARD_CACHE=SC;
+    window.UITGESPROKEN_DASHBOARD_SUPABASE=window._supa||null;
+  }catch(_err){}
 }
 function showLivePreview(){
   if(!S.activeId){toast('Kies eerst een kaartenset','red');return;}

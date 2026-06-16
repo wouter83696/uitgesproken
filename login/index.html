@@ -205,11 +205,26 @@
 <script type="module">
   import { supabase } from '../js/supabase-client.js';
 
+  const localAuthHost = ['localhost', '127.0.0.1', '::1'].includes(String(location.hostname || '').toLowerCase());
+  if (localAuthHost) {
+    location.replace('https://uitgesproken.me/login/' + location.search);
+    throw new Error('Redirecting local auth page to production');
+  }
+
   function normalizeRedirect(target) {
     const raw = String(target || '').trim();
     if (!raw) return '/dashboard/';
     if (raw === '/onboarding' || raw === '/onboarding/') return '/dashboard/';
+    if (!raw.startsWith('/') || raw.startsWith('//')) return '/dashboard/';
     return raw;
+  }
+
+  function resolveAuthRedirectOrigin() {
+    const host = String(location.hostname || '').toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+      return 'https://uitgesproken.me';
+    }
+    return location.origin;
   }
 
   // Al ingelogd? Stuur direct door
@@ -225,7 +240,7 @@
     btn.textContent = 'Even wachten…';
 
     const params = new URLSearchParams(location.search);
-    const redirectTo = location.origin + normalizeRedirect(params.get('redirect'));
+    const redirectTo = resolveAuthRedirectOrigin() + normalizeRedirect(params.get('redirect'));
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',

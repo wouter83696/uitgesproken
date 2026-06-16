@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Uitgesproken</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'IBM Plex Sans', system-ui, sans-serif;
+      background: #f4f6f7;
+      min-height: 100dvh;
+      color: #1a1a2e;
+    }
+
+    /* ── Topbar ── */
+    .topbar {
+      background: #fff;
+      border-bottom: 1px solid rgba(26,26,46,.07);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .topbar-logo {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1a1a2e;
+      letter-spacing: -.02em;
+      text-decoration: none;
+    }
+    .topbar-actions { display: flex; gap: 8px; align-items: center; }
+    .btn-manage {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #3f6b7c;
+      background: rgba(63,107,124,.08);
+      border: none;
+      border-radius: 8px;
+      padding: 6px 13px;
+      cursor: pointer;
+      text-decoration: none;
+      font-family: inherit;
+      transition: background .13s;
+    }
+    .btn-manage:hover { background: rgba(63,107,124,.15); }
+
+    /* ── Main ── */
+    .main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+
+    /* ── Profiel-header ── */
+    .maker-header {
+      margin-bottom: 44px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .maker-header-left { flex: 1; min-width: 0; }
+    .maker-username {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      margin-bottom: 4px;
+    }
+    .maker-username-at {
+      color: #a0aab4;
+      font-weight: 400;
+    }
+    .maker-sub {
+      font-size: 13.5px;
+      color: #7f8996;
+      margin-top: 6px;
+    }
+    .info-btn {
+      flex-shrink: 0;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(26,26,46,.12);
+      background: #fff;
+      color: #7f8996;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color .13s, color .13s;
+      font-family: inherit;
+    }
+    .info-btn:hover { border-color: rgba(26,26,46,.25); color: #1a1a2e; }
+
+    /* ── Eigen-weergave banner ── */
+    .owner-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: rgba(99,102,241,.07);
+      border: 1px solid rgba(99,102,241,.15);
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+    }
+    .owner-banner-text {
+      font-size: 13px;
+      color: #3b3f6e;
+    }
+    .owner-banner-text strong { font-weight: 600; }
+    .owner-banner-link {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #5254a3;
+      text-decoration: none;
+    }
+    .owner-banner-link:hover { text-decoration: underline; }
+
+    /* ── Concept-badge ── */
+    .badge-concept {
+      display: inline-flex;
+      align-items: center;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+      background: rgba(245,158,11,.12);
+      color: #b45309;
+      border-radius: 5px;
+      padding: 2px 7px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .badge-private {
+      background: rgba(100,116,139,.10);
+      color: #64748b;
+    }
+
+    /* ── Sets grid ── */
+    .sets-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      color: #a0aab4;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .sets-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 14px;
+    }
+    .set-card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 20px;
+      text-decoration: none;
+      color: inherit;
+      border: 1px solid rgba(26,26,46,.07);
+      transition: box-shadow .15s, transform .15s;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .set-card:hover {
+      box-shadow: 0 4px 18px rgba(15,23,42,.09);
+      transform: translateY(-1px);
+    }
+    .set-title {
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+    .set-arrow {
+      margin-top: auto;
+      padding-top: 12px;
+      font-size: 12.5px;
+      color: #4f8e9e;
+      font-weight: 500;
+    }
+
+    /* ── States ── */
+    .state-msg {
+      text-align: center;
+      padding: 80px 24px;
+      color: #a0aab4;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    .state-msg strong { display: block; font-size: 18px; font-weight: 700; color: #64748b; margin-bottom: 8px; }
+
+    /* ── Infosheet overlay ── */
+    .sheet-overlay {
+      position: fixed; inset: 0;
+      background: rgba(15,23,42,.35);
+      z-index: 100;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .sheet-overlay.open { display: flex; }
+    .sheet {
+      background: #fff;
+      border-radius: 20px 20px 0 0;
+      width: 100%;
+      max-width: 560px;
+      padding: 32px 28px 40px;
+      max-height: 70dvh;
+      overflow-y: auto;
+    }
+    .sheet-close {
+      float: right;
+      background: none;
+      border: none;
+      font-size: 20px;
+      color: #a0aab4;
+      cursor: pointer;
+      line-height: 1;
+      padding: 2px 4px;
+    }
+    .sheet-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      letter-spacing: -.01em;
+    }
+    .sheet-body {
+      font-size: 14.5px;
+      line-height: 1.6;
+      color: #374151;
+      white-space: pre-wrap;
+    }
+
+    /* ── Set-pagina ── */
+    .set-page-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: #7f8996;
+      text-decoration: none;
+      margin-bottom: 28px;
+      transition: color .13s;
+    }
+    .set-page-back:hover { color: #1a1a2e; }
+    .set-page-title {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      margin-bottom: 32px;
+      line-height: 1.25;
+    }
+    .theme-block {
+      margin-bottom: 28px;
+    }
+    .theme-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: #a0aab4;
+      margin-bottom: 10px;
+    }
+    .question-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .question-item {
+      background: #fff;
+      border: 1px solid rgba(26,26,46,.07);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 14px;
+      color: #1a1a2e;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 500px) {
+      .main { padding: 32px 16px 60px; }
+      .maker-username { font-size: 22px; }
+    }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header class="topbar">
+  <a href="/" class="topbar-logo">Uitgesproken</a>
+  <div class="topbar-actions" id="topbarActions"></div>
+</header>
+
+<main class="main" id="main">
+  <div class="state-msg">Laden…</div>
+</main>
+
+<!-- Infosheet overlay -->
+<div class="sheet-overlay" id="sheetOverlay" onclick="closeSheet(event)">
+  <div class="sheet">
+    <button class="sheet-close" onclick="closeSheet()" aria-label="Sluiten">×</button>
+    <div class="sheet-title" id="sheetTitle"></div>
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
+</div>
+
+<script type="module">
+  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+  const SUPABASE_URL  = 'https://gjquwqepisbpphgnzlcs.supabase.co';
+  const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqcXV3cWVwaXNicHBoZ256bGNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2NzU3OTAsImV4cCI6MjA5MDI1MTc5MH0.NFcWbQY_ES4SotPW2cNGFmJl4vpI0m-ejDPPlHj83Gs';
+  const db = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+  // ── URL parsen: /@username of /@username/set-slug ──
+  const rawPath  = location.pathname.replace(/^\/|\/$/g, '');
+  const parts    = rawPath.split('/');
+  const rawFirst = parts[0] || '';
+
+  if (!rawFirst.startsWith('@')) {
+    showError('Ongeldige URL.');
+    throw new Error('not a maker route');
+  }
+
+  const username = rawFirst.slice(1).toLowerCase();
+  const setSlug  = parts[1] || null;
+
+  if (!username) {
+    showError('Geen gebruikersnaam opgegeven.');
+    throw new Error('no username');
+  }
+
+  // ── Eigen sessie ophalen (voor owner-check) ──
+  const { data: { session } } = await db.auth.getSession();
+  const viewerUid = session?.user?.id || null;
+
+  // ── Profiel ophalen op username ──
+  const { data: profile, error: profErr } = await db
+    .from('profiles')
+    .select('id, username, intro_text, public_maker_home, bg_variant')
+    .eq('username', username)
+    .single();
+
+  if (profErr || !profile) {
+    showError('Gebruiker niet gevonden.', '@' + username + ' bestaat niet op Uitgesproken.');
+    throw new Error('profile not found');
+  }
+
+  const isOwner = viewerUid === profile.id;
+
+  // ── Space ophalen voor deze gebruiker ──
+  const { data: spaces } = await db
+    .from('spaces')
+    .select('id')
+    .eq('owner_id', profile.id)
+    .limit(1);
+
+  const space = spaces?.[0] || null;
+
+  // ── Achtergrondvariant toepassen ──
+  const BG_VARIANTS = {
+    licht: '#f4f6f7', wit: '#ffffff', warm: '#fdf8f0',
+    koel: '#f0f4f8', groen: '#f0f6f1', paars: '#f4f0f8'
+  };
+  document.body.style.background = BG_VARIANTS[profile.bg_variant] || BG_VARIANTS.licht;
+
+  // ── Branch: set-pagina of maker-home ──
+  // Set pages respect their own visibility; maker home requires public_maker_home.
+  if (setSlug && space) {
+    await renderSetPage(space, profile, isOwner);
+  } else {
+    if (!isOwner && !profile.public_maker_home) {
+      showPrivate(profile.username);
+      throw new Error('private');
+    }
+    await renderMakerHome(space, profile, isOwner);
+  }
+
+  // ── Set-pagina ─────────────────────────────────────────────
+  async function renderSetPage(space, profile, isOwner) {
+    const { data: set, error } = await db
+      .from('sets')
+      .select('id, slug, title, is_public, status, visibility, bundle')
+      .eq('space_id', space.id)
+      .eq('slug', setSlug)
+      .single();
+
+    if (error || !set) {
+      showError('Set niet gevonden.');
+      return;
+    }
+
+    // Zichtbaarheidscheck
+    const isLive       = set.status === 'live'    || set.status == null;
+    const isPublicVis  = set.visibility === 'public'   || set.visibility === 'unlisted' || set.visibility == null;
+    const accessible   = isOwner || (isLive && isPublicVis && set.is_public !== false);
+
+    if (!accessible) {
+      showError('Niet beschikbaar.', 'Deze kaartenset is niet openbaar.');
+      return;
+    }
+
+    document.title = set.title + ' — @' + profile.username + ' — Uitgesproken';
+    if (isOwner) {
+      document.getElementById('topbarActions').innerHTML =
+        '<a class="btn-manage" href="/dashboard/">Beheren</a>';
+    }
+
+    const bundle   = set.bundle || {};
+    const themes   = (bundle.meta && Array.isArray(bundle.meta.themes)) ? bundle.meta.themes : [];
+    const questMap = bundle.questions || {};
+
+    let contentHtml = '';
+    if (!themes.length) {
+      contentHtml = '<p class="state-msg">Nog geen kaarten in deze set.</p>';
+    } else {
+      contentHtml = themes.map(t => {
+        const qs = Array.isArray(questMap[t.key]) ? questMap[t.key] : [];
+        const items = qs.map(q =>
+          `<div class="question-item">${esc(q.voorkant || q.q || q.front || '')}</div>`
+        ).join('');
+        return `<div class="theme-block">
+          <div class="theme-label">${esc(t.label || t.title || '')}</div>
+          <div class="question-list">${items || '<div class="question-item" style="color:#a0aab4">Nog geen vragen</div>'}</div>
+        </div>`;
+      }).join('');
+    }
+
+    document.getElementById('main').innerHTML = `
+      <a class="set-page-back" href="/@${esc(profile.username)}/">
+        ← @${esc(profile.username)}
+      </a>
+      <div class="set-page-title">${esc(set.title)}</div>
+      ${contentHtml}
+    `;
+  }
+
+  // ── Maker-home ──────────────────────────────────────────────
+  async function renderMakerHome(space, profile, isOwner) {
+    // Sets ophalen
+    let sets = [];
+    if (space) {
+      let q = db
+        .from('sets')
+        .select('id, slug, title, is_public, status, visibility')
+        .eq('space_id', space.id)
+        .order('sort_order');
+
+      if (!isOwner) {
+        q = q.eq('status', 'live').eq('visibility', 'public');
+      }
+
+      const { data } = await q;
+      sets = data || [];
+    }
+
+  // ── Pagina renderen ──
+  document.title = '@' + profile.username + ' — Uitgesproken';
+
+  const main = document.getElementById('main');
+
+  // Owner-banner
+  const ownerBanner = isOwner ? `
+    <div class="owner-banner">
+      <span class="owner-banner-text">
+        Je bekijkt je eigen makerpagina.
+        ${!profile.public_maker_home
+          ? '<strong>Niet openbaar</strong> — bezoekers zien deze pagina nog niet.'
+          : '<strong>Openbaar</strong> — bezoekers zien je publieke sets.'}
+      </span>
+      <a class="owner-banner-link" href="/dashboard/">Beheren →</a>
+    </div>` : '';
+
+  // Info-knop
+  const infoBtn = profile.intro_text
+    ? `<button class="info-btn" onclick="openSheet()" aria-label="Info">ⓘ</button>`
+    : '';
+
+  // Topbar "beheren" link voor owner
+  if (isOwner) {
+    document.getElementById('topbarActions').innerHTML =
+      '<a class="btn-manage" href="/dashboard/">Beheren</a>';
+  }
+
+  // Sets HTML
+  let setsHtml = '';
+  if (!sets.length) {
+    setsHtml = '<p class="state-msg">Nog geen kaartensets.</p>';
+  } else {
+    const cards = sets.map(s => {
+      const href  = '/@' + profile.username + '/' + s.slug + '/';
+      const badge = isOwner && !s.is_public
+        ? '<span class="badge-concept badge-private">Privé</span>'
+        : '';
+      return `<a class="set-card" href="${href}">
+        <div class="set-title">${esc(s.title)}${badge}</div>
+        <div class="set-arrow">Kaarten bekijken →</div>
+      </a>`;
+    });
+    setsHtml = `<div class="sets-label">Kaartensets</div><div class="sets-grid">${cards.join('')}</div>`;
+  }
+
+  main.innerHTML = ownerBanner + `
+    <div class="maker-header">
+      <div class="maker-header-left">
+        <div class="maker-username">
+          <span class="maker-username-at">@</span>${esc(profile.username)}
+        </div>
+      </div>
+      ${infoBtn}
+    </div>
+    ${setsHtml}
+  `;
+
+  // ── Infosheet ──
+  window.openSheet = function() {
+    document.getElementById('sheetTitle').textContent = '@' + profile.username;
+    document.getElementById('sheetBody').textContent  = profile.intro_text || '';
+    document.getElementById('sheetOverlay').classList.add('open');
+  };
+  window.closeSheet = function(e) {
+    if (!e || e.target === document.getElementById('sheetOverlay') || !e.target) {
+      document.getElementById('sheetOverlay').classList.remove('open');
+    }
+  };
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') document.getElementById('sheetOverlay').classList.remove('open');
+  });
+  } // end renderMakerHome
+
+  // ── Hulpfuncties ──
+  function showError(title, sub) {
+    document.getElementById('main').innerHTML =
+      `<div class="state-msg"><strong>${esc(title)}</strong>${sub ? esc(sub) : ''}</div>`;
+    document.title = 'Niet gevonden — Uitgesproken';
+  }
+
+  function showPrivate(uname) {
+    document.getElementById('main').innerHTML =
+      `<div class="state-msg">
+        <strong>@${esc(uname)}</strong>
+        Deze makerpagina is niet openbaar.
+      </div>`;
+    document.title = '@' + uname + ' — Uitgesproken';
+  }
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+</script>
+</body>
+</html>
