@@ -3381,9 +3381,9 @@ function dashboardSetModeUrl(setRef,mode){
   if(cleanMode!=='view'&&cleanMode!=='edit')cleanMode='edit';
   if(cleanMode==='edit'){
     if(ref)rememberWizardSetRef(ref);
-    return dashboardBaseUrl()+(ref?('?set='+encodeURIComponent(ref)+'&mode=edit'):'?mode=edit');
+    return dashboardUrlWithParams(ref?{set:ref,mode:'edit'}:{mode:'edit'});
   }
-  return dashboardBaseUrl()+(ref?('?set='+encodeURIComponent(ref)+'&mode='+encodeURIComponent(cleanMode)):('?mode='+encodeURIComponent(cleanMode)));
+  return dashboardUrlWithParams(ref?{set:ref,mode:cleanMode}:{mode:cleanMode});
 }
 function openWizardSetMode(mode){
   var currentSet=currentDashboardWizardSet();
@@ -3436,8 +3436,8 @@ function openWizardMoreMenu(btn){
   var hasSet=!!(currentSet&&currentSet.id);
   var editHref=hasSet?dashboardSetModeUrl(currentSet.id,'edit'):dashboardBaseUrl();
   var viewHref=hasSet?dashboardSetModeUrl(currentSet.id,'view'):'';
-  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+S._username+'/'+currentSet.slug):'';
-  var restartHref=dashboardBaseUrl()+'wizard/';
+  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+encodeURIComponent(S._username)+'/'+encodeURIComponent(currentSet.slug)+'/'):'';
+  var restartHref=setWizardUrl('');
   var editIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
   var viewIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
   var restartIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>';
@@ -3486,7 +3486,7 @@ function renderDashboardWizardPage(){
     '</div>';
   var backHref=hasSet?dashboardSetModeUrl(currentSet.id,'edit'):dashboardBaseUrl();
   var viewHref=hasSet?dashboardSetModeUrl(currentSet.id,'view'):'';
-  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+S._username+'/'+currentSet.slug):'';
+  var previewHref=(hasSet&&S._username&&currentSet.slug)?('/@'+encodeURIComponent(S._username)+'/'+encodeURIComponent(currentSet.slug)+'/'):'';
   var wizardModeBtns=
     '<div class="edModeSwitcher">'+
       (hasSet
@@ -3573,7 +3573,7 @@ function cleanVisibleDashboardEditorUrl(){
     history.replaceState(
       {space:S.spaceSlug||((S.space&&S.space.slug)||''),set:S.activeId,mode:'edit'},
       '',
-      dashboardBaseUrl()+'editor/'+(location.hash||'')
+      dashboardSetModeUrl(S.activeId,'edit')+(location.hash||'')
     );
   }catch(_err){}
 }
@@ -16013,8 +16013,8 @@ var markDirtySoftSidebarTimer=null;
 function toast(msg,type){var t=g('toast');t.textContent=msg;t.className='toast on'+(type?' '+type:'');clearTimeout(toastTm);toastTm=setTimeout(function(){t.className='toast';},3200);}
 function livePreviewUrl(){
   var activeSet=(S.sets||[]).find(function(set){return set&&set.id===S.activeId;})||null;
-  if(S.spaceSlug&&activeSet&&(activeSet.slug||activeSet.id)){
-    return '/'+encodeURIComponent(S.spaceSlug)+'/'+encodeURIComponent(activeSet.slug||activeSet.id)+'/';
+  if(S._username&&activeSet&&(activeSet.slug||activeSet.id)){
+    return '/@'+encodeURIComponent(S._username)+'/'+encodeURIComponent(activeSet.slug||activeSet.id)+'/';
   }
   return '../kaarten/?set='+encodeURIComponent(S.activeId||'');
 }
@@ -16024,10 +16024,13 @@ function dashboardStartupIntent(){
     var params=new URLSearchParams(location.search||'');
     intent.setRef=String(params.get('set')||'').trim();
     intent.mode=String(params.get('mode')||'').trim().toLowerCase();
+    var view=String(params.get('view')||'').trim().toLowerCase();
+    if(view==='wizard')intent.wizard=true;
+    if(view==='editor')intent.editor=true;
   }catch(_err){}
   var path=String(location.pathname||'');
-  intent.wizard=/\/dashboard\/wizard\/?$/.test(path);
-  intent.editor=/\/dashboard\/editor\/?$/.test(path);
+  intent.wizard=intent.wizard||/\/dashboard\/wizard\/?$/.test(path);
+  intent.editor=intent.editor||/\/dashboard\/editor\/?$/.test(path);
   if(intent.editor)intent.mode='edit';
   if(intent.mode!=='view'&&intent.mode!=='edit')intent.mode='';
   return intent;
@@ -16040,8 +16043,16 @@ function dashboardFindSetByRef(ref){
   })||null;
 }
 function dashboardBaseUrl(){
-  var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'').trim();
-  return spaceSlug?('/'+encodeURIComponent(spaceSlug)+'/dashboard/'):'/dashboard/';
+  return dashboardUrlWithParams({});
+}
+function dashboardUrlWithParams(extra){
+  var params=new URLSearchParams();
+  Object.keys(extra||{}).forEach(function(key){
+    var value=extra[key];
+    if(value!==undefined&&value!==null&&String(value).trim()!=='')params.set(key,String(value));
+  });
+  var query=params.toString();
+  return '/dashboard/'+(query?('?'+query):'');
 }
 function wizardSessionSetKey(){
   var spaceSlug=(S.spaceSlug||((S.space&&S.space.slug)||'')||'default').trim()||'default';
@@ -16082,7 +16093,7 @@ function rememberWizardSetRef(setRef){
 function setWizardUrl(setRef){
   var ref=String(setRef||'').trim();
   rememberWizardSetRef(ref);
-  return dashboardBaseUrl()+'wizard/';
+  return dashboardUrlWithParams(ref?{view:'wizard',set:ref}:{view:'wizard'});
 }
 function standaloneWizardIframeUrl(setRef){
   var params=[];

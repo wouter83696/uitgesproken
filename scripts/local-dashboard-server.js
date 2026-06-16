@@ -74,6 +74,9 @@ function rewritePrettyPublic(pathname) {
   const normalized = normalizeUrlPath(pathname);
   const parts = normalized.replace(/^\/|\/$/g, '').split('/').filter(Boolean);
   if (!parts.length) return normalized;
+  if (parts[0] && parts[0].startsWith('@')) {
+    return '/maker/index.html';
+  }
   if (parts.length === 1 && !isReservedRootSegment(parts[0])) {
     return '/index.html';
   }

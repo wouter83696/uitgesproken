@@ -1096,7 +1096,7 @@ function embeddedPreviewHref() {
     slug = String(state.editingSet.slug).trim();
   }
   if (!username || !slug) return '';
-  return '/@' + encodeURIComponent(username) + '/' + encodeURIComponent(slug);
+  return '/@' + encodeURIComponent(username) + '/' + encodeURIComponent(slug) + '/';
 }
 
 function useEmbeddedParentPreview() {
@@ -1376,8 +1376,7 @@ window.addEventListener('message', function(e){
 });
 
 function dashboardHomeHref() {
-  var slug = state.space && state.space.slug ? String(state.space.slug) : requestedSpaceSlug();
-  return slug ? '/' + encodeURIComponent(slug) + '/dashboard/' : '/dashboard/';
+  return '/dashboard/';
 }
 
 function dashboardWizardHref(setRef) {
@@ -5659,6 +5658,9 @@ function buildSummaryData() {
 function dashboardSetHref(mode) {
   var base = dashboardHomeHref();
   if (!state.createdSet) return base;
+  if (String(mode || '').trim().toLowerCase() === 'view') {
+    return embeddedPreviewHref() || base;
+  }
   return base + '?set=' + encodeURIComponent(state.createdSet.id) + '&mode=' + encodeURIComponent(mode || 'edit');
 }
 
