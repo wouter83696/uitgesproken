@@ -27,6 +27,10 @@ if (PAGE === 'kaarten') {
   void initCardsPage();
 }
 
+if (PAGE === 'uitleg') {
+  void initUitlegPage();
+}
+
 async function initSetsIndexPage() {
   const els = {
     pill: document.getElementById('themePill'),
@@ -251,6 +255,56 @@ async function initSetsIndexPage() {
   function toggleMenu() {
     if (menuOpen) closeMenu();
     else openMenu();
+  }
+}
+
+async function initUitlegPage() {
+  const els = {
+    img: document.getElementById('uitlegImg'),
+    theme: document.getElementById('kaartThema'),
+    desc: document.getElementById('desc'),
+    card: document.querySelector('.uitlegCardInner')
+  };
+  if (!els.img || !els.desc) return;
+
+  const setId = readQueryParam('set') || 'samenwerken';
+  const set = await loadCardsSetRecord(setId, 'Samen onderzoeken', '').catch(function(){ return null; });
+  if (!set) return;
+
+  const slides = set.infoSlides.length ? set.infoSlides : [{
+    key: 'cover',
+    title: set.title,
+    body: set.infoText,
+    img: set.cover,
+    alt: set.title
+  }];
+  let index = 0;
+
+  document.title = (set.title || 'Samen onderzoeken') + ' — Uitgesproken';
+  render();
+
+  if (els.card) {
+    els.card.addEventListener('click', function(ev){
+      const rect = els.card.getBoundingClientRect();
+      const leftSide = ev.clientX - rect.left < rect.width / 2;
+      index = Math.max(0, Math.min(slides.length - 1, index + (leftSide ? -1 : 1)));
+      render();
+    });
+  }
+
+  function render() {
+    const slide = slides[index] || slides[0];
+    if (!slide) return;
+    els.img.src = slide.img || set.cover || '';
+    els.img.alt = slide.alt || slide.title || set.title || '';
+    if (els.theme) {
+      const isCover = !slide.key || slide.key === 'cover';
+      els.theme.style.display = isCover ? 'none' : 'block';
+      els.theme.textContent = isCover ? '' : (slide.title || slide.alt || '');
+    }
+    els.desc.innerHTML =
+      (slide.title ? '<p class="infoTextSubhead"><strong>' + esc(slide.title) + '</strong></p>' : '') +
+      (slide.body ? formatInfoBodyHtml(slide.body) : '');
   }
 }
 
