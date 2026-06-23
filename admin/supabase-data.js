@@ -82,6 +82,121 @@
       .replace(/^-|-$/g,'');
   }
 
+  async function fetchLegacyJson(path, fallback){
+    try{
+      var resp = await fetch(path, { cache:'no-store' });
+      if(!resp.ok) return cloneJson(fallback);
+      return await resp.json();
+    }catch(_err){
+      return cloneJson(fallback);
+    }
+  }
+
+  async function loadLegacySetBundle(legacyId){
+    var base = '/sets/' + encodeURIComponent(legacyId) + '/';
+    var meta = await fetchLegacyJson(base + 'meta.json', mkMeta(legacyId, legacyId));
+    var questions = await fetchLegacyJson(base + 'questions.json', {});
+    var uitleg = await fetchLegacyJson(base + 'uitleg.json', { cover:'' });
+    var intro = await fetchLegacyJson(base + 'intro.json', { slides:[], hint:'← → swipe' });
+    return {
+      meta: meta || mkMeta(legacyId, legacyId),
+      questions: questions || {},
+      uitleg: uitleg || { cover:'' },
+      intro: intro || { slides:[], hint:'← → swipe' }
+    };
+  }
+
+  function legacyLocalSetId(legacyId){
+    return 'legacy-local-' + slugify(legacyId || 'set');
+  }
+
+  function buildLegacyLocalRow(space, legacyId, bundle){
+    var title = String(((bundle||{}).meta||{}).title || legacyId).trim() || legacyId;
+    var slug = uniqueSlug(legacyId);
+    var localId = legacyLocalSetId(legacyId);
+    bundle = cloneJson(bundle || {});
+    bundle.meta = bundle.meta || mkMeta(localId, title);
+    bundle.meta.id = localId;
+    bundle.meta.title = title;
+    bundle.meta.slug = slug;
+    return {
+      id: localId,
+      slug: slug,
+      title: title,
+      card_format: String(bundle.meta.cardFormat || bundle.meta.card_format || '').trim() || 'rect',
+      sort_order: (S.sets || []).length,
+      is_public: false,
+      status: 'draft',
+      visibility: 'private',
+      bundle: bundle,
+      local_only: true,
+      legacy_id: legacyId,
+      space_id: space && space.id ? space.id : null
+    };
+  }
+
+  function spaceHasImportedLegacySet(legacyId, bundle){
+    var wantedSlug = slugify(legacyId);
+    var wantedTitle = String(((bundle||{}).meta||{}).title || '').trim().toLowerCase();
+    return (S.sets || []).some(function(set){
+      if(!set) return false;
+      var setSlug = String(set.slug || '').trim().toLowerCase();
+      var setTitle = String(set.title || '').trim().toLowerCase();
+      return setSlug === wantedSlug || (!!wantedTitle && setTitle === wantedTitle);
+    });
+  }
+
+  async function importLegacySetIfMissing(space, legacyId){
+    var bundle = await loadLegacySetBundle(legacyId);
+    if(!bundle || !bundle.meta) return null;
+    if(spaceHasImportedLegacySet(legacyId, bundle)) return null;
+
+    var title = String(bundle.meta.title || legacyId).trim() || legacyId;
+    var slug = uniqueSlug(legacyId);
+    var newId = uid();
+    var cardFormat = String(bundle.meta.cardFormat || bundle.meta.card_format || '').trim() || 'rect';
+
+    bundle.meta = JSON.parse(JSON.stringify(bundle.meta));
+    bundle.meta.id = newId;
+    bundle.meta.title = title;
+    bundle.meta.slug = slug;
+    bundle.meta.cardFormat = cardFormat;
+
+    var insertPayload = {
+      id: newId,
+      space_id: space.id,
+      slug: slug,
+      title: title,
+      card_format: cardFormat,
+      is_public: false,
+      status: 'draft',
+      visibility: 'private',
+      allow_platform_collections: false,
+      sort_order: (S.sets || []).length,
+      bundle: bundle
+    };
+
+    var r = await db.from('sets').insert(insertPayload).select('id,slug,title,card_format,sort_order,is_public,status,visibility,bundle').single();
+    if(r.error){
+      console.warn('legacy import fallback for', legacyId, r.error);
+      return buildLegacyLocalRow(space, legacyId, bundle);
+    }
+    return r.data || null;
+  }
+
+  async function ensureLegacyDashboardSets(space){
+    var username = String(S._username || '').trim().toLowerCase();
+    var spaceSlug = String((space && space.slug) || '').trim().toLowerCase();
+    if(!space || (username !== 'wouter' && spaceSlug !== 'wouter' && spaceSlug !== 'wouter-test')) return [];
+    var imports = ['samenwerken'];
+    var inserted = [];
+    for(var i=0;i<imports.length;i++){
+      var row = await importLegacySetIfMissing(space, imports[i]);
+      if(row) inserted.push(row);
+    }
+    return inserted;
+  }
+
   // Zorg dat slug uniek is binnen S.sets
   function uniqueSlug(base){
     var slug=slugify(base)||'set';
@@ -154,6 +269,7 @@
       S.activeId = null;
       S.activeKind = 'space';
       S.d = null;
+      S.sets = [];
       Object.keys(SC||{}).forEach(function(id){ delete SC[id]; });
       Object.keys(CC||{}).forEach(function(path){
         if(/^sets\//.test(path)) delete CC[path];
@@ -211,7 +327,28 @@
           isPublic:s.is_public!==false,
           status:s.status||'draft',
           visibility:s.visibility||'private',
-          bundle:null
+          bundle:null,
+          localOnly:false,
+          legacyId:null
+        };
+      });
+
+      var importedLegacyRows = await ensureLegacyDashboardSets(space);
+      if(importedLegacyRows.length){
+        r.data = (r.data || []).concat(importedLegacyRows).sort(function(a,b){
+          return Number(a.sort_order || 0) - Number(b.sort_order || 0);
+        });
+      }
+
+      S.sets = (r.data||[]).map(function(s){
+        return {
+          id:s.id, slug:s.slug, title:s.title,
+          isPublic:s.is_public!==false,
+          status:s.status||'draft',
+          visibility:s.visibility||'private',
+          bundle:null,
+          localOnly:!!s.local_only,
+          legacyId:s.legacy_id||null
         };
       });
       (r.data||[]).forEach(function(row){
@@ -285,6 +422,9 @@
 
   // ── loadSetFiles — overschrijft de GitHub-versie ────────────
   window.loadSetFiles = async function(id){
+    if(/^legacy-local-/.test(String(id||'')) && SC[id]){
+      return cloneSetBundle(SC[id]);
+    }
     var r = await db.from('sets').select('bundle,card_format').eq('id',id).single();
     if(r.error) throw new Error(r.error.message);
     var b = r.data.bundle || {};
@@ -345,7 +485,44 @@
     if(btn){ btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Opslaan…'; }
 
     var id = S.activeId, d = S.d;
+    var activeSet = (S.sets||[]).find(function(set){ return set && set.id===id; }) || null;
     var bundle = { meta:d.meta, questions:d.questions, uitleg:d.uitleg, intro:d.intro };
+
+    if(activeSet && activeSet.localOnly){
+      var newId = uid();
+      var newSlug = uniqueSlug(d.meta && d.meta.slug ? d.meta.slug : (activeSet.legacyId || activeSet.title || 'set'));
+      d.meta = cloneJson(d.meta || {});
+      d.meta.id = newId;
+      d.meta.slug = newSlug;
+      bundle = { meta:d.meta, questions:d.questions, uitleg:d.uitleg, intro:d.intro };
+      var insertPayload = {
+        id: newId,
+        space_id: S.spaceId,
+        slug: newSlug,
+        title: d.meta.title || activeSet.title || activeSet.legacyId || 'Set',
+        card_format: d.meta.cardFormat || 'rect',
+        is_public: false,
+        status: 'draft',
+        visibility: 'private',
+        allow_platform_collections: false,
+        sort_order: Math.max(0, (S.sets||[]).indexOf(activeSet)),
+        bundle: bundle
+      };
+      var insertResult = await db.from('sets').insert(insertPayload).select('id,slug,title,card_format,sort_order,is_public,status,visibility,bundle').single();
+      if(insertResult.error){
+        if(btn){ btn.disabled=false; btn.innerHTML='Opslaan'; }
+        toast('Fout: '+insertResult.error.message,'red');
+        return;
+      }
+      delete SC[id];
+      activeSet.id = newId;
+      activeSet.slug = newSlug;
+      activeSet.title = d.meta.title || activeSet.title;
+      activeSet.localOnly = false;
+      activeSet.legacyId = null;
+      S.activeId = newId;
+      id = newId;
+    }
 
     var r = await db.from('sets').update({
       title:       d.meta.title || '',
