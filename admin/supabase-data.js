@@ -106,6 +106,69 @@
     };
   }
 
+  function legacySetAssetFiles(bundle){
+    var meta = (bundle && bundle.meta) || {};
+    var files = [];
+    function add(file){
+      file = String(file || '').trim();
+      if(file && files.indexOf(file) < 0) files.push(file);
+    }
+    add(meta.cover || 'voorkant.svg');
+    (Array.isArray(meta.themes) ? meta.themes : []).forEach(function(theme){
+      add(theme && (theme.card || (theme.key ? theme.key + '.svg' : '')));
+    });
+    return files;
+  }
+
+  async function fetchLegacyAssetDataUrl(legacyId, file){
+    var folders = ['cards', 'cards_rect', 'cards_square'];
+    for(var i=0;i<folders.length;i++){
+      var path = '/sets/' + encodeURIComponent(legacyId) + '/' + folders[i] + '/' + encodeURIComponent(file);
+      try{
+        var resp = await fetch(path, { cache:'no-store' });
+        if(!resp.ok) continue;
+        if(/\.svg$/i.test(file)){
+          var text = await resp.text();
+          return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(text)));
+        }
+        var blob = await resp.blob();
+        return await new Promise(function(resolve){
+          var reader = new FileReader();
+          reader.onload = function(){ resolve(String(reader.result || '')); };
+          reader.onerror = function(){ resolve(''); };
+          reader.readAsDataURL(blob);
+        });
+      }catch(_err){}
+    }
+    return '';
+  }
+
+  async function seedLegacySetAssets(row, legacyId, bundle){
+    if(!row || !row.id || !legacyId || typeof CC === 'undefined') return;
+    bundle = bundle || { meta: row.bundle && row.bundle.meta };
+    var files = legacySetAssetFiles(bundle);
+    for(var i=0;i<files.length;i++){
+      var file = files[i];
+      var path = 'sets/' + row.id + '/cards/' + file;
+      if(CC[path] && CC[path].dataUrl) continue;
+      var dataUrl = await fetchLegacyAssetDataUrl(legacyId, file);
+      if(dataUrl) CC[path] = { sha:null, dataUrl:dataUrl };
+    }
+  }
+
+  async function seedLegacyAssetsForRows(rows){
+    rows = Array.isArray(rows) ? rows : [];
+    for(var i=0;i<rows.length;i++){
+      var row = rows[i];
+      if(!row) continue;
+      var slug = String(row.slug || '').trim().toLowerCase();
+      var title = String(row.title || '').trim().toLowerCase();
+      if(slug === 'samenwerken' || title === 'samen onderzoeken'){
+        await seedLegacySetAssets(row, 'samenwerken', row.bundle || await loadLegacySetBundle('samenwerken'));
+      }
+    }
+  }
+
   function legacyLocalSetId(legacyId){
     return 'legacy-local-' + slugify(legacyId || 'set');
   }
@@ -179,8 +242,11 @@
     var r = await db.from('sets').insert(insertPayload).select('id,slug,title,card_format,sort_order,is_public,status,visibility,bundle').single();
     if(r.error){
       console.warn('legacy import fallback for', legacyId, r.error);
-      return buildLegacyLocalRow(space, legacyId, bundle);
+      var localRow = buildLegacyLocalRow(space, legacyId, bundle);
+      await seedLegacySetAssets(localRow, legacyId, bundle);
+      return localRow;
     }
+    await seedLegacySetAssets(r.data, legacyId, bundle);
     return r.data || null;
   }
 
@@ -339,6 +405,7 @@
           return Number(a.sort_order || 0) - Number(b.sort_order || 0);
         });
       }
+      await seedLegacyAssetsForRows(r.data);
 
       S.sets = (r.data||[]).map(function(s){
         return {
